@@ -1,0 +1,665 @@
+# scrapper: []
+http_api:
+#   - name: CoingeckoFeeds
+#     interval: s30
+#     resource_type: timeseries
+#     target: https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin,avalanche-2,solana,the-open-network,dogecoin,pepe,shiba-inu,dogwifcoin,polkadot,cardano,matic-network,aptos,mantle,optimism,arbitrum,sui,fantom,sei-network,usd-coin,tether,frax,dai&vs_currencies=usd
+#     type: float64
+#     fields:
+#       - name: USDC_USD
+#         selector: .usd-coin.usd
+#         transformers: ["round6"]
+#         transient: true
+#       - name: BTC_USDC
+#         selector: .bitcoin.usd
+#         transformers: ["float({self}) * {USDCUSD}", "round2"]
+#       - name: ETH_USDC
+#         selector: .ethereum.usd
+#         transformers: ["float({self}) * {USDCUSD}", "round2"]
+#       # - name: DOGEUSDC
+#       #   selector: .dogecoin.usd
+#       #   transformers: ["float({self}) * {USDCUSD}", "round6"]
+#       # - name: PEPEUSDC
+#       #   selector: .pepe.usd
+#       #   transformers: ["float({self}) * {USDCUSD}", "round10"]
+
+  # cex (prefer websockets for short intervals to avoid rate limits)
+  - name: BinanceFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://api.binance.com/api/v3/ticker?symbol= # root
+    selector: .price
+    type: float64
+    transformers: ["float({self}) * {USDT_USDC}", "round4"]
+    fields:
+      - {name: USDT_USDC, target: USDCUSDT, transformers: ["1 / float({self})", "round6"]}
+      - {name: BTC_USDC, target: BTCUSDT}
+      - {name: ETH_USDC, target: ETHUSDT}
+
+  - name: BybitFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://api.bybit.com/v5/market/orderbook?category=spot&limit=1&symbol=
+    selector: .result
+    type: float64
+    transformers: ["float({self}['b'][0][0]) * {USDT_USDC}", "round4"]
+    fields:
+      - {name: USDT_USDC, target: USDCUSDT, transformers: ["1 / ((float({self}['b'][0][0]) + float({self}['a'][0][0])) / 2)", "round6"], transient: true}
+      - {name: BTC_USDC, target: BTCUSDT}
+      - {name: ETH_USDC, target: ETHUSDT}
+
+  - name: CoinbaseFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://api.coinbase.com/v2/prices/
+    selector: .data.amount
+    type: float64
+    transformers: ["float({self}) * {USD_USDC}", "round4"]
+    fields:
+      - {name: USDT_USDC, target: USDT-USD/spot, transformers: ["float({self}) * {USD_USDC}", "round6"]}
+      - {name: BTC_USDC, target: BTC-USD/spot}
+      - {name: ETH_USDC, target: ETH-USD/spot}
+
+  - name: OkxFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://www.okx.com/api/v5/market/ticker?instId=
+    selector: .data[0].last # better to use .bidPx and .askPx
+    type: float64
+    transformers: ["float({self}) * {USDT_USDC}", "round4"]
+    fields:
+      - {name: USDT_USDC, target: USDC-USDT, transformers: ["1 / float({self})", "round6"]}
+      - {name: BTC_USDC, target: BTC-USDT} # BTCUSDT * USDTUSDC
+      - {name: ETH_USDC, target: ETH-USDT}
+
+  - name: KrakenFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://api.kraken.com/0/public/Depth?count=1&pair=
+    type: float64
+    transformers: ["((float({self}['asks'][0][0]) + float({self}['bids'][0][0])) / 2) * {USD_USDC}", "round4"]
+    fields:
+      - {name: USD_USDC, target: USDCUSD, selector: .result.USDCUSD, transformers: ["1 / ((float({self}['asks'][0][0]) + float({self}['bids'][0][0])) / 2)", "round6"], transient: true}
+      - {name: BTC_USDC, target: XXBTZUSD, selector: .result.XXBTZUSD}
+      - {name: ETH_USDC, target: XETHZUSD, selector: .result.XETHZUSD}
+ 
+  - name: BitgetFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://api.bitget.com/api/v2/spot/market/tickers?symbol=
+    selector: .data[0]
+    type: float64
+    transformers: ["((float({self}['askPr']) + float({self}['bidPr'])) / 2) * {USDT_USDC}", "round4"]
+    fields:
+      - {name: USDT_USDC, target: USDCUSDT, transformers: ["1 / ((float({self}['askPr']) + float({self}['bidPr'])) / 2)", "round6"]}
+      - {name: BTC_USDC, target: BTCUSDT}
+      - {name: ETH_USDC, target: ETHUSDT}
+
+  - name: KucoinFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=
+    selector: .data
+    type: float64
+    transformers: ["((float({self}['bestBid']) + float({self}['bestAsk'])) / 2) * {USDT_USDC}", "round4"]
+    fields:
+      - {name: USDT_USDC, target: USDT-USDC, transformers: ["1 / ((float({self}['bestBid']) + float({self}['bestAsk'])) / 2)", "round6"]}
+      - {name: BTC_USDC, target: BTC-USDT}
+      - {name: ETH_USDC, target: ETH-USDT}
+
+  - name: HtxFeeds
+    interval: s20 # due to rate limits, we use a longer interval
+    resource_type: timeseries
+    target: https://api.huobi.pro/market/detail/merged?symbol=
+    selector: .tick
+    type: float64
+    transformers: ["((float({self}['ask'][0]) + float({self}['bid'][0])) / 2) * {USDT_USDC}", "round4"]
+    fields:
+      - {name: USDT_USDC, target: usdcusdt, transformers: ["1 / ((float({self}['ask'][0]) + float({self}['bid'][0])) / 2)", "round6"]}
+      - {name: BTC_USDC, target: btcusdt}
+      - {name: ETH_USDC, target: ethusdt}
+
+  - name: GateFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://api.gateio.ws/api/v4/spot/tickers?currency_pair=
+    selector: .[0]
+    type: float64
+    transformers: ["(float({self}['lowest_ask']) + float({self}['highest_bid'])) * {USDT_USDC}", "round4"]
+    fields:
+      - {name: USDT_USDC, target: USDC_USDT, transformers: ["1 / (float({self}['lowest_ask']) + float({self}['highest_bid']))", "round6"]}
+      - {name: BTC_USDC, target: BTC_USDT}
+      - {name: ETH_USDC, target: ETH_USDT}
+
+  - name: MexcFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://api.mexc.com/api/v3/ticker/price?symbol=
+    type: float64
+    transformers: ["float({self}['price']) * {USDT_USDC}", "round4"]
+    fields:
+      - {name: USDT_USDC, target: USDCUSDT, transformers: ["1 / float({self}['price'])", "round6"]}
+      - {name: BTC_USDC, target: BTCUSDT}
+      - {name: ETH_USDC, target: ETHUSDT}
+
+  - name: LBankFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://api.lbkex.com/v2/ticker.do?symbol=
+    selector: .data[0].ticker
+    type: float64
+    transformers: ["float({self}['latest']) * {USDT_USDC}", "round2"]
+    fields:
+      - {name: USDT_USDC, target: usdc_usdt, transformers: ["1 / float({self}['latest'])", "round6"]}
+      - {name: BTC_USDC, target: btc_usdt}
+      - {name: ETH_USDC, target: eth_usdt}
+
+  - name: WhiteBitFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://whitebit.com/api/v4/public/orderbook/
+    type: float64
+    transformers: ["(((float({self}['asks'][0][0]) + float({self}['bids'][0][0]))) / 2) * {USDT_USDC}", "round2"]
+    fields:
+      - {name: USDT_USDC, target: USDC_USDT?limit=1&level=0, transformers: ["1 / ((float({self}['asks'][0][0]) + float({self}['bids'][0][0])) / 2)", "round6"]}
+      - {name: BTC_USDC, target: BTC_USDT?limit=1&level=0 }
+      - {name: ETH_USDC, target: ETH_USDT?limit=1&level=0 }
+
+  - name: XtComFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://sapi.xt.com/v4/public/ticker/price?symbols=usdc_usdt,dai_usdt,btc_usdt,eth_usdt,bnb_usdt,op_usdt,arb_usdt,sol_usdt,avax_usdt,ftm_usdt,glmr_usdt,mnt_usdt,scr_usdt,zk_usdt,gno_usdt,shib_usdt,pepe_usdt,floki_usdt
+    type: float64
+    transformers: ["float({self}) * {USDT_USDC}", "round4"]
+    fields:
+      - {name: USDT_USDC, selector: ".result[0].p" , transformers: ["1 / float({self})", "round6"]}
+      - {name: BTC_USDC, selector: ".result[2].p" }
+      - {name: ETH_USDC, selector: ".result[3].p" }
+
+  - name: CryptoComFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://api.crypto.com/v2/public/get-book?depth=1&instrument_name=
+    selector: .result.data[0]
+    type: float64
+    transformers: ["(float({self}['bids'][0][0]) + float({self}['asks'][0][0])) / 2", "round4"]
+    fields:
+      - {name: BTC_USDC, target: BTC_USD}
+      - {name: ETH_USDC, target: ETH_USD}
+
+  - name: BingXFeeds
+    interval: s10
+    resource_type: timeseries
+    target: https://open-api.bingx.com/openApi/spot/v1/market/depth?limit=1&symbol=
+    selector: .data
+    type: float64
+    transformers: ["((float({self}['bids'][0][0]) + float({self}['asks'][0][0])) / 2) * {USDT_USDC}", "round4"]
+    fields:
+      - {name: USDT_USDC, target: USDC-USDT, transformers: ["1 / ((float({self}['bids'][0][0]) + float({self}['asks'][0][0])) / 2)", "round6"]}
+      - {name: BTC_USDC, target: BTC-USDT }
+      - {name: ETH_USDC, target: ETH-USDT }
+
+#   # dex aggregators
+#   - name: OdosFeeds
+#     interval: s30
+#     resource_type: timeseries
+#     target: https://api.odos.xyz/pricing/token/1 # ethereum only
+#     type: float64
+#     fields:
+#       - name: USDC_USD
+#         selector: .tokenPrices.0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+#         transformers: ["round6"]
+#         transient: true
+#       - name: BTC_USDC
+#         selector: .tokenPrices.0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599
+#         transformers: ["{self} * {USDCUSD}", "round2"]
+#       - name: ETH_USDC
+#         selector: .tokenPrices.0x0000000000000000000000000000000000000000
+#         transformers: ["{self} * {USDCUSD}", "round2"]
+
+#   - name: CowSwapFeeds
+#     interval: s30
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: https://api.cow.fi/mainnet/api/v1/token/0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48/native_price
+#         selector: .price
+#         transformers: ["(1 / {self}) * 1e12", "round2"]
+#       - name: BTC_USDC
+#         target: https://api.cow.fi/mainnet/api/v1/token/0x2260fac5e5542a773aa44fbcfedf7c193bc2c599/native_price
+#         selector: .price
+#         transformers: ["({self} * {ETHUSDC}) / 1e10", "round2"]
+
+ws_api:
+  # - name: CoinMarketcapFeeds
+  #   interval: s10
+  #   resource_type: timeseries
+  #   target: wss://push.coinmarketcap.com/ws?device=web&client_source=home_page
+  #   selector: root
+  #   headers:
+  #     Host: push.coinmarketcap.com
+  #     Origin: https://coinmarketcap.com
+  #   handler: |
+  #     def h(msg, epochs):
+  #       d = msg['d']
+  #       epochs[0].setdefault(int(d['id']), []).append(float(d['p']))
+  #   fields:
+  #     - name: USDC_USD
+  #       type: float64
+  #       reducer: "lambda epochs: mean(epochs[0][3408])"
+  #       transformers: ["round6"]
+  #     - name: BTC_USDC
+  #       type: float64
+  #       reducer: "lambda epochs: mean(epochs[0][1])"
+  #       transformers: ["{self} * {USDCUSD}", "round2"]
+  #     - name: ETH_USDC
+  #       type: float64
+  #       reducer: "lambda epochs: mean(epochs[0][1027])"
+  #       transformers: ["{self} * {USDCUSD}", "round2"]
+
+  # - name: BinanceFeeds
+  #   interval: s10
+  #   resource_type: timeseries
+  #   target: "wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/usdcusdt@aggTrade"
+  #   selector: root
+  #   params: { method: "SUBSCRIBE", params: ["btcusdt@aggTrade", "ethusdt@aggTrade", "usdcusdt@aggTrade"], id: "1" }
+  #   type: float64
+  #   handler: |
+  #     def h(msg, epochs):
+  #       msg = msg['data']
+  #       sym = msg['s']
+  #       epoch = epochs[0].setdefault(sym, {})
+  #       cols = ["bids", "asks", "vbids", "vasks"] if msg['m'] == False else ["asks", "bids", "vasks", "vbids"]
+  #       hp = [epoch.setdefault(cols[0], []), epoch.setdefault(cols[1], [])]
+  #       hv = [epoch.setdefault(cols[2], []), epoch.setdefault(cols[3], [])]
+  #       p = [float(msg['p']), 0]
+  #       if len(hp[1]) > 1:
+  #         p[1] = hp[1][-1]
+  #       elif len(epochs) > 1:
+  #         p[1] = epochs[1][sym][cols[1]][-1]
+  #       else:
+  #         p[1] = p[0]
+  #       v = [float(msg['q']), 0]
+  #       hp[0].append(p[0])
+  #       hp[1].append(p[1])
+  #       hv[0].append(v[0])
+  #       hv[1].append(v[1])
+  #   fields:
+  #     - name: USDT_USDC
+  #       reducer: "lambda epochs: 1 / ((mean(epochs[0]['USDCUSDT']['bids']) + mean(epochs[0]['USDCUSDT']['asks'])) / 2)"
+  #       transformers: ["round6"]
+  #       transient: true
+  #     - name: BTC_USDC
+  #       reducer: "lambda epochs: (mean(epochs[0]['BTCUSDT']['bids']) + mean(epochs[0]['BTCUSDT']['asks'])) / 2"
+  #       transformers: ["{self} * {USDT_USDC}", "round2"]
+  #     # - name: BTC_USDC_spread
+  #     #   type: float64
+  #     #   reducer: "lambda epochs: mean(epochs[0]['BTCUSDT']['asks']) - mean(epochs[0]['BTCUSDT']['bids'])"
+  #     #   transformers: ["{self} * {USDT_USDC}", "round2"]
+  #     - name: ETH_USDC
+  #       reducer: "lambda epochs: (mean(epochs[0]['ETHUSDT']['bids']) + mean(epochs[0]['ETHUSDT']['asks'])) / 2"
+  #       transformers: ["{self} * {USDT_USDC}", "round2"]
+  #     # - name: ETH_USDC_spread
+  #     #   type: float64
+  #     #   reducer: "lambda epochs: mean(epochs[0]['BTCUSDT']['asks']) - mean(epochs[0]['BTCUSDT']['bids'])"
+  #     #   transformers: ["{self} * {USDT_USDC}", "round2"]
+
+  # - name: BybitFeeds
+  #   interval: s10
+  #   resource_type: timeseries
+  #   target: wss://stream.bybit.com/v5/public/spot
+  #   selector: .data
+  #   params: { req_id: "", op: "subscribe", args: ["publicTrade.USDCUSDT", "publicTrade.BTCUSDT", "publicTrade.ETHUSDT"]}
+  #   type: float64
+  #   handler: |
+  #     def h(msg, epochs):
+  #       msg = msg[0]
+  #       sym = msg['s']
+  #       epoch = epochs[0].setdefault(sym, {})
+  #       cols = ["bids", "asks", "vbids", "vasks"] if msg['S'].lower() == 'buy' else ["asks", "bids", "vasks", "vbids"]
+  #       hp = [epoch.setdefault(cols[0], []), epoch.setdefault(cols[1], [])]
+  #       hv = [epoch.setdefault(cols[2], []), epoch.setdefault(cols[3], [])]
+  #       p = [float(msg['p']), 0]
+  #       if len(hp[1]) > 1:
+  #         p[1] = hp[1][-1]
+  #       elif len(epochs) > 1:
+  #         p[1] = epochs[1][sym][cols[1]][-1]
+  #       else:
+  #         p[1] = p[0]
+  #       v = [float(msg['v']), 0]
+  #       hp[0].append(p[0])
+  #       hp[1].append(p[1])
+  #       hv[0].append(v[0])
+  #       hv[1].append(v[1])
+  #   fields:
+  #     - name: USDT_USDC
+  #       reducer: "lambda epochs: 1 / ((mean(epochs[0]['USDCUSDT']['bids']) + mean(epochs[0]['USDCUSDT']['asks'])) / 2)"
+  #       transformers: ["round6"]
+  #       transient: true
+  #     - name: BTC_USDC
+  #       reducer: "lambda epochs: (mean(epochs[0]['BTCUSDT']['bids']) + mean(epochs[0]['BTCUSDT']['asks'])) / 2"
+  #       transformers: ["{self} * {USDT_USDC}", "round2"]
+  #     - name: ETH_USDC
+  #       reducer: "lambda epochs: (mean(epochs[0]['ETHUSDT']['bids']) + mean(epochs[0]['ETHUSDT']['asks'])) / 2"
+  #       transformers: ["{self} * {USDT_USDC}", "round2"]
+
+  # - name: CoinbaseFeeds
+  #   interval: s10
+  #   resource_type: timeseries
+  #   target: wss://ws-feed.exchange.coinbase.com
+  #   selector: root
+  #   params: { type: "subscribe", "channels": [{"name": "ticker", "product_ids": ["BTC-USD", "ETH-USD", "USDT-USDC", "USDT-USD"]}] }
+  #   type: float64
+  #   handler: |
+  #     def h(msg, epochs):
+  #       sym = msg['product_id']
+  #       epoch = epochs[0].setdefault(sym, {})
+  #       cols = ["bids", "asks", "vbids", "vasks"] if msg['side'] == 'buy' else ["asks", "bids", "vasks", "vbids"]
+  #       hp = [epoch.setdefault(cols[0], []), epoch.setdefault(cols[1], [])]
+  #       hv = [epoch.setdefault(cols[2], []), epoch.setdefault(cols[3], [])]
+  #       p = [float(msg['price']), 0]
+  #       if len(hp[1]) > 1:
+  #         p[1] = hp[1][-1]
+  #       elif len(epochs) > 1:
+  #         p[1] = epochs[1][sym][cols[1]][-1]
+  #       else:
+  #         p[1] = p[0]
+  #       v = [float(msg['last_size']), 0]
+  #       hp[0].append(p[0])
+  #       hp[1].append(p[1])
+  #       hv[0].append(v[0])
+  #       hv[1].append(v[1])
+  #   fields:
+  #     - name: USDUSDT
+  #       reducer: "lambda epochs: 1 / ((mean(epochs[0]['USDT-USD']['bids']) + mean(epochs[0]['USDT-USD']['asks'])) / 2)"
+  #       transformers: ["round6"]
+  #       transient: true
+  #     - name: USDT_USDC
+  #       reducer: "lambda epochs: (mean(epochs[0]['USDT-USDC']['bids']) + mean(epochs[0]['USDT-USDC']['asks'])) / 2"
+  #       transformers: ["round6"]
+  #       transient: true
+  #     - name: USDUSDC
+  #       transformers: ["{USDUSDT} * {USDT_USDC}", "round6"]
+  #       transient: true
+  #     - name: BTC_USDC
+  #       reducer: "lambda epochs: (mean(epochs[0]['BTC-USD']['bids']) + mean(epochs[0]['BTC-USD']['asks'])) / 2"
+  #       transformers: ["{self} * {USDUSDC}", "round2"]
+  #     - name: ETH_USDC
+  #       reducer: "lambda epochs: (mean(epochs[0]['ETH-USD']['bids']) + mean(epochs[0]['ETH-USD']['asks'])) / 2"
+  #       transformers: ["{self} * {USDUSDC}", "round2"]
+
+  # - name: GateFeeds
+  #   interval: s10
+  #   resource_type: timeseries
+  #   target: wss://ws.gate.io/v3/ # NB: v4 still seems unstable as of late 2024
+  #   selector: root
+  #   params: { id: 1, method: "ticker.subscribe" , params: ["BTC_USDT", "ETH_USDT", "USDC_USDT"]} # the trades endpoint should be used to aggregate volumes
+  #   handler: |
+  #     def h(msg, epochs):
+  #       msg = msg['params']
+  #       sym = msg[0]
+  #       msg = msg[1]
+  #       epoch = epochs[0].setdefault(sym, {})
+  #       cols = ["lasts"]
+  #       hp = [epoch.setdefault(cols[0], [])]
+  #       p = [float(msg['last']), 0]
+  #       hp[0].append(p)
+  #   fields:
+  #     - name: USDT_USDC
+  #       type: float64
+  #       reducer: "lambda epochs: 1 / mean(epochs[0]['USDC_USDT']['lasts'])"
+  #       transformers: ["round6"]
+  #       transient: true
+  #     - name: BTC_USDC
+  #       type: float64
+  #       reducer: "lambda epochs: mean(epochs[0]['BTC_USDT']['lasts'])"
+  #       transformers: ["{self} * {USDT_USDC}", "round2"]
+  #     - name: ETH_USDC
+  #       type: float64
+  #       reducer: "lambda epochs: mean(epochs[0]['ETH_USDT']['lasts'])"
+  #       transformers: ["{self} * {USDT_USDC}", "round2"]
+
+  # - name: KrakenFeeds
+  #   interval: s10
+  #   resource_type: timeseries
+  #   target: wss://ws-auth.kraken.com/v2
+  #   selector: root
+  #   params: { method: "ticker.subscribe" , params: { channel: "ticker", symbol: ["BTC/USD", "ETH/USD", "USDC/USD"]} }
+  #   handler: |
+  #     def h(msg, epochs):
+  #       msg = msg['data'][0]
+  #       sym = msg['symbol']
+  #       epoch = epochs[0].setdefault(sym, {})
+  #       cols = ["lasts"]
+  #       hp = [epoch.setdefault(cols[0], [])]
+  #       p = [float(msg['last'])] # more precise: (float(msg['ask']) + float(msg['bid'])) / 2
+  #       hp[0].append(p)
+  #   fields:
+  #     - name: USDUSDC
+  #       type: float64
+  #       reducer: "lambda epochs: 1 / mean(epochs[0]['USDC/USD']['lasts'])"
+  #       transformers: ["round6"]
+  #       transient: true
+  #     - name: BTC_USDC
+  #       type: float64
+  #       reducer: "lambda epochs: mean(epochs[0]['BTC/USD']['lasts'])"
+  #       transformers: ["{self} * {USDUSDC}", "round2"]
+  #     - name: ETH_USDC
+  #       type: float64
+  #       reducer: "lambda epochs: mean(epochs[0]['ETH/USD']['lasts'])"
+  #       transformers: ["{self} * {USDUSDC}", "round2"]
+
+# fix_api: []
+# evm_caller:
+
+#   # ethereum l1 prices
+#   - name: UniswapEthFeeds
+#     interval: s10
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: "1:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#         params: []
+#         transformers: ["2 ** 192 / ({self}[0] ** 2) * 1e12", "round2"] # inverse of (sqrtPriceX96 / (2**96))**2 * usdc wei per unit
+#       - name: BTC_USDC # BTCETH * ETHUSDC
+#         target: "1:0x4585fe77225b41b697c938b018e2ac67ac5a20c0"
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#         params: []
+#         transformers: ["((({self}[0] ** 2) / 2 ** 192) / 1e10) * {ETHUSDC}", "round2"]
+
+#   # base prices
+#   - name: AerodromeBaseFeeds
+#     interval: s10
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: "8453:0xb2cc224c1c9fee385f8ad6a55b4d94e92359dc59"
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,bool)) # v3 fork
+#         transformers: ["{self}[0] ** 2 / 2 ** 192 * 1e12", "round2"] # inverse of (sqrtPriceX96 / (2**96))**2 * usdc wei per unit
+#       - name: BTC_USDC # tBTCETH * ETHUSDC
+#         target: "8453:0x2722c8f9b5e2ac72d1f225f8e8c990e449ba0078" # chainId:address
+#         selector: getReserves()((uint256,uint256,uint256)) # v2 fork
+#         transformers: ["({self}[1] / {self}[0]) * {ETHUSDC}", "round2"]
+
+#   - name: UniswapBaseFeeds
+#     interval: s10
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: "8453:0xd0b53d9277642d899df5c87a3966a349a798f224"
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#         transformers: ["{self}[0] ** 2 / 2 ** 192 * 1e12", "round2"] # inverse of (sqrtPriceX96 / (2**96))**2 * usdc wei per unit
+
+#   # polygon prices
+#   - name: UniswapPolyFeeds
+#     interval: s10
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: "137:0x45dda9cb7c25131df268515131f647d726f50608"
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#         transformers: ["2 ** 192 / ({self}[0] ** 2) * 1e12", "round2"] # inverse of (sqrtPriceX96 / (2**96))**2 * usdc wei per unit
+#       - name: BTC_USDC # BTCETH * ETHUSDC
+#         target: "137:0x50eaedb835021e4a108b7290636d62e9765cc6d7" # chainId:address
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#         transformers: ["((({self}[0] ** 2) / 2 ** 192) / 1e10) * {ETHUSDC}", "round2"]
+
+#   - name: QuickSwapPolyFeeds # algebra fork
+#     interval: s10
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: "137:0x55CAaBB0d2b704FD0eF8192A7E35D8837e678207"
+#         selector: globalState()((uint160,int24,uint16,uint16,uint8,uint8,bool))
+#         transformers: ["2 ** 192 / ({self}[0] ** 2) * 1e12", "round2"]
+#       - name: BTC_USDC # BTCETH * ETHUSDC
+#         target: "137:0xAC4494e30a85369e332BDB5230d6d694d4259DbC" # chainId:address
+#         selector: globalState()((uint160,int24,uint16,uint16,uint8,uint8,bool))
+#         transformers: ["((({self}[0] ** 2) / 2 ** 192) / 1e10) * {ETHUSDC}", "round2"]
+
+#   # optimism prices
+#   - name: UniswapOpFeeds
+#     interval: s10
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: "10:0x85149247691df622eaf1a8bd0cafd40bc45154a9"
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#         transformers: ["{self}[0] ** 2 / 2 ** 192 * 1e12", "round2"]
+#       - name: BTC_USDC # BTCETH * ETHUSDC
+#         target: "10:0x85c31ffa3706d1cce9d525a00f1c7d4a2911754c" # chainId:address
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#         transformers: ["(2 ** 192 / {self}[0] ** 2 / 1e10) * {ETHUSDC}", "round2"]
+
+#   - name: VelodromeOpFeeds
+#     interval: s10
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: "10:0x3241738149b24c9164da14fa2040159ffc6dd237"
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,bool))
+#         transformers: ["2 ** 192 / ({self}[0] ** 2) * 1e12", "round2"]
+#       - name: BTC_USDC # BTCETH * ETHUSDC
+#         target: "10:0xe1b9cc9cc17616ce81f0fa5b958d36f789fb2c00" # chainId:address
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,bool))
+#         transformers: ["(2 ** 192 / {self}[0] ** 2 / 1e10) * {ETHUSDC}", "round2"]
+
+#   # arbitrum prices
+#   - name: CamelotArbFeeds # algebra fork
+#     interval: s10
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: "42161:0xb1026b8e7276e7ac75410f1fcbbe21796e8f7526"
+#         selector: globalState()((uint160,int24,uint16,uint16,uint16,uint8,uint8,bool))
+#         transformers: ["{self}[0] ** 2 / 2 ** 192 * 1e12", "round2"]
+#       - name: BTC_USDC # BTCETH * ETHUSDC
+#         target: "42161:0xd845f7d4f4deb9ff5bcf09d140ef13718f6f6c71" # chainId:address
+#         selector: globalState()((uint160,int24,uint16,uint16,uint16,uint8,uint8,bool))
+#         transformers: ["({self}[0] ** 2 / 2 ** 192 / 1e10) * {ETHUSDC}", "round2"]
+
+#   - name: UniswapArbFeeds
+#     interval: s10
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: "42161:0xc6962004f452be9203591991d15f6b388e09e8d0"
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#         transformers: ["{self}[0] ** 2 / 2 ** 192 * 1e12", "round2"]
+#       - name: BTC_USDC # BTCETH * ETHUSDC
+#         target: "42161:0x2f5e87c9312fa29aed5c179e456625d79015299c"
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#         transformers: ["({self}[0] ** 2 / 2 ** 192 / 1e10) * {ETHUSDC}", "round2"]
+
+#   - name: RamsesArbFeeds
+#     interval: s10
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: "42161:0x30afbcf9458c3131a6d051c621e307e6278e4110"
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#         transformers: ["{self}[0] ** 2 / 2 ** 192 * 1e12", "round2"]
+#       - name: BTC_USDC # BTCETH * ETHUSDC
+#         target: "42161:0x2760cc828b2e4d04f8ec261a5335426bb22d9291"
+#         selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#         transformers: ["({self}[0] ** 2 / 2 ** 192 / 1e10) * {ETHUSDC}", "round2"]
+
+#   # linea prices
+#   - name: LinexLineaFeeds # algebra fork
+#     interval: s10
+#     resource_type: timeseries
+#     type: float64
+#     fields:
+#       - name: ETH_USDC
+#         target: "59144:0x3cb104f044db23d6513f2a6100a1997fa5e3f587"
+#         selector: globalState()((uint160,int24,uint16,uint16,uint16,uint16,bool))
+#         transformers: ["2 ** 192 / {self}[0] ** 2 * 1e12", "round2"]
+#       - name: BTC_USDC # BTCETH * ETHUSDC
+#         target: "59144:0x8e80016b025c89a6a270b399f5ebfb734be58ada"
+#         selector: globalState()((uint160,int24,uint16,uint16,uint16,uint16,bool))
+#         transformers: ["({self}[0] ** 2 / 2 ** 192 / 1e10) * {ETHUSDC}", "round2"]
+
+#   # # mantle prices > issue with multicall 3 given view max gas subsidy on the chain
+#   # - name: AgniMantleFeeds
+#   #   interval: s10
+#   #   resource_type: timeseries
+#   #   type: float64
+#   #   fields:
+#   #     - name: USDC_USDT
+#   #       target: "5000:0x6488f911c6cd86c289aa319c5a826dcf8f1ca065"
+#   #       selector: slot0()((uint160,int24,uint16,uint16,uint16,uint32,bool))
+#   #       transformers: ["2 ** 192 / {self}[0] ** 2 * 1e12", "round6"]
+#   #       transient: true
+#   #     - name: ETH_USDC # ETHUSDT * USDCUSDT
+#   #       target: "5000:0x628f7131cf43e88ebe3921ae78c4ba0c31872bd4"
+#   #       selector: slot0()((uint160,int24,uint16,uint16,uint16,uint32,bool))
+#   #       transformers: ["(2 ** 192 / {self}[0] ** 2 * 1e12) / {USDCUSDT}", "round2"]
+#   #     - name: mETHETH
+#   #       target: "5000:0x94d692afff21e045691971a20df4a9adb482ddf6"
+#   #       selector: slot0()((uint160,int24,uint16,uint16,uint16,uint32,bool))
+#   #       transformers: ["{self}[0] ** 2 / 2 ** 192 / 1e10", "round6"]
+#   #       transient: true
+#   #     - name: BTC_USDC # BTCmETH * mETHETH * ETHUSDC
+#   #       target: "5000:0x198c826af31938736539e7025d81caa7b8952094"
+#   #       selector: slot0()((uint160,int24,uint16,uint16,uint16,uint32,bool))
+#   #       transformers: ["({self}[0] ** 2 / 2 ** 192 / 1e10) * {mETHETH} * {ETHUSDC}", "round6"]
+
+#   # # blast prices
+#   # - name: ThrusterBlastFeeds # uniswap fork
+#   #   interval: s10
+#   #   resource_type: timeseries
+#   #   type: float64
+#   #   fields:
+#   #     - name: ETH_USDC
+#   #       target: "238:0x7f0db0d77d0694f29c3f940b5b1f589fff6ef2e0"
+#   #       selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#   #       transformers: ["(2 ** 192 / {self}[0] ** 2 * 1e12) / {USDCUSDT}", "round2"]
+#   #     - name: BTC_USDC # BTCETH * ETHUSDC
+#   #       target: "238:0xecb1c17a51d782ac2757e2ab568d159854b9b4bd"
+#   #       selector: slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))
+#   #       transformers: ["({self}[0] ** 2 / 2 ** 192 / 1e10) * {ETHUSDC}", "round2"]
+
+# evm_logger: []
+# # non-evm chain ingesters
+# solana_caller: []
+# solana_logger: []
+# sui_caller: []
+# sui_logger: []
+# aptos_caller: []
+# aptos_logger: []
+# ton_caller: []
+# ton_logger: []
+# cosmos_caller: []
+# cosmos_logger: []

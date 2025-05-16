@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <div class="title">
+    <!--<span id="name"></span>'s -->
+    API v<span id="version"></span> up and running
+  </div>
+  <div class="info">
+    ID: <span id="id"></span><br>
+    IP: <span id="ip"></span><span id="ping"></span><br>
+  </div>
+  <nav class="menu">
+    <a href="/schema">Resources Schema</a>
+    <a href="/limits">Rate Limits</a>
+    <a href="https://github.com/AstrolabDAO/chomp/blob/main/README.md">Docs</a>
+  </nav>
+  <div class="footer">Powered by <a href="https://github.com/AstrolabDAO/chomp">Chomp</a> <span id="copyright"></span> 🤤</div>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      background-color: black;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .title, .info {
+      color: white;
+      font-size: 2rem;
+      text-align: center;
+      padding: 2rem;
+    }
+    .info {
+      color: #666;
+      padding-top: 0;
+      border-bottom: 1px solid #333;
+      font-size: 1rem;
+      /* line-height: 1.5; */
+    }
+
+    .menu {
+      color: white;
+      display: flex;
+      flex-direction: column;
+      flex-grow: 1;
+    }
+
+    .menu a {
+      text-decoration: none;
+      text-align: center;
+      transition: all 0.2s;
+      padding: 2rem;
+      font-size: 1.2rem;
+      border-bottom: 1px solid #333;
+      color: white;
+    }
+
+    .menu a:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .menu a:hover:before {
+      content: "👉 ";
+    }
+
+    .menu a:hover:after {
+      content: " 👈";
+    }
+
+    .footer {
+      color: #666;
+      text-align: center;
+      padding: .5rem;
+      font-size: 1rem;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    #ping {
+      transition: color 0.2s;
+      margin-left: 0.8rem;
+    }
+
+    #ping.good { color: #00ff00; }
+    #ping.ok { color: #ffff00; }
+    #ping.slow { color: #ffa500; }
+    #ping.bad { color: #ff0000; }
+  </style>
+  <script>
+  function updatePing() {
+    const clientTime = Date.now();
+    fetch(`/ping?utc_time=${clientTime}`)
+      .then(r => r.json())
+      .then(d => {
+        const p = document.getElementById('ping');
+        const m = d.ping_ms;
+        p.textContent = `${m}ms ping`;
+        p.classList.remove('good', 'ok', 'slow', 'bad');
+        p.classList.add(m < 70 ? 'good' : m < 150 ? 'ok' : m < 300 ? 'slow' : 'bad');
+        
+        ['version', 'id', 'ip'].forEach(el => {
+          document.getElementById(el).textContent = d[el];
+        });
+      })
+      .catch(() => {
+        ['ping', 'version', 'id', 'ip'].forEach(el => {
+          document.getElementById(el).textContent = '???';
+        });
+      });
+    document.getElementById('copyright').textContent=`© ${new Date().getFullYear()}`;
+  }
+  updatePing();
+  setInterval(updatePing,10000);
+
+  </script>
+</body>
+</html>

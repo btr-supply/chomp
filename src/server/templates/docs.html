@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Docs</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui@5.10.0/dist/swagger-ui.css" integrity="sha256-IgNmYaATqY6z6AuD6hvz9XN0OyeAc94gsTa+lK8ka1Y=" crossorigin="anonymous">
+  <style>
+    /* Fast dark mode https://github.com/swagger-api/swagger-ui/issues/5327 */
+    @media (prefers-color-scheme: dark) {
+      /* body {
+        background: black;
+      }
+      .swagger-ui {
+        filter: invert(88%) hue-rotate(180deg);
+      }
+      .swagger-ui .microlight {
+        filter: invert(100%) hue-rotate(180deg);
+      } */
+    }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui@5.10.0/dist/swagger-ui-bundle.js" integrity="sha256-i050FsZ0MSwm3mVMv7IhpfCdK90RKaXPS/EmiWxv8vc=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui@5.10.0/dist/swagger-ui-standalone-preset.js" integrity="sha256-IGoJVXW7MRyeZOsKceWVePAShfVpJhnYhDhOQp+Yi38=" crossorigin="anonymous"></script>  
+  <script>
+    // Initialize Swagger UI
+    window.onload = function() {
+      const ui = SwaggerUIBundle({
+        url: "/openapi.json",  // Use FastAPI's OpenAPI schema
+        dom_id: '#swagger-ui'
+      });
+      window.ui = ui;
+    };
+  </script>
+</body>
+</html>

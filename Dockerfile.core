@@ -1,0 +1,67 @@
+ # Default python version
+ ARG PYTHON_VERSION=3.11
+
+# 1. Prepare TDengine binaries and libs from a lightweight base image
+FROM tdengine/tdengine:3.2.3.0 AS tdengine-base
+
+# Extract only required binaries and libraries
+RUN mkdir -p /deps && \
+    for bin in /usr/bin/taosd /usr/bin/taos; do \
+        ldd $bin | tr -s '[:space:]' | cut -d' ' -f3 | grep '^/' | xargs -I {} cp -u {} /deps/; \
+    done && \
+    cp /usr/lib/libtaos.so* /deps/
+
+# 2. Main image based on lightweight Python version from environment variable
+FROM python:${PYTHON_VERSION}-slim
+
+# Reload the environment variable
+ARG PYTHON_VERSION
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    LD_LIBRARY_PATH=/usr/local/taos/lib:$LD_LIBRARY_PATH
+
+# Set the timezone
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# Copy TDengine binaries and libraries
+COPY --from=tdengine-base /deps/* /usr/lib/
+RUN ldconfig
+
+# Install required system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    gcc \
+    libffi-dev \
+    libssl-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN pip install --no-cache-dir uv
+
+# Set the working directory
+WORKDIR /app
+
+# Copy only necessary files for dependency installation
+COPY pyproject.toml ./pyproject.toml
+
+# Install dependencies using uv
+RUN uv venv --python ${PYTHON_VERSION}
+RUN uv pip install -r pyproject.toml
+
+ENV PYTHONPATH=$PYTHONPATH:/app
+
+# Copy the application source code
+COPY . .
+
+# Make main.py executable
+RUN chmod +x main.py
+
+# Entrypoint for running the application
+ENTRYPOINT ["uv", "run", "python", "main.py"]
+
+# Default command options
+CMD ["-v", "-s"]
