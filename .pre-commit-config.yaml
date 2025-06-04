@@ -1,0 +1,29 @@
+repos:
+- repo: local
+  hooks:
+  - id: make-pre-commit
+    name: Run format and lint checks
+    entry: make pre-commit
+    language: system
+    pass_filenames: false
+    always_run: true
+    stages: [pre-commit]
+  - id: validate-commit-msg
+    name: Validate commit message format
+    entry: make validate-commit-msg
+    language: system
+    stages: [commit-msg]
+  - id: make-pre-push
+    name: Validate branch and commits before push
+    entry: make pre-push
+    language: system
+    stages: [pre-push]
+    pass_filenames: false
+    always_run: true
+  - id: validate-branch-name
+    name: Validate current branch name format
+    entry: make validate-branch-name
+    language: system
+    stages: [post-checkout]
+    pass_filenames: false
+    always_run: true
