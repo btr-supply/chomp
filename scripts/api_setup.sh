@@ -1,12 +1,13 @@
 #!/bin/bash
-set -e
-source "$(dirname "${BASH_SOURCE[0]}")/utils.bash"
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
 check_sudo
+check_docker
 ensure_network $DOCKER_NET
 cd $PARENT
 build_images Dockerfile.core $CORE_IMAGE $API_IMAGE
-check_container_running $DB_CONTAINER "Database not running. Run db-setup.bash first." || exit 1
+check_container_running $DB_CONTAINER "Database not running. Run db_setup.sh first." || exit 1
 cleanup_containers $API_CONTAINER
 # db_client_health_check $DOCKER_NET $HEALTHCHECK_CONTAINER $CORE_IMAGE $ENV || exit 1
 

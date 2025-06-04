@@ -1,8 +1,9 @@
 #!/bin/bash
-set -e
-source "$(dirname "${BASH_SOURCE[0]}")/utils.bash"
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
 check_sudo
+check_docker
 ensure_network $DOCKER_NET
 
 # Build DB image
@@ -14,7 +15,7 @@ cleanup_containers $DB_CONTAINER
 
 # Run the new container instance
 echo "Starting $DB_CONTAINER container..."
-docker run -d \
+docker_cmd run -d \
     --env-file "$ENV" \
     --label project=Chomp \
     --network "$DOCKER_NET" \
