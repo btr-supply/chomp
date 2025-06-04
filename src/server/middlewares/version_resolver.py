@@ -1,5 +1,4 @@
 from fastapi import Request
-from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import src.state as state

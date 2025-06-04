@@ -9,6 +9,7 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = "==3.11.*"
 
+# Core dependencies - always required
 dependencies = [
     "redis==5.2.0",
     "python-dotenv==1.0.1",
@@ -18,22 +19,136 @@ dependencies = [
     "aiohttp>=3.11.7",
     "fastapi>=0.115.5",
     "uvicorn[standard]>=0.32.1",
-    "beautifulsoup4>=4.12.3",
-    "lxml>=5.3.0",
-    "web3==6.20.3",
-    "multicall==0.9.0",
-    "taospy==2.7.16",
     "orjson>=3.10.3",
-    "numpy>=1.26.4",
-    "playwright>=1.49.0",
     "python-dateutil>=2.9.0",
-    # "asyncpg>=0.29.0",
-    # "pymongo>=4.7.2",
-    # "opentsdb-py>=0.6.0",
-    # "solana>=0.36.2",
-    # "solders>=0.23.0"
     "httpx>=0.28.1",
     "tomli>=2.2.1",
     "polars>=1.21.0",
     "pyarrow>=19.0.0",
+    "numpy>=1.26.4",
+    "types-python-dateutil>=2.9.0.20250516",
+    "mypy>=1.16.0",
+]
+
+# Optional dependencies for specific adapters and ingesters
+[project.optional-dependencies]
+
+# Database adapters
+tdengine = ["taospy==2.7.16"]
+timescale = ["asyncpg>=0.29.0"]
+clickhouse = ["asynch>=0.2.0"]
+duckdb = ["duckdb>=0.9.0"]
+mongodb = ["motor>=3.3.0"]
+influxdb = ["influxdb-client>=1.38.0"]
+kx = ["pykx>=2.4.0"]
+sqlite = ["aiosqlite>=0.19.0"]
+questdb = []  # Uses aiohttp which is already in core
+opentsdb = []  # Uses aiohttp which is already in core
+victoriametrics = []  # Uses aiohttp which is already in core
+
+# Web2 ingesters
+scraper = [
+    "beautifulsoup4>=4.12.3",
+    "lxml>=5.3.0",
+    "playwright>=1.49.0"
+]
+web2 = [
+    "beautifulsoup4>=4.12.3",
+    "lxml>=5.3.0",
+    "playwright>=1.49.0"
+]
+
+# Web3 ingesters
+evm = [
+    "web3==6.20.3",
+    "multicall==0.9.0",
+    "eth-utils>=2.0.0",
+    "eth-account>=0.9.0",
+    "hexbytes>=0.3.0"
+]
+solana = ["solana>=0.36.2", "solders>=0.23.0"]
+sui = []  # Uses httpx which is already in core
+aptos = []  # Uses httpx which is already in core
+ton = []  # Uses httpx which is already in core
+
+# Data processing (numpy is now in core dependencies)
+
+# Common combinations
+default = [
+    # Default adapter - TDengine
+    "taospy==2.7.16",
+    # All web2 ingesters
+    "beautifulsoup4>=4.12.3",
+    "lxml>=5.3.0",
+    "playwright>=1.49.0",
+    # All web3 ingesters
+    "web3==6.20.3",
+    "multicall==0.9.0",
+    "eth-utils>=2.0.0",
+    "eth-account>=0.9.0",
+    "hexbytes>=0.3.0",
+    "solana>=0.36.2",
+    "solders>=0.23.0"
+]
+
+# All database adapters
+all-adapters = [
+    "taospy==2.7.16",      # tdengine
+    "asyncpg>=0.29.0",     # timescale
+    "asynch>=0.2.0",       # clickhouse
+    "duckdb>=0.9.0",       # duckdb
+    "motor>=3.3.0",        # mongodb
+    "influxdb-client>=1.38.0", # influxdb
+    "pykx>=2.4.0",         # kx
+    "aiosqlite>=0.19.0"    # sqlite
+]
+
+# All ingesters
+all-ingesters = [
+    # Web2
+    "beautifulsoup4>=4.12.3",
+    "lxml>=5.3.0",
+    "playwright>=1.49.0",
+    # Web3
+    "web3==6.20.3",
+    "multicall==0.9.0",
+    "eth-utils>=2.0.0",
+    "eth-account>=0.9.0",
+    "hexbytes>=0.3.0",
+    "solana>=0.36.2",
+    "solders>=0.23.0"
+]
+
+# Everything
+all = [
+    # All adapters
+    "taospy==2.7.16",
+    "asyncpg>=0.29.0",
+    "asynch>=0.2.0",
+    "duckdb>=0.9.0",
+    "motor>=3.3.0",
+    "influxdb-client>=1.38.0",
+    "pykx>=2.4.0",
+    "aiosqlite>=0.19.0",
+    # All ingesters
+    "beautifulsoup4>=4.12.3",
+    "lxml>=5.3.0",
+    "playwright>=1.49.0",
+    "web3==6.20.3",
+    "multicall==0.9.0",
+    "eth-utils>=2.0.0",
+    "eth-account>=0.9.0",
+    "hexbytes>=0.3.0",
+    "solana>=0.36.2",
+    "solders>=0.23.0"
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.12",
+    "mypy>=1.16.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0,<5.0.0",
+    "pytest-asyncio>=0.25.0",
+    "pre-commit>=4.0.0",
 ]

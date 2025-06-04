@@ -2,8 +2,10 @@ from asyncio import Task, gather, sleep
 from hashlib import md5
 import orjson
 from aiohttp import ClientSession, ClientTimeout, TCPConnector
+from typing import Any
+from socket import AddressFamily
 
-from ..utils import log_debug, log_info, log_error, log_warn, select_nested
+from ..utils import log_debug, log_error, log_warn, select_nested
 from ..model import Ingester
 from ..cache import ensure_claim_task, get_or_set_cache
 from ..actions.schedule import scheduler
@@ -21,7 +23,7 @@ class HTTPIngester:
       timeout = ClientTimeout(total=30, connect=10, sock_connect=10)
       connector = TCPConnector(
         verify_ssl=False,
-        family=0, # IPv4 + IPv6
+        family=AddressFamily.AF_UNSPEC, # IPv4 + IPv6
         enable_cleanup_closed=True,
         force_close=False,
         use_dns_cache=True,
@@ -59,9 +61,9 @@ async def schedule(c: Ingester) -> list[Task]:
 
   data_by_route: dict[str, dict] = {}
   hashes: dict[str, str] = {}
-  transformed_data_by_route: dict[str, any] = {} # Store pre-transformed data
+  transformed_data_by_route: dict[str, Any] = {} # Store pre-transformed data
 
-  async def ingest(c: Ingester):
+  async def ingest(c: Ingester) -> None:
     await ensure_claim_task(c)
 
     async def fetch_hashed(url: str) -> dict:
@@ -75,6 +77,7 @@ async def schedule(c: Ingester) -> list[Task]:
           transform_fn = safe_eval(c.pre_transformer, callable_check=True)
           transformed_data_by_route[hashes[url]] = transform_fn(data)
 
+        return data
       except Exception as e:
         log_error(f"Failed to fetch/parse JSON response from {url}: {e}")
         return {}
@@ -86,7 +89,7 @@ async def schedule(c: Ingester) -> list[Task]:
         url = url.strip().format(**c.data_by_field) # inject fields inside url if required
 
         # create a unique key using a hash of the URL and interval
-        if not url in hashes:
+        if url not in hashes:
           hashes[url] = md5(f"{url}:{c.interval}".encode()).hexdigest()
 
     for url, hash_key in hashes.items():
@@ -114,4 +117,5 @@ async def schedule(c: Ingester) -> list[Task]:
     await transform_and_store(c)
 
   # globally register/schedule the ingester
-  return [await scheduler.add_ingester(c, fn=ingest, start=False)]
+  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+  return [task] if task is not None else []

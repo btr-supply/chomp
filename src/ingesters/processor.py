@@ -1,8 +1,7 @@
 from asyncio import Task, gather, sleep
 import importlib.util
 from os import path
-from typing import Callable, Dict, Any
-from aiohttp import ClientSession
+from typing import Callable, Union, Any
 
 from ..actions.schedule import scheduler
 from ..actions.store import transform_and_store
@@ -11,17 +10,21 @@ from ..model import Ingester
 from ..utils import log_debug, log_error, log_warn, safe_eval
 from .. import state
 
-async def load_handler(handler_path: str) -> Callable:
+async def load_handler(handler_path: Union[str, Callable[..., Any]]) -> Callable:
   """Load handler function from an external module."""
   try:
+    # If already a callable, return it directly
+    if callable(handler_path):
+      return handler_path
+
     if handler_path.endswith(".py"):
       # Convert relative path to absolute path
       abs_path = path.abspath(handler_path)
-      
+
       # Load module from the file path
       module_name = path.splitext(path.basename(abs_path))[0]  # e.g., "test" from "test.py"
       spec = importlib.util.spec_from_file_location(module_name, abs_path)
-      
+
       if spec and spec.loader:
         module = importlib.util.module_from_spec(spec)
         module.__package__ = "chomp.src.processors"
@@ -38,7 +41,7 @@ async def load_handler(handler_path: str) -> Callable:
 
 async def schedule(c: Ingester) -> list[Task]:
   """Schedule processor ingester"""
-  
+
   async def ingest(c: Ingester):
     await ensure_claim_task(c)
 
@@ -48,7 +51,7 @@ async def schedule(c: Ingester) -> list[Task]:
       if state.args.verbose:
         log_debug(f"Waiting {wait_time}s for dependencies to be processed...")
       await sleep(wait_time)
-    
+
     # Load handler if specified
     handler = None
     if hasattr(c, 'handler'):
@@ -76,19 +79,20 @@ async def schedule(c: Ingester) -> list[Task]:
             ingester_name, field_name = field.selector.split('.', 1)
             if ingester_name in inputs:
               results[field.name] = inputs[ingester_name].get(field_name)
-      
+
       # Update field values
       for field in c.fields:
         if field.name in results:
           field.value = results[field.name]
         elif not field.selector:  # Warn about missing computed fields
           log_warn(f"Handler did not return value for field {field.name}")
-      
+
       # Store results
       await transform_and_store(c) # jsonify=True
-      
+
     except Exception as e:
       log_error(f"Failed to process {c.name}: {e}")
 
   # Register/schedule the ingester
-  return [await scheduler.add_ingester(c, fn=ingest, start=False)]
+  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+  return [task] if task is not None else []

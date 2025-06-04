@@ -1,4 +1,5 @@
 from functools import wraps
+from typing import Callable
 from fastapi import FastAPI, Request, HTTPException, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -18,7 +19,8 @@ class Limiter(BaseHTTPMiddleware):
     ppr={}
   ):
     super().__init__(app)
-    state.server.limiter = self
+    # Use setattr to avoid mypy error about dynamic attribute
+    setattr(state.server, 'limiter', self)
     self.limits = {
       'rpm': (rpm, 60), 'rph': (rph, 3600), 'rpd': (rpd, 86400),
       'spm': (spm, 60), 'sph': (sph, 3600), 'spd': (spd, 86400),
@@ -28,23 +30,23 @@ class Limiter(BaseHTTPMiddleware):
     self.blacklist = blacklist
     self.ppr = ppr
 
-  async def dispatch(self, req: Request, call_next: callable) -> Response:
+  async def dispatch(self, req: Request, call_next: Callable) -> Response:
     user = requester_id(req)
 
     # Check limits
     err, check_result = await limiter_service.check_limits(user, req.url.path)
     if err:
       raise HTTPException(status_code=429 if "exceeded" in err else 403, detail=err)
-    
+
     if check_result.get("whitelisted"):
       return await call_next(req)
 
     # Execute request
     res: Response = await call_next(req)
-    
+
     # Increment counters
     err, headers = await limiter_service.increment_counters(
-      user, 
+      user,
       int(res.headers.get('Content-Length') or 0),
       check_result["ppr"]
     )
@@ -57,17 +59,16 @@ class Limiter(BaseHTTPMiddleware):
         "X-RateLimit-Remaining": headers["remaining"],
         "X-RateLimit-Reset": headers["reset"]
       })
-      
+
     return res
 
 # TODO: implement a simpler reflexion mechanism than request->app->middleware
-@staticmethod
 def limit(points: int):
-  def decorator(func: callable):
+  def decorator(func: Callable):
     @wraps(func)
-    async def wrapper(*args, **kwargs):
+    async def wrapper(*args, **kwargs) -> Response:
       req: Request = kwargs.get("req") or args[0]
-      limiter: Limiter = state.server.limiter
+      limiter: Limiter = getattr(state.server, 'limiter')
       limiter.ppr.setdefault(req.url.path, points)
       return await func(*args, **kwargs)
     return wrapper

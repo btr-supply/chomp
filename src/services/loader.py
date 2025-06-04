@@ -1,22 +1,22 @@
-from concurrent.futures import Future
 import orjson
 import math
 import polars as pl
-from datetime import datetime, timezone
+from datetime import datetime
 from asyncio import gather, get_running_loop
 from io import BytesIO
+from typing import Any, Optional, cast
+from concurrent.futures import Executor
 
 from ..server.responses import ORJSON_OPTIONS
-from ..cache import get_cached_resources, get_cache_batch, get_cache, get_resource_status
-from ..utils import now, round_sigfig, fit_interval, floor_date,\
-  split, parse_date, Interval, numeric_columns, log_error, log_info
+from ..cache import get_cache_batch, get_cache, get_resource_status
+from ..utils import now, round_sigfig, split, Interval, numeric_columns, log_info
 from .. import state
 from ..model import SCOPE_ATTRS, UNALIASED_FORMATS, FillMode, Scope, ServiceResponse, DataFormat
 
 # level 1: In-memory module cache for resources that expires after 5 minutes (lvl 2: redis)
-_resources_by_scope = {
+_resources_by_scope: dict[Scope, dict[str, Any] | None] = {
   Scope.ALL: None,
-  Scope.DEFAULT: None, 
+  Scope.DEFAULT: None,
   Scope.DETAILED: None
 }
 _resources_cached_at = None
@@ -44,10 +44,10 @@ def trim_resource(resource: dict, scope: Scope = Scope.DEFAULT) -> dict:
 async def get_resources(scope: Scope = Scope.DEFAULT) -> ServiceResponse[dict]:
   """Get and cache resources with 5-minute expiry"""
   global _resources_by_scope, _resources_cached_at
-  
+
   if not _resources_cached_at or (now() - _resources_cached_at).total_seconds() > 300:
     resources = await get_resource_status()
-    tp = state.thread_pool  # ThreadPoolExecutor
+    tp = cast(Executor, state.thread_pool)  # Cast to Executor for type compatibility
     loop = get_running_loop()
 
     async def trim_all(scope: Scope):
@@ -61,54 +61,58 @@ async def get_resources(scope: Scope = Scope.DEFAULT) -> ServiceResponse[dict]:
       trim_all(Scope.DEFAULT), trim_all(Scope.DETAILED)
     )
 
-    _resources_by_scope = {
-      Scope.ALL: resources,
-      Scope.DEFAULT: trimmed_default,
-      Scope.DETAILED: trimmed_detailed,
-    }
+    _resources_by_scope[Scope.ALL] = resources
+    _resources_by_scope[Scope.DEFAULT] = trimmed_default
+    _resources_by_scope[Scope.DETAILED] = trimmed_detailed
     _resources_cached_at = now()
 
-  if scope not in _resources_by_scope:
-    return f"Unsupported resource scope: {scope}", None
+  cached_resource = _resources_by_scope.get(scope)
+  if cached_resource is None:
+    return f"Unsupported resource scope: {scope}", {}
 
-  return "", _resources_by_scope[scope]
+  return "", cached_resource
 
 async def parse_resources(resources: str, scope: Scope = Scope.DEFAULT) -> ServiceResponse[list[str]]:
   """Parse and validate resource strings"""
-  resources = split(resources) or ['*']
+  resource_list = split(resources) or ['*']
   try:
-    if resources[0] in ["all", "*"]:
+    if resource_list[0] in ["all", "*"]:
       err, res = await get_resources(scope)
-      if err: return err, None
-      resources = res
+      if err:
+        return err, []
+      resource_list = list(res.keys())
     else:
       # Ensure resources are initialized and valid for scope
       if _resources_by_scope.get(scope) is None:
         log_info(f"Initializing resources for scope: {scope}")
         await get_resources()  # Initialize cache if not already done
-      if _resources_by_scope.get(scope) is None:
-        return "Problem initializing resources", None
-      resources = [resource for resource in resources if resource in _resources_by_scope[scope]]
-    return "", resources if resources else ("No resources found", None)
+      cached_resources = _resources_by_scope.get(scope)
+      if cached_resources is None:
+        return "Problem initializing resources", []
+      resource_list = [resource for resource in resource_list if resource in cached_resources]
+    if not resource_list:
+      return "No resources found", []
+    return "", resource_list
   except Exception as e:
-    return f"Error parsing resources: {resources} - {e}", None
+    return f"Error parsing resources: {resources} - {e}", []
 
 # TODO: merge with get_schema
 async def parse_fields(resource: str, fields: str, scope: Scope = Scope.ALL) -> ServiceResponse[list[str]]:
   """Parse and validate fields for a resource"""
   try:
-    fields = split(fields) or ['*']
+    field_list = split(fields) or ['*']
     err, resources = await get_resources(scope)
-    if err: return err, None
+    if err:
+      return err, []
     if resource in resources:
-      found = resources[resource].get('fields', [])
+      found = resources[resource].get('fields', {})
       if not found:
-        return f"Fields not found: {resource}.{fields}", None
-      filtered = [field for field in fields if field in found] if not fields[0] in ["all", "*"] else found
-      return "", (list(filtered.keys()) if type(filtered) == dict else filtered)
-    return f"Resource not found: {resource}", None
+        return f"Fields not found: {resource}.{fields}", []
+      filtered = [field for field in field_list if field in found] if field_list[0] not in ["all", "*"] else found
+      return "", (list(filtered.keys()) if isinstance(filtered, dict) else filtered)
+    return f"Resource not found: {resource}", []
   except Exception as e:
-    return f"Error parsing fields: {resource}.{fields} - {e}", None
+    return f"Error parsing fields: {resource}.{fields} - {e}", []
 
 async def parse_resources_fields(
   resources: str,
@@ -117,19 +121,22 @@ async def parse_resources_fields(
 ) -> ServiceResponse[tuple[list[str], list[str]]]:
 
   err, parsed_resources = await parse_resources(resources, scope)
-  if err: return err, None
+  if err:
+    return err, ([], [])
   err, parsed_fields = await parse_fields(parsed_resources[0], fields, scope)
-  if err: return err, None
+  if err:
+    return err, ([], [])
   return "", (parsed_resources, parsed_fields)
 
 async def get_schema(
-    resources: list[str] = None, 
-    fields: list[str] = None, 
+    resources: Optional[list[str]] = None,
+    fields: Optional[list[str]] = None,
     scope: Scope = Scope.ALL
 ) -> ServiceResponse[dict]:
 
   err, resources_data = await get_resources(scope)
-  if err: return err, None
+  if err:
+    return err, {}
 
   partial = resources_data.copy()
   if resources:
@@ -150,104 +157,154 @@ def format_table(
   data,
   from_format: DataFormat = "py:row",
   to_format: DataFormat = "py:column",
-  columns: list[str] = None
-) -> ServiceResponse[any]:
+  columns: Optional[list[str]] = None
+) -> ServiceResponse[Any]:
 
-  empty = data.is_empty() if (type(data) == pl.DataFrame) else \
+  empty = data.is_empty() if isinstance(data, pl.DataFrame) else \
     data in [None, "", [], {}, ()]
 
   if empty:
     return "No dataset to format", None
 
-  from_format, to_format = UNALIASED_FORMATS.get(from_format), UNALIASED_FORMATS.get(to_format)
+  from_fmt = UNALIASED_FORMATS.get(from_format, from_format)
+  to_fmt = UNALIASED_FORMATS.get(to_format, to_format)
   # Validate inputs
-  if from_format == to_format:
+  if from_fmt == to_fmt:
     return "", data
 
   # Load JSON if needed
-  if from_format.startswith("json"):
+  if from_fmt and from_fmt.startswith("json"):
     if isinstance(data, str):
       data = orjson.loads(data)
-    from_format = from_format.replace("json", "py")
+    # Safe replacement for JSON formats
+    if from_fmt == "json:row":
+      from_fmt = "py:row"
+    elif from_fmt == "json:column":
+      from_fmt = "py:column"
+    else:
+      from_fmt = "py:row"  # default fallback
   try:
     # Convert to Polars DataFrame
-    match from_format:
-      case "py:row": df = pl.DataFrame(data, orient="row")
-      case "py:column": df = pl.DataFrame(data, orient="column")
-      case "csv": df = pl.read_csv(data, separator=',', has_header=True, line_terminator='\n')
-      case "tsv": df = pl.read_csv(data, separator='\t', has_header=True, line_terminator='\n')
-      case "psv": df = pl.read_csv(data, separator='|', has_header=True, line_terminator='\n')
-      case "parquet": df = pl.read_parquet(data)
-      case "arrow": df = pl.from_arrow(data)
-      case "feather": df = pl.read_ipc(data)
+    match from_fmt:
+      case "py:row":
+        df = pl.DataFrame(data, orient="row")
+      case "py:column":
+        if isinstance(data, pl.DataFrame):
+          df = data
+        else:
+          df = pl.DataFrame(data)
+      case "csv":
+        df = pl.read_csv(data, separator=',', has_header=True)
+      case "tsv":
+        df = pl.read_csv(data, separator='\t', has_header=True)
+      case "psv":
+        df = pl.read_csv(data, separator='|', has_header=True)
+      case "parquet":
+        df = pl.read_parquet(data)
+      case "arrow":
+        result = pl.from_arrow(data)
+        df = result if isinstance(result, pl.DataFrame) else result.to_frame()
+      case "feather":
+        df = pl.read_ipc(data)
       # case "orc": df = pl.read_orc(data) # not supported
-      case "avro": df = pl.read_avro(data)
-      case "polars": df = data
-      case _: return f"Unsupported from_format: {from_format}", None
+      case "avro":
+        df = pl.read_avro(data)
+      case "polars":
+        if isinstance(data, pl.DataFrame):
+          df = data
+        elif isinstance(data, pl.Series):
+          df = data.to_frame()  # type: ignore[assignment]
+        else:
+          df = pl.DataFrame(data)
+      case _:
+        return f"Unsupported from_format: {from_fmt}", None
 
     # Assign column names if provided
     if columns:
-      df.columns = columns
+      df = df.rename(dict(zip(df.columns, columns)))
 
     # Convert timestamps to milliseconds since epoch for (JS Date compatible)
-    if not to_format.startswith(("py:", "polars", "np:", "pd:")):
+    if to_fmt and not to_fmt.startswith(("py:", "polars", "np:", "pd:")):
       df = df.with_columns([
         (pl.col('ts').cast(pl.Datetime).dt.timestamp(time_unit="ms")).cast(pl.Int64).alias('ts')
       ])
 
     # Export from Polars DataFrame
-    match to_format:
-      case "polars": data = df
-      case "py:row": data = df.to_numpy().tolist()
-      case "py:column": data = df.to_numpy().T.tolist()
-      case "np:row": data = df.to_numpy()
-      case "np:column": data = df.to_numpy().T
+    match to_fmt:
+      case "polars":
+        data = df
+      case "py:row":
+        data = df.to_numpy().tolist()
+      case "py:column":
+        data = df.to_numpy().T.tolist()
+      case "np:row":
+        data = df.to_numpy()
+      case "np:column":
+        data = df.to_numpy().T
       # case "json:row:labelled": data = orjson.dumps(df.to_dicts(), option=ORJSON_OPTIONS)
       # case "json:column:labelled": data = orjson.dumps({col: df[col].to_list() for col in df.columns}, option=ORJSON_OPTIONS)
-      case "json:row": data = orjson.dumps({'columns': df.columns,'types': [str(t).lower() for t in df.dtypes],'data': df.to_numpy().tolist()}, option=ORJSON_OPTIONS)
-      case "json:column": data = orjson.dumps({'columns': df.columns,'types': [str(t).lower() for t in df.dtypes],'data': df.to_numpy().T.tolist()}, option=ORJSON_OPTIONS)
+      case "json:row":
+        data = orjson.dumps({'columns': df.columns,'types': [str(t).lower() for t in df.dtypes],'data': df.to_numpy().tolist()}, option=ORJSON_OPTIONS)
+      case "json:column":
+        data = orjson.dumps({'columns': df.columns,'types': [str(t).lower() for t in df.dtypes],'data': df.to_numpy().T.tolist()}, option=ORJSON_OPTIONS)
       # TODO: determine float precision based on content?
-      case "csv": data = df.write_csv(separator=',', include_header=True, line_terminator='\n', float_precision=9)
-      case "tsv": data = df.write_csv(separator='\t', include_header=True, line_terminator='\n', float_precision=9)
-      case "psv": data = df.write_csv(separator='|', include_header=True, line_terminator='\n', float_precision=9)
-      case "parquet": data = df.write_parquet(compression="zstd")
-      case "arrow": data = df.to_arrow()
-      case "feather": buf = BytesIO(); df.write_ipc(buf, compression="zstd"); data = buf.getvalue()
+      case "csv":
+        data = df.write_csv(separator=',', include_header=True, line_terminator='\n', float_precision=9)
+      case "tsv":
+        data = df.write_csv(separator='\t', include_header=True, line_terminator='\n', float_precision=9)
+      case "psv":
+        data = df.write_csv(separator='|', include_header=True, line_terminator='\n', float_precision=9)
+      case "parquet":
+        buf = BytesIO()
+        df.write_parquet(buf, compression="zstd")
+        data = buf.getvalue()
+      case "arrow":
+        data = df.to_arrow()
+      case "feather":
+        buf = BytesIO()
+        df.write_ipc(buf, compression="zstd")
+        data = buf.getvalue()
       # case "orc": data = df.write_orc() # not supported
-      case "avro": buf = BytesIO(); df.write_avro(buf, compression="snappy"); data = buf.getvalue()
-      case "np:row": data = df.to_numpy()
-      case "np:column": data = df.to_numpy().T
-      case _: return f"Unsupported to_format: {to_format}", None
+      case "avro":
+        buf = BytesIO()
+        df.write_avro(buf, compression="snappy")
+        data = buf.getvalue()
+      case "np:row":
+        data = df.to_numpy()
+      case "np:column":
+        data = df.to_numpy().T
+      case _:
+        return f"Unsupported to_format: {to_fmt}", None
 
   except Exception as e:
     return f"Error formatting table: {e}", None
   return "", data
 
-async def get_last_values(resources: list[str], quote: str = None, precision: int = 6) -> ServiceResponse[dict]:
+async def get_last_values(resources: list[str], quote: Optional[str] = None, precision: int = 6) -> ServiceResponse[dict]:
   """Get latest values for resources with optional quote conversion"""
   res = await get_cache_batch(resources, pickled=True) if len(resources) > 1 else \
         {resources[0]: await get_cache(resources[0], pickled=True)}
-  
+
   missing_resources = [resource for resource, value in res.items() if value is None]
   if missing_resources:
-    return f"Resources not found: {', '.join(missing_resources)}", None
+    return f"Resources not found: {', '.join(missing_resources)}", {}
 
   if quote and quote != "USDC.idx":
     try:
       quote_resource, quote_field = quote.split('.', 1)
       quote_data = await get_cache(quote_resource, pickled=True)
       if quote_data is None:
-        return f"Quote resource not found: {quote_resource}", None
+        return f"Quote resource not found: {quote_resource}", {}
       quote_value = quote_data.get(quote_field)
       if quote_value is None or math.isnan(quote_value):
-        return f"Quote field not found or NaN: {quote}", None
+        return f"Quote field not found or NaN: {quote}", {}
 
       for resource in res:
-        res[resource] = {k: round_sigfig(v * quote_value, precision) 
-                          if isinstance(v, float) else v 
+        res[resource] = {k: round_sigfig(v * quote_value, precision)
+                          if isinstance(v, float) else v
                           for k, v in res[resource].items()}
     except ValueError:
-      return "Quote must be in format resource.field", None
+      return "Quote must be in format resource.field", {}
 
   quote = quote or "USDC.idx"
   for resource in res:
@@ -257,23 +314,23 @@ async def get_last_values(resources: list[str], quote: str = None, precision: in
 
 async def get_history(
   resources: list[str],
-  fields: list[str], 
+  fields: list[str],
   from_date: datetime,
   to_date: datetime,
   interval: Interval,
-  quote: str = None,
+  quote: Optional[str] = None,
   precision: int = 6,
   format: DataFormat = "json:row",
   fill_mode: FillMode = "forward_fill",
   truncate_leading_zeros: bool = True
-) -> ServiceResponse[any]:
+) -> ServiceResponse[Any]:
   """Get historical data with optional quote conversion and fill mode"""
 
   # try:
   # Fetch base data
   base_columns, base_data = await state.tsdb.fetch_batch(
     tables=resources,
-    from_date=from_date, 
+    from_date=from_date,
     to_date=to_date,
     aggregation_interval=interval,
     columns=fields or []
@@ -283,10 +340,10 @@ async def get_history(
 
   # Filter out rows where ts is null before creating DataFrame
   filtered_base_data = [row for row in base_data[0] if row[0] is not None]
-  
+
   # Explicitly specify orientation and ensure datetime conversion
   df = pl.DataFrame(
-    filtered_base_data, 
+    filtered_base_data,
     schema=base_columns,
     orient="row"
   )

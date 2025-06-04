@@ -1,37 +1,33 @@
-from asyncio import gather, sleep
-from datetime import datetime, timezone
+from datetime import datetime
 from os import environ as env
-from taos import TaosConnection, TaosCursor, TaosResult, TaosStmt, connect, new_bind_params, new_multi_binds
-from dateutil.relativedelta import relativedelta
+from typing import Any
 
-from ..cache import get_or_set_cache
-from ..utils import log_error, log_info, log_warn, Interval, TimeUnit, interval_to_sql, fmt_date, ago, now
-from ..model import Ingester, FieldType, Resource, Tsdb
-from .. import state
+from ..utils import log_error, log_info, log_warn, Interval
+from ..model import Ingester, FieldType
+from .sql import SqlAdapter
 
-UTC = timezone.utc
-
+# TDengine data type mapping
 TYPES: dict[FieldType, str] = {
-  "int8": "tinyint", # 8 bits char
-  "uint8": "tinyint unsigned", # 8 bits uchar
-  "int16": "smallint", # 16 bits short
-  "uint16": "smallint unsigned", # 16 bits ushort
-  "int32": "int", # 32 bits int
-  "uint32": "int unsigned", # 32 bits uint
-  "int64": "bigint", # 64 bits long
-  "uint64": "bigint unsigned", # 64 bits ulong
-  "float32": "float", # 32 bits float
-  "ufloat32": "float unsigned", # 32 bits ufloat
-  "float64": "double", # 64 bits double
-  "ufloat64": "double unsigned", # 64 bits udouble
-  "bool": "bool", # 8 bits bool
-  "timestamp": "timestamp", # 64 bits timestamp, default precision is ms, us and ns are also supported
-  "datetime": "timestamp", # 64 bits timestamp
-  "string": "nchar", # fixed length array of 4 bytes uchar
-  "binary": "binary", # fixed length array of 1 byte uchar
-  "varbinary": "varbinary", # variable length array of 1 byte uchar
+  "int8": "tinyint",  # 8 bits char
+  "uint8": "tinyint unsigned",  # 8 bits uchar
+  "int16": "smallint",  # 16 bits short
+  "uint16": "smallint unsigned",  # 16 bits ushort
+  "int32": "int",  # 32 bits int
+  "uint32": "int unsigned",  # 32 bits uint
+  "int64": "bigint",  # 64 bits long
+  "uint64": "bigint unsigned",  # 64 bits ulong
+  "float32": "float",  # 32 bits float
+  "ufloat32": "float unsigned",  # 32 bits ufloat
+  "float64": "double",  # 64 bits double
+  "ufloat64": "double unsigned",  # 64 bits udouble
+  "bool": "bool",  # 8 bits bool
+  "timestamp": "timestamp",  # 64 bits timestamp, default precision is ms, us and ns are also supported
+  "string": "nchar",  # fixed length array of 4 bytes uchar
+  "binary": "binary",  # fixed length array of 1 byte uchar
+  "varbinary": "varbinary",  # variable length array of 1 byte uchar
 }
 
+# TDengine interval mapping
 INTERVALS: dict[str, str] = {
   "s1": "1s",
   "s2": "2s",
@@ -60,89 +56,134 @@ INTERVALS: dict[str, str] = {
   "Y1": "1y"
 }
 
-PREPARE_STMT = {}
-for k, v in TYPES.items():
-  PREPARE_STMT[k] = v.replace(" ", "_")
+PRECISION = "ms"  # ns, us, ms, s, m
+TIMEZONE = "UTC"  # making sure the front-end and back-end are in sync
 
-PRECISION: TimeUnit = "ms" # ns, us, ms, s, m
-TIMEZONE="UTC" # making sure the front-end and back-end are in sync
+class Taos(SqlAdapter):
+  """TDengine adapter extending SqlAdapter."""
 
-class Taos(Tsdb):
-  conn: TaosConnection
-  cursor: TaosCursor
+  TYPES = TYPES
+
+  def __init__(self, host: str = "localhost", port: int = 40002, db: str = "default",
+               user: str = "rw", password: str = "pass"):
+    super().__init__(host, port, db, user, password)
+    self._taos_module = None
+
+  @property
+  def taos_module(self):
+    """Lazy load TDengine module to avoid import errors if not installed."""
+    if self._taos_module is None:
+      try:
+        import taos
+        self._taos_module = taos
+      except ImportError as e:
+        raise ImportError("TDengine Python client (taospy) is required for TDengine adapter. Install with: pip install taospy") from e
+    return self._taos_module
+
+  @property
+  def timestamp_column_type(self) -> str:
+    return "timestamp"
+
   @classmethod
   async def connect(
     cls,
-    host=None,
-    port=None,
-    db=None,
-    user=None,
-    password=None
+    host: str | None = None,
+    port: int | None = None,
+    db: str | None = None,
+    user: str | None = None,
+    password: str | None = None
   ) -> "Taos":
     self = cls(
-      host=host or env.get("TAOS_HOST", "localhost"),
-      port=int(port or env.get("TAOS_PORT", 40002)), # 6030
-      db=db or env.get("TAOS_DB", "default"),
-      user=user or env.get("DB_RW_USER", "rw"),
-      password=password or env.get("DB_RW_PASS", "pass")
+      host=host or env.get("TAOS_HOST") or "localhost",
+      port=int(port or env.get("TAOS_PORT") or 40002),  # 6030
+      db=db or env.get("TAOS_DB") or "default",
+      user=user or env.get("DB_RW_USER") or "rw",
+      password=password or env.get("DB_RW_PASS") or "pass"
     )
     await self.ensure_connected()
     return self
 
-  async def ping(self) -> bool:
+  async def _connect(self):
+    """TDengine-specific connection."""
     try:
-      await self.ensure_connected()
-      self.cursor.execute("SHOW DATABASES;")
-      return True
+      taos = self.taos_module
+      self.conn = taos.connect(
+        host=self.host,
+        port=self.port,
+        database=self.db,
+        user=self.user,
+        password=self.password
+      )
+      self.cursor = self.conn.cursor()
+      log_info(f"Connected to TDengine on {self.host}:{self.port}/{self.db} as {self.user}")
     except Exception as e:
-      log_error("TDengine ping failed", e)
-      return False
-
-  async def close(self):
-    if self.cursor:
-      self.cursor.close()
-    if self.conn:
-      self.conn.close()
-
-  async def ensure_connected(self):
-    if not self.conn:
-      try:
-        self.conn = connect(
+      e_str = str(e).lower()
+      if "not exist" in e_str:
+        log_warn(f"Database '{self.db}' does not exist on {self.host}:{self.port}, creating it now...")
+        # Connect without database to create it
+        taos = self.taos_module
+        self.conn = taos.connect(host=self.host, port=self.port, user=self.user, password=self.password)
+        self.cursor = self.conn.cursor()
+        await self.create_db(self.db)
+        # Reconnect to the created database
+        self.conn.close()
+        self.conn = taos.connect(
           host=self.host,
           port=self.port,
           database=self.db,
           user=self.user,
           password=self.password
         )
-      except Exception as e:
-        e = str(e).lower()
-        if "not exist" in e:
-          log_warn(f"Database '{self.db}' does not exist on {self.host}:{self.port}, creating it now...")
-          self.conn = connect(host=self.host, port=self.port, user=self.user, password=self.password) # co without db
-          self.cursor = self.conn.cursor()
-          if not self.conn:
-            raise ValueError(f"Failed to connect to TDengine on {self.user}@{self.host}:{self.port}")
-          await self.create_db(self.db)
-        if not self.conn:
-          raise ValueError(f"Failed to connect to TDengine on {self.user}@{self.host}:{self.port}/{self.db}")
+        self.cursor = self.conn.cursor()
+      else:
+        raise ValueError(f"Failed to connect to TDengine on {self.user}@{self.host}:{self.port}/{self.db}")
 
-      log_info(f"Connected to TDengine on {self.host}:{self.port}/{self.db} as {self.user}")
-      self.cursor = self.conn.cursor()
+  async def _close_connection(self):
+    """TDengine-specific connection closing."""
+    if self.cursor:
+      self.cursor.close()
+    if self.conn:
+      self.conn.close()
+    self.conn = None
+    self.cursor = None
 
-    if not self.cursor:
-      self.cursor = self.conn.cursor()
-    if not self.cursor:
-      raise ValueError(f"Failed to connect to TDengine on {self.user}@{self.host}:{self.port}/{self.db}")
+  async def _execute(self, query: str, params: tuple = ()):
+    """Execute TDengine query."""
+    # TDengine doesn't support parameterized queries the same way
+    # For now, we'll use simple string formatting (not ideal for production)
+    if params:
+      formatted_query = query
+      for param in params:
+        if isinstance(param, str):
+          formatted_query = formatted_query.replace("?", f"'{param}'", 1)
+        else:
+          formatted_query = formatted_query.replace("?", str(param), 1)
+    else:
+      formatted_query = query
 
-  async def get_dbs(self):
-    # return self.conn.dbs
-    self.cursor.execute("SHOW DATABASES;")
+    self.cursor.execute(formatted_query)
+
+  async def _fetch(self, query: str, params: tuple = ()) -> list[tuple]:
+    """Execute TDengine query and fetch results."""
+    await self._execute(query, params)
     return self.cursor.fetchall()
 
-  async def create_db(self, name: str, options={}, force=False):
-    base = "CREATE DATABASE IF NOT EXISTS" if force else "CREATE DATABASE"
+  async def _executemany(self, query: str, params_list: list[tuple]):
+    """Execute many TDengine queries."""
+    for params in params_list:
+      await self._execute(query, params)
+
+  def _quote_identifier(self, identifier: str) -> str:
+    """TDengine uses backticks for identifiers."""
+    return f"`{identifier}`"
+
+  async def create_db(self, name: str, options: dict = {}, force: bool = False):
+    """TDengine-specific database creation."""
+    from asyncio import sleep
+
+    base = "CREATE DATABASE IF NOT EXISTS" if not force else "CREATE DATABASE"
     max_retries = 10
-    i = 0
+
     for i in range(max_retries):
       try:
         self.cursor.execute(f"{base} {name} PRECISION '{PRECISION}' BUFFER 256 KEEP 3650d;")  # 10 years max archiving
@@ -150,9 +191,12 @@ class Taos(Tsdb):
       except Exception as e:
         log_warn(f"Retrying to create database {name} in {i}/{max_retries} ({e})...")
         await sleep(1)
-    if i != max_retries:
+
+    if i < max_retries - 1:
       log_info(f"Created database {name} with time precision {PRECISION}")
-      for i in range(max_retries): # readiness check
+
+      # Readiness check
+      for i in range(max_retries):
         try:
           self.cursor.execute(f"USE {name};")
           log_info(f"Database {name} is now ready.")
@@ -160,36 +204,80 @@ class Taos(Tsdb):
         except Exception as e:
           log_warn(f"Retrying to use database {name} in {i}/{max_retries} ({e})...")
           await sleep(1)
+
     raise ValueError(f"Database {name} readiness check failed.")
 
   async def use_db(self, db: str):
+    """TDengine-specific database switching."""
     if not self.conn:
-      await self.connect(db=db)
+      await self._connect()
     else:
       self.conn.select_db(db)
 
-  async def create_table(self, c: Ingester, name=""):
-    table = name or c.name
-    log_info(f"Creating table {self.db}.{table}...")
-    fields = ", ".join([f"`{field.name}` {TYPES[field.type]}" for field in c.fields if not field.transient])
-    sql = f"""
-    CREATE TABLE IF NOT EXISTS {self.db}.`{table}` (
+  def _build_create_table_sql(self, c: Ingester, table_name: str) -> str:
+    """TDengine-specific CREATE TABLE syntax."""
+    persistent_fields = [field for field in c.fields if not field.transient]
+    fields = ", ".join([f"`{field.name}` {TYPES[field.type]}" for field in persistent_fields])
+
+    return f"""
+    CREATE TABLE IF NOT EXISTS {self.db}.`{table_name}` (
       ts timestamp,
       {fields}
     );
     """
+
+  def _build_aggregation_sql(
+    self,
+    table_name: str,
+    columns: list[str],
+    from_date: datetime,
+    to_date: datetime,
+    aggregation_interval: Interval
+  ) -> tuple[str, list[Any]]:
+    """TDengine-specific aggregation query."""
+    interval_sql = INTERVALS.get(aggregation_interval, "5m")
+
+    # Build aggregation with TDengine syntax
+    select_cols = ["ts"]
+    select_cols.extend([f"LAST({self._quote_identifier(col)}) as {col}" for col in columns])
+    select_clause = ", ".join(select_cols)
+
+    query = f"""
+    SELECT {select_clause}
+    FROM {self.db}.`{table_name}`
+    WHERE ts >= ? AND ts <= ?
+    INTERVAL({interval_sql})
+    ORDER BY ts DESC
+    """
+
+    return query, [from_date, to_date]
+
+  async def _get_table_columns(self, table: str) -> list[str]:
+    """TDengine-specific column information query."""
     try:
-      self.cursor.execute(sql)
-      log_info(f"Created table {self.db}.{table}")
+      result = await self._fetch(f"DESCRIBE {self.db}.`{table}`")
+      return [row[0] for row in result if row[0] != "ts"]
+    except Exception:
+      return []
+
+  async def list_tables(self) -> list[str]:
+    """TDengine-specific table listing."""
+    await self.ensure_connected()
+    try:
+      result = await self._fetch("SHOW TABLES")
+      return [row[0] for row in result]
     except Exception as e:
-      log_error(f"Failed to create table {self.db}.{table}\nSQL: {sql}", e)
-      raise e
+      log_error(f"Failed to list tables from {self.db}", e)
+      return []
 
   async def alter_table(self, table: str, add_columns: list[tuple[str, str]] = [], drop_columns: list[str] = []):
+    """TDengine-specific ALTER TABLE."""
     await self.ensure_connected()
+
     for column_name, column_type in add_columns:
       try:
-        self.cursor.execute(f"ALTER TABLE {self.db}.`{table}` ADD COLUMN `{column_name}` {TYPES[column_type]};")
+        sql = f"ALTER TABLE {self.db}.`{table}` ADD COLUMN `{column_name}` {column_type}"
+        await self._execute(sql)
         log_info(f"Added column {column_name} of type {column_type} to {self.db}.{table}")
       except Exception as e:
         log_error(f"Failed to add column {column_name} to {self.db}.{table}", e)
@@ -197,128 +285,9 @@ class Taos(Tsdb):
 
     for column_name in drop_columns:
       try:
-        self.cursor.execute(f"ALTER TABLE {self.db}.`{table}` DROP COLUMN `{column_name}`;")
+        sql = f"ALTER TABLE {self.db}.`{table}` DROP COLUMN `{column_name}`"
+        await self._execute(sql)
         log_info(f"Dropped column {column_name} from {self.db}.{table}")
       except Exception as e:
         log_error(f"Failed to drop column {column_name} from {self.db}.{table}", e)
         raise e
-
-  async def insert(self, c: Ingester, table=""):
-    await self.ensure_connected()
-    table = table or c.name
-    persistent_data = [field for field in c.fields if not field.transient]
-    fields = "`, `".join(field.name for field in persistent_data)
-    values = ", ".join([field.sql_escape() for field in persistent_data])
-    sql = f"INSERT INTO {self.db}.`{table}` (ts, `{fields}`) VALUES ('{c.last_ingested}', {values});"
-    try:
-      self.cursor.execute(sql)
-    except Exception as e:
-      error_message = str(e).lower()
-      if "table does not exist" in error_message:
-        log_warn(f"Table {self.db}.{table} does not exist, creating it now...")
-        await self.create_table(c, name=table)
-        await self.insert(c, table=table)
-      elif "invalid column name" in error_message or "statement too long" in error_message:
-        log_warn(f"Column mismatch detected, altering table {self.db}.{table} to add missing columns...")
-        existing_columns = await self.get_columns(table)
-        existing_column_names = [col[0] for col in existing_columns]
-        add_columns = [(field.name, field.type) for field in persistent_data if field.name not in existing_column_names]
-        await self.alter_table(table, add_columns=add_columns)
-        await self.insert(c, table=table)
-      else:
-        log_error(f"Failed to insert data into {self.db}.{table}", e)
-        raise e
-
-  async def insert_many(self, c: Ingester, values: list[tuple], table=""):
-    table = table or c.name
-    persistent_fields = [field.name for field in c.fields if not field.transient]
-    fields = "`, `".join(persistent_fields)
-    field_count = len(persistent_fields)
-    stmt = self.conn.statement(f"INSER INTO {self.db}.`{table}` VALUES(?" + ",?" * (field_count - 1) + ")")
-    params = new_multi_binds(field_count)
-    types = [PREPARE_STMT[field.type] for field in c.fields]
-    for i in fields:
-      params[i][types[i]]([v[i] for v in values])
-    stmt.bind(params)
-    stmt.execute()
-
-  async def get_columns(self, table: str) -> list[tuple[str, str, str]]:
-    try:
-      self.cursor.execute(f"DESCRIBE {self.db}.`{table}`;")
-      return self.cursor.fetchall()
-    except Exception as e:
-      log_error(f"Failed to get columns from {self.db}.{table}", e)
-      return []
-
-  async def get_cache_columns(self, table: str) -> list[str]:
-    column_descs = await get_or_set_cache(f"{table}:columns",
-      callback=lambda: self.get_columns(table),
-      expiry=300, pickled=True)
-    return [col[0] for col in column_descs]
-
-  async def fetch(
-    self,
-    table: str,
-    from_date: datetime=None,
-    to_date: datetime=None,
-    aggregation_interval: Interval="m5",
-    columns: list[str] = [],
-    use_first: bool=False
-  ) -> tuple[list[str], list[tuple]]:
-
-    to_date = to_date or now()
-    from_date = from_date or ago(from_date=to_date, years=1)
-    agg_bucket = INTERVALS[aggregation_interval]
-
-    if not columns:
-      columns = await self.get_cache_columns(table)
-
-    else:
-      if 'ts' not in columns:
-        columns.insert(0, 'ts')
-
-    if not columns:
-      log_warn(f"No columns found for table {self.db}.{table}")
-      return (columns, [])
-
-    select_cols = [f"{'FIRST' if use_first else 'LAST'}(`{col}`) AS `{col}`" for col in columns]
-    select_cols = ", ".join(filter(None, select_cols))
-    conditions = [
-      f"ts >= '{fmt_date(from_date, keepTz=False)}'" if from_date else None,
-      f"ts <= '{fmt_date(to_date, keepTz=False)}'" if to_date else None,
-    ]
-    where_clause = f"WHERE {' AND '.join(filter(None, conditions))}" if any(conditions) else ""
-    sql = f"SELECT {select_cols} FROM {self.db}.`{table}` {where_clause} INTERVAL({agg_bucket}) SLIDING({agg_bucket}) FILL(prev);" # ORDER BY ts DESC LIMIT 1
-
-    try:
-      self.cursor.execute(sql)
-      return (columns, self.cursor.fetchall())
-    except Exception as e:
-      log_error(f"Failed to fetch data into {self.db}.{table}", e)
-      raise e
-
-  async def fetch_batch(
-    self,
-    tables: list[str],
-    from_date: datetime=None,
-    to_date: datetime=None,
-    aggregation_interval: Interval="m5",
-    columns: list[str] = []
-  ) -> tuple[list[str], list[tuple]]:
-
-    if not columns:
-      columns = await self.get_cache_columns(tables[0])
-    to_date = to_date or now()
-    from_date = from_date or to_date - relativedelta(years=10)
-    return (columns, [result[1] for result in await gather(*[self.fetch(table, from_date, to_date, aggregation_interval, columns) for table in tables])])
-
-  async def fetch_all(self, query: str) -> TaosResult:
-    self.cursor.execute(query)
-    return self.cursor.fetchall()
-
-  async def list_tables(self) -> list[str]:
-    self.cursor.execute("USE {self.db}; SHOW TABLES;") 
-    return [table[0] for table in self.cursor.fetchall()]
-
-  async def commit(self):
-    self.conn.commit()

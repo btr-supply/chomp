@@ -1,8 +1,7 @@
-
 from argparse import _ArgumentGroup, ArgumentParser
-from typing import Any, Literal
+from typing import Any, Optional
 from os import environ as env
-from dotenv import dotenv_values, find_dotenv, load_dotenv
+from dotenv import dotenv_values
 
 from .types import is_bool
 from .format import prettify
@@ -10,14 +9,14 @@ from .format import prettify
 class ArgParser(ArgumentParser):
 
   info: dict[str, tuple] = {}
-  origin: dict[str, Literal['cli','env','default']]
-  parsed: any = None
+  origin: dict[str, str]
+  parsed: Any = None
 
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
     self.info = {}  # Internal map for storing argument info
     self.origin = {}
-    self.parsed: any = None
+    self.parsed: Any = None
 
   def add_argument(self, *args, **kwargs):
     if kwargs.get("group"):
@@ -30,14 +29,14 @@ class ArgParser(ArgumentParser):
     self.info[action.dest] = (action.type, action.default) # arg type and default value
     return action
 
-  def get_info(self, arg_name):
+  def get_info(self, arg_name: str) -> Optional[tuple]:
     return self.info.get(arg_name)
 
-  def parse_args(self, *args, **kwargs) -> any:
+  def parse_args(self, *args, **kwargs) -> Any:
     self.parsed = super().parse_args(*args, **kwargs)
     return self.parsed
 
-  def argument_tuple_to_kwargs(self, arg_tuple: tuple) -> dict:
+  def argument_tuple_to_kwargs(self, arg_tuple: tuple) -> tuple[Any, dict[str, Any]]:
     names_tuple, arg_type, default, action, help_str = arg_tuple
     args = names_tuple
     kwargs = {
@@ -50,7 +49,7 @@ class ArgParser(ArgumentParser):
       kwargs["action"] = action
     return args, kwargs
 
-  def add_arguments(self, arguments: list[tuple], group: _ArgumentGroup=None) -> None:
+  def add_arguments(self, arguments: list[tuple], group: Optional[_ArgumentGroup]=None) -> None:
     for arg_tuple in arguments:
       args, kwargs = self.argument_tuple_to_kwargs(arg_tuple)
       if group:
@@ -65,11 +64,13 @@ class ArgParser(ArgumentParser):
     for group_name, arguments in groups.items():
       self.add_group(group_name, arguments)
 
-  def load_env(self, path: str=None) -> any:
+  def load_env(self, path: Optional[str]=None) -> Any:
     if not self.parsed:
       self.parse_args()
     env_file = dotenv_values(path or self.parsed.env)
-    env.update(env_file)
+    # Filter out None values before updating env
+    filtered_env = {k: v for k, v in env_file.items() if v is not None}
+    env.update(filtered_env)
     for k, v in {**env_file, **vars(self.parsed)}.items():
       k_lower = k.lower()
       arg_type, arg_default = self.get_info(k_lower) or (type(v), None)
@@ -77,10 +78,10 @@ class ArgParser(ArgumentParser):
       dotenv_val = env_file.get(k)
       env_os_val = env.get(k)
       if dotenv_val:
-        selected = arg_type(dotenv_val) if arg_type != bool else dotenv_val.lower() == "true"
+        selected = arg_type(dotenv_val) if not isinstance(arg_type, type) or arg_type is not bool else dotenv_val.lower() == "true"
         self.origin[k_lower] = ".env file"
       elif env_os_val:
-        selected = arg_type(env_os_val) if arg_type != bool else env_os_val.lower() == "true"
+        selected = arg_type(env_os_val) if not isinstance(arg_type, type) or arg_type is not bool else env_os_val.lower() == "true"
         self.origin[k_lower] = "os env"
       else:
         selected = v
@@ -89,7 +90,7 @@ class ArgParser(ArgumentParser):
       setattr(self.parsed, k_lower, selected)
     return self.parsed
 
-  def pretty(self):
+  def pretty(self) -> str:
     rows = [
       [arg, getattr(self.parsed, arg), self.origin.get(arg, "unknown")]
       for arg in vars(self.parsed)

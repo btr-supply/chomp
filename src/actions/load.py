@@ -3,7 +3,7 @@ from typing import Optional
 import numpy as np
 
 from ..model import Ingester
-from ..cache import cache, get_cache
+from ..cache import get_cache
 from .. import state
 
 UTC = timezone.utc
@@ -12,7 +12,7 @@ async def load(c: Ingester, from_date: datetime, to_date: Optional[datetime], ag
   if not to_date:
     to_date = datetime.now(UTC)
   if c.resource_type == "value":
-    return load_one(c)
+    return await load_one(c)
   if not aggregation_interval:
     aggregation_interval = c.interval
   return await state.tsdb.fetch(c.name, from_date, to_date, aggregation_interval)

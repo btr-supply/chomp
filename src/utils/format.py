@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta, timezone
-import math
 from pathlib import Path
 from dateutil import parser
 from hashlib import md5, sha256
@@ -22,8 +21,8 @@ LogLevel = Literal["INFO", "ERROR", "DEBUG", "WARN"]
 def split(resources: str, splitter: str = GENERIC_NO_DOT_SPLITTER) -> list[str]:
   if resources in ["", None]:
     return []
-  resources = [r for r in re.split(splitter, resources) if r not in ["", None]]
-  return resources
+  split_resources = [r for r in re.split(splitter, resources) if r not in ["", None]]
+  return split_resources
 
 def log(level: LogLevel="INFO", *args):
   body = ' '.join(str(arg) for arg in args)
@@ -32,31 +31,49 @@ def log(level: LogLevel="INFO", *args):
   with open(LOGFILE, "a+") as log:
     log.write(msg + "\n")
 
-def log_debug(*args): log("DEBUG", *args); return True
-def log_info(*args): log("INFO", *args); return True
-def log_error(*args): log("ERROR", *args); return False
-def log_warn(*args): log("WARN", *args); return False
+def log_debug(*args):
+  log("DEBUG", *args)
+  return True
+
+def log_info(*args):
+  log("INFO", *args)
+  return True
+
+def log_error(*args):
+  log("ERROR", *args)
+  return False
+
+def log_warn(*args):
+  log("WARN", *args)
+  return False
 
 def fmt_date(date: datetime, iso=True, keepTz=True):
   return date.strftime(DATETIME_FMT_ISO if iso else DATETIME_FMT_TZ if keepTz else DATETIME_FMT)
 
-def parse_date(date: str|int|datetime) -> datetime:
+def parse_date(date: str|int|datetime) -> datetime|None:
   if isinstance(date, datetime):
     return date
-  if date == None:
+  if date is None:
     return None
   try:
-    if is_float(date):
-      return datetime.fromtimestamp(rebase_epoch_to_sec(float(date)), tz=UTC)
-    match date.lower():
-      case "now": return datetime.now(UTC)
-      case "today": return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-      case "yesterday": return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-      case "tomorrow": return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-    parsed = parser.parse(date, fuzzy_with_tokens=True, ignoretz=False)[0]
-    if not parsed.tzinfo:
-      parsed = parsed.replace(tzinfo=UTC)
-    return parsed
+    if isinstance(date, (int, float)) or (isinstance(date, str) and is_float(date)):
+      timestamp = float(date) if isinstance(date, str) else date
+      return datetime.fromtimestamp(rebase_epoch_to_sec(timestamp), tz=UTC)
+    if isinstance(date, str):
+      match date.lower():
+        case "now":
+          return datetime.now(UTC)
+        case "today":
+          return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        case "yesterday":
+          return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        case "tomorrow":
+          return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+      parsed_result = parser.parse(date, fuzzy_with_tokens=True, ignoretz=False)
+      parsed = parsed_result[0] if isinstance(parsed_result, tuple) else parsed_result
+      if not parsed.tzinfo:
+        parsed = parsed.replace(tzinfo=UTC)
+      return parsed
   except Exception as e:
     log_error(f"Failed to parse date: {date}", e)
     return None
@@ -78,7 +95,8 @@ loggingToLevel = {
 
 class LogHandler(logging.Handler):
   def emit(self, record: logging.LogRecord):
-    return log(loggingToLevel[record.levelno], self.format(record))
+    level_name = loggingToLevel[record.levelno]
+    return log(level_name, self.format(record))  # type: ignore
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -160,5 +178,7 @@ def selector_outputs(selector: str) -> list[str]:
     outputs = output_part
   # Parse outputs and return as a flat list
   ret = [out.strip() for out in outputs.split(',') if out.strip()]
-  return ret if not struct else [ret]
+  if struct:
+    return [ret]  # type: ignore
+  return ret
 

@@ -1,6 +1,6 @@
 import orjson
 import httpx
-from typing import Optional
+from typing import Optional, Any
 
 class JsonRpcClient:
   def __init__(self, endpoint: str, headers: Optional[dict[str, str]] = None, timeout: float = 10.0, jsonrpc_version: str = "2.0"):
@@ -22,13 +22,13 @@ class JsonRpcClient:
 
   async def reconnect(self) -> None:
     await self.disconnect()
-    await self.connect()
+    self.connect()
 
   async def ping(self) -> bool:
     try:
       await self.call("getHealth")
       return True
-    except:
+    except Exception:
       return False
 
   async def is_connected(self) -> bool:
@@ -36,7 +36,7 @@ class JsonRpcClient:
       return False
     return await self.ping()
 
-  async def call(self, method: str, params: Optional[any] = None, request_id: int = 1, ensure_connected=True) -> any:
+  async def call(self, method: str, params: Optional[Any] = None, request_id: int = 1, ensure_connected=True) -> Any:
     if ensure_connected and not await self.is_connected():
       self.connect()
       if not await self.is_connected():
@@ -54,7 +54,9 @@ class JsonRpcClient:
     headers = self.headers.copy()
     headers["Content-Length"] = str(len(json_payload))
     try:
-      response = await self._client.post(self.endpoint, data=json_payload, headers=headers)
+      if self._client is None:
+        raise Exception("Client not connected")
+      response = await self._client.post(self.endpoint, content=json_payload, headers=headers)
       response.raise_for_status()  # Raise an error for HTTP-level issues
       data = response.json()
     except Exception as e:

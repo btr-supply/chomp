@@ -3,7 +3,7 @@ import re
 from asyncio import iscoroutinefunction, new_event_loop
 from importlib import metadata, resources
 import tomli
-from typing import Coroutine, Optional
+from typing import Coroutine, Optional, Any
 
 from .format import log_error, log_warn
 
@@ -13,7 +13,7 @@ class PackageMeta:
       dist = metadata.distribution(package)
       self._set_metadata(dist.metadata)
       self.root = resources.files(package)
-    except:
+    except Exception:
       print(f"Package {package} not resolved, searching for pyproject.toml...")
       self._parse_pyproject_toml()
 
@@ -51,7 +51,7 @@ def submit_to_threadpool(executor, fn, *args, **kwargs):
       return executor.submit(run_async_in_thread, fn(*args, **kwargs))
   return executor.submit(fn, *args, **kwargs)
 
-def select_nested(selector: Optional[str], data: dict) -> any:
+def select_nested(selector: Optional[str], data: dict) -> Any:
 
   # invalid selectors
   if selector and not isinstance(selector, str):
@@ -65,14 +65,14 @@ def select_nested(selector: Optional[str], data: dict) -> any:
   if selector.startswith("."):
     selector = selector[1:]
 
-  current = data # base access
+  current: Any = data # base access
   segment_pattern = re.compile(r'([^.\[\]]+)(?:\[(\d+)\])?') # match selector segments eg. ".key" or ".key[index]"
 
   # loop through segments
   for match in segment_pattern.finditer(selector):
     key, index = match.groups()
-    if key.isnumeric() and not index:
-      key, index = None, int(key)
+    if key and key.isnumeric() and not index:
+      key, index = None, key  # Keep as string for now
     # dict access
     if key and isinstance(current, dict):
       current = current.get(key)
@@ -80,10 +80,12 @@ def select_nested(selector: Optional[str], data: dict) -> any:
       return log_warn(f"Key not found in dict: {key}")
     # list access
     if index is not None:
-      index = int(index)
-      if not isinstance(current, list) or index >= len(current):
+      if current is None:
+        return log_error("Cannot access index on None value")
+      index_int = int(index)
+      if not isinstance(current, list) or index_int >= len(current):
         return log_error(f"Index out of range in dict.{key}: {index}")
-      current = current[index]
+      current = current[index_int]
   return current
 
 def merge_replace_empty(dest: dict, src: dict) -> dict:

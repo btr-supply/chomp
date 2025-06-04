@@ -1,16 +1,16 @@
 import re
 from uuid import uuid4
-from typing import Awaitable, Tuple
+from typing import Awaitable, Tuple, Any, TypeVar
 from functools import lru_cache
-from fastapi import HTTPException, Response
+from fastapi import Response
 from fastapi.exceptions import RequestValidationError, ValidationException, HTTPException, WebSocketException
 import orjson
 from ..utils import log_error
-from ..model import DataFormat, T
+from ..model import DataFormat
 
 ORJSON_OPTIONS = (
-  orjson.OPT_SERIALIZE_NUMPY | 
-  orjson.OPT_SERIALIZE_DATACLASS | 
+  orjson.OPT_SERIALIZE_NUMPY |
+  orjson.OPT_SERIALIZE_DATACLASS |
   orjson.OPT_SERIALIZE_UUID |
   orjson.OPT_SERIALIZE_NUMPY
 )
@@ -21,7 +21,7 @@ class ApiResponse(Response):
 
   def __init__(self, content=None, data_format: DataFormat = "json:row", **kwargs) -> None:
 
-    if not data_format.startswith("json"):  
+    if not data_format.startswith("json"):
       # Set appropriate media type based on format
       match data_format:
         case "csv":
@@ -45,10 +45,10 @@ class ApiResponse(Response):
     self.headers["Content-Type"] = f"{self.media_type}; charset=utf-8"
     self.data_format = data_format
 
-  def render(self, content: any) -> bytes:
-    if type(content) == bytes:
+  def render(self, content: Any) -> bytes:
+    if isinstance(content, bytes):
       return content
-    if type(content) == str:
+    if isinstance(content, str):
       return content.encode('utf-8')
     match self.data_format:
       case "json:row" | "json:column":
@@ -58,7 +58,7 @@ class ApiResponse(Response):
       case "parquet" | "arrow" | "feather" | "orc" | "avro":
         return content  # Assuming content is already in Parquet format
       case _:
-        raise ValueError(f"Unsupported response format: {self.format}")
+        raise ValueError(f"Unsupported response format: {self.data_format}")
 
 _ERROR_PATTERNS = [
   (re.compile(r"(?i)not\s*found|missing|404"), 404),
@@ -107,7 +107,9 @@ class ApiError(HTTPException):
   def __str__(self) -> str:
     return self.to_response().body.decode("utf-8")
 
-async def handle_service_error(service_call: Awaitable[Tuple[str, T]]) -> T:
+T = TypeVar('T')
+
+async def handle_service_error(service_call: Awaitable[Tuple[str, Any]]) -> Any:
   err, result = await service_call
   if err:
     raise ApiError(error_msg=err)

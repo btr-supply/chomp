@@ -1,10 +1,10 @@
 from asyncio import Task
 from web3 import Web3
 
-from ..model import Ingester, ResourceField
-from ..utils import log_debug, log_error, log_info, log_warn, split_chain_addr
-from ..actions import store, transform_and_store, scheduler
-from ..cache import ensure_claim_task, get_or_set_cache
+from ..model import Ingester
+from ..utils import log_debug, log_error, log_info, split_chain_addr
+from ..actions import transform_and_store, scheduler
+from ..cache import ensure_claim_task
 from .. import state
 
 def parse_event_signature(signature: str) -> tuple[str, list[str], list[bool]]:
@@ -21,7 +21,7 @@ def decode_log_data(client: Web3, log: dict, topics_first: list[str], indexed: l
     data += t
   data += log['data']
   decoded = client.codec.decode(types=topics_first, data=data)
-  return tuple(reorder_decoded_params(decoded, indexed))
+  return tuple(reorder_decoded_params(list(decoded), indexed))
 
 def reorder_decoded_params(decoded: list, indexed: list[bool]) -> list:
   reordered = []
@@ -62,7 +62,8 @@ async def schedule(c: Ingester) -> list[Task]:
       event_id = f"{field.target}:{field.selector}"
 
       event_hash = Web3.keccak(text=field.selector.replace('indexed ', '')).hex()
-      event_hashes[event_id] = event_hash; event_hashes[event_hash] = event_id
+      event_hashes[event_id] = event_hash
+      event_hashes[event_hash] = event_id
 
       for i, is_indexed in enumerate(indexed):
         index_types.append(param_types[i]) if is_indexed else non_index_types.append(param_types[i])
@@ -82,12 +83,18 @@ async def schedule(c: Ingester) -> list[Task]:
 
     filter_by_contract[contract]["topics"] = list(set(filter_by_contract[contract]["topics"])) # remove duplicates
 
-  def poll_events(contract: str):
+  async def poll_events(contract: str):
     chain_id, addr = split_chain_addr(contract)
-    client = state.web3.client(chain_id)
+    client = await state.web3.client(chain_id)
     f = filter_by_contract[contract]
     retry_count = 0
     output = None
+
+    # Type check: only EVM clients have eth attribute
+    if not hasattr(client, 'eth'):
+      log_error(f"Non-EVM client for chain {chain_id}, cannot poll events")
+      return
+
     current_block = client.eth.block_number
     last_block_by_contract.setdefault(contract, current_block)
     prev_block = last_block_by_contract[contract]
@@ -101,16 +108,18 @@ async def schedule(c: Ingester) -> list[Task]:
         log_info(f"No new blocks for {contract}, skipping event polling for {c.interval}")
         break
       try:
-        logs = client.eth.get_logs(f)
-        for l in logs:
-          event_id = l["topics"][0]
-          decoded_event = decode_log_data(client, l, index_first_types_by_event[event_id], indexed)
-          if state.args.verbose:
-            log_debug(f"Block: {l['blockNumber']} | Event: {decoded_event}")
+        logs = client.eth.get_logs(f)  # type: ignore
+        for log_entry in logs:
+          event_id = event_hashes[log_entry["topics"][0].hex()]  # type: ignore
+          # Ensure we have a Web3 client for decoding
+          if hasattr(client, 'eth'):
+            decoded_event = decode_log_data(client, log_entry, index_first_types_by_event[event_id], indexed)  # type: ignore
+            if state.args.verbose:
+              log_debug(f"Block: {log_entry['blockNumber']} | Event: {decoded_event}")
         start_block = end_block + 1
-      except Exception as l:
-        log_error(f"Failed to poll event logs for contract {c}: {l}")
-        client = state.web3.client(chain_id, roll=True)
+      except Exception as error:
+        log_error(f"Failed to poll event logs for contract {c}: {error}")
+        client = await state.web3.client(chain_id, roll=True)
         retry_count += 1
 
   async def ingest(c: Ingester):
@@ -134,4 +143,5 @@ async def schedule(c: Ingester) -> list[Task]:
     await transform_and_store(c)
 
   # globally register/schedule the ingester
-  return [await scheduler.add_ingester(c, fn=ingest, start=False)]
+  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+  return [task] if task is not None else []

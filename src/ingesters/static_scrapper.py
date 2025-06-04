@@ -4,7 +4,7 @@ from hashlib import md5
 from lxml import html
 from bs4 import BeautifulSoup
 
-from ..utils import floor_utc, interval_to_seconds, log_error
+from ..utils import interval_to_seconds, log_error
 from ..model import Ingester
 from ..cache import ensure_claim_task, get_or_set_cache
 from .. import state
@@ -45,26 +45,23 @@ async def schedule(c: Ingester) -> list[Task]:
       page = await get_or_set_cache(h, lambda: get_page(url), expiry_sec)
       if not page:
         log_error(f"Failed to fetch page {url}, skipping...")
+        return ""
 
       # cache page both for CSS selection and XPath
       pages[h] = page
       trees[h] = html.fromstring(page)
       soups[h] = BeautifulSoup(page, 'html.parser')
+      return page
 
     urls = set([f.target for f in c.fields if f.target])
     fetch_tasks = []
 
     for url in urls:
-      if not url in hashes:
+      if url not in hashes:
         hashes[url] = md5(f"{url}:{c.interval}".encode()).hexdigest()
       fetch_tasks.append(fetch_hashed(url))
 
     await gather(*fetch_tasks)
-
-    for field in [f for f in c.fields if f.target]:
-      h = hashes[field.target]
-      if not field.selector:
-        return pages[h]
 
     def select_field(field):
       h = hashes[field.target]
@@ -75,16 +72,16 @@ async def schedule(c: Ingester) -> list[Task]:
       if is_xpath(field.selector):
         els = trees[h].xpath(field.selector)
         if not els or len(els) == 0:
-          log_error(f"Failed to find element {field.selector} in page {url}, skipping...")
-          return
+          log_error(f"Failed to find element {field.selector} in page {field.target}, skipping...")
+          return ""
         # merge all text content from matching selectors
         return "\n".join([e.text_content().lstrip() for e in els])
       else:
         # css selector
         els = soups[h].select(field.selector)
         if not els or len(els) == 0:
-          log_error(f"Failed to find element {field.selector} in page {url}, skipping...")
-          return
+          log_error(f"Failed to find element {field.selector} in page {field.target}, skipping...")
+          return ""
         # merge all text content from matching selectors
         return "\n".join([e.get_text().lstrip() for e in els])
 
@@ -101,4 +98,5 @@ async def schedule(c: Ingester) -> list[Task]:
     trees.clear()
 
   # globally register/schedule the ingester
-  return [await scheduler.add_ingester(c, fn=ingest, start=False)]
+  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+  return [task] if task is not None else []

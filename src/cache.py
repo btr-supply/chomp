@@ -1,13 +1,14 @@
 # TODO: batch state.redis tx commit whenever possible (cf. limiter.py)
 from asyncio import gather, iscoroutinefunction, iscoroutine, sleep
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from time import monotonic
 from os import environ as env
 import pickle
 from random import random
 import time
+from typing import Callable, Optional, Any, Union
 
-from .model import Ingester, ResourceField, Config, Scope
+from .model import Ingester, Scope
 from .utils import log_debug, log_info, log_error, log_warn, YEAR_SECONDS, now, merge_replace_empty
 from . import state
 
@@ -24,7 +25,7 @@ async def ping() -> bool:
 def claim_key(c: Ingester) -> str:
   return f"{NS}:claims:{c.id}"
 
-async def claim_task(c: Ingester, until=0, key="") -> bool:
+async def claim_task(c: Ingester, until: int = 0, key: str = "") -> bool:
   if state.args.verbose:
     log_debug(f"Claiming task {c.name}.{c.interval}")
   # if c.last_ingested and c.last_ingested > (datetime.now(UTC) - interval_to_delta(c.interval)):
@@ -34,28 +35,31 @@ async def claim_task(c: Ingester, until=0, key="") -> bool:
     return False
   return await state.redis.setex(key, round(until or (c.interval_sec + 8)), state.args.proc_id) # 8 sec overtime buffer for long running tasks
 
-async def ensure_claim_task(c: Ingester, until=0) -> bool:
+async def ensure_claim_task(c: Ingester, until: int = 0) -> bool:
   if not await claim_task(c, until):
     raise ValueError(f"Failed to claim task {c.name}.{c.interval}): probably claimed by another worker")
   if c.probablity < 1.0 and random() > c.probablity:
     raise ValueError(f"Task {c.name}.{c.interval} was probabilistically skipped")
+  return True
 
-async def is_task_claimed(c: Ingester, exclude_self=False, key="") -> bool:
+async def is_task_claimed(c: Ingester, exclude_self: bool = False, key: str = "") -> bool:
   key = key or claim_key(c)
   val = await state.redis.get(key)
   # unclaimed and uncontested
   return bool(val) and (not exclude_self or val.decode() != state.args.proc_id)
 
-async def free_task(c: Ingester, key="") -> bool:
+async def free_task(c: Ingester, key: str = "") -> bool:
   key = key or claim_key(c)
-  if not (await is_task_claimed(key)) or await state.redis.get(key) != state.args.proc_id:
+  if not (await is_task_claimed(c, key=key)) or await state.redis.get(key) != state.args.proc_id.encode():
     return False
   return await state.redis.delete(key)
 
 def ingester_registry_lock_key() -> str:
   return f"{NS}:locks:ingesters"
 
-async def acquire_registry_lock(lock_key=ingester_registry_lock_key(), timeout_ms=5000) -> bool:
+async def acquire_registry_lock(lock_key: str = "", timeout_ms: int = 5000) -> bool:
+  if not lock_key:
+    lock_key = ingester_registry_lock_key()
   return await state.redis.set(
     lock_key,
     state.args.proc_id,
@@ -63,7 +67,7 @@ async def acquire_registry_lock(lock_key=ingester_registry_lock_key(), timeout_m
     nx=True # upsert
   )
 
-async def wait_acquire_registry_lock(timeout_ms=10_000) -> bool:
+async def wait_acquire_registry_lock(timeout_ms: int = 10_000) -> bool:
   lock_key = ingester_registry_lock_key()
   timeout = monotonic() + (timeout_ms / 1000)
   while not await acquire_registry_lock(lock_key, timeout_ms):
@@ -81,33 +85,59 @@ async def release_registry_lock() -> bool:
 def cache_key(name: str) -> str:
   return f"{NS}:cache:{name}"
 
-async def cache(name: str, value: str|int|float|bool, expiry=YEAR_SECONDS, raw_key=False, encoding="", pickled=False) -> bool:
-  return await state.redis.setex(name if raw_key else cache_key(name),
-    round(expiry),
-    pickle.dumps(value) if pickled else \
-      value.encode(encoding) if encoding else \
-        value)
+async def cache(name: str, value: Any, expiry: int = YEAR_SECONDS, raw_key: bool = False, encoding: str = "", pickled: bool = False) -> bool:
+  processed_value: Union[str, bytes]
+  if pickled:
+    processed_value = pickle.dumps(value)
+  elif encoding and isinstance(value, str):
+    processed_value = value.encode(encoding)
+  elif not isinstance(value, (str, bytes)):
+    processed_value = str(value)
+  else:
+    processed_value = value  # type: ignore
 
-async def cache_batch(data: dict, expiry=YEAR_SECONDS, pickled=False, encoding="", raw_key: bool = False) -> None:
+  return await state.redis.setex(
+    name if raw_key else cache_key(name),
+    round(expiry),
+    processed_value
+  )
+
+async def cache_batch(data: dict, expiry: int = YEAR_SECONDS, pickled: bool = False, encoding: str = "", raw_key: bool = False) -> None:
   expiry = round(expiry)
-  keys_values = {
-    name if raw_key else cache_key(name): pickle.dumps(value) if pickled else value.encode(encoding) if encoding else value
-    for name, value in data.items()
-  }
+  keys_values: dict[str, Union[str, bytes]] = {}
+  for name, value in data.items():
+    key = name if raw_key else cache_key(name)
+    processed_value: Union[str, bytes]
+    if pickled:
+      processed_value = pickle.dumps(value)
+    elif encoding and isinstance(value, str):
+      processed_value = value.encode(encoding)
+    elif not isinstance(value, (str, bytes)):
+      processed_value = str(value)
+    else:
+      processed_value = value  # type: ignore
+    keys_values[key] = processed_value
+
   async with state.redis.pipeline() as pipe:
     for key, value in keys_values.items():
-      pipe.psetex(key, expiry, value)
+      pipe.setex(key, expiry, value)
     await pipe.execute()
 
-async def get_cache(name: str, pickled=False, encoding="", raw_key=False):
+async def get_cache(name: str, pickled: bool = False, encoding: str = "", raw_key: bool = False) -> Any:
   r = await state.redis.get(name if raw_key else cache_key(name))
-  if r in (None, b"", ""): return None
-  return pickle.loads(r) if pickled else r.decode(encoding) if encoding else r
+  if r in (None, b"", ""):
+    return None
+  if pickled:
+    return pickle.loads(r)  # type: ignore
+  elif encoding and isinstance(r, bytes):
+    return r.decode(encoding)
+  else:
+    return r
 
-async def get_cache_batch(names: list[str], pickled=False, encoding="", raw_key=False):
+async def get_cache_batch(names: list[str], pickled: bool = False, encoding: str = "", raw_key: bool = False) -> dict[str, Any]:
   keys = [(name if raw_key else cache_key(name)) for name in names]
   r = await state.redis.mget(*keys)
-  res = {}
+  res: dict[str, Any] = {}
   for name, value in zip(names, r):
     if value is None:
       res[name] = None
@@ -115,11 +145,11 @@ async def get_cache_batch(names: list[str], pickled=False, encoding="", raw_key=
       res[name] = pickle.loads(value) if pickled else value.decode(encoding) if encoding else value
   return res
 
-async def get_or_set_cache(name: str, callback: callable, expiry=YEAR_SECONDS, pickled=False, encoding=""):
+async def get_or_set_cache(name: str, callback: Callable, expiry: int = YEAR_SECONDS, pickled: bool = False, encoding: str = "") -> Any:
   key = cache_key(name)
-  value = await get_cache(key)
+  value = await get_cache(key, raw_key=True)
   if value:
-    return pickle.loads(value) if pickled else value.decode(encoding) if encoding else value
+    return pickle.loads(value) if pickled else value.decode(encoding) if encoding and isinstance(value, bytes) else value
   else:
     value = callback() if not iscoroutinefunction(callback) else await callback()
     if iscoroutine(value):
@@ -127,19 +157,19 @@ async def get_or_set_cache(name: str, callback: callable, expiry=YEAR_SECONDS, p
     if value in (None, b"", ""):
       log_warn(f"Cache could not be rehydrated for key: {key}")
       return None
-    await cache(key, value, expiry=expiry, pickled=pickled)
-  return value
+    await cache(key, value, expiry=expiry, pickled=pickled, raw_key=True)
+    return value
 
 # pubsub
-async def pub(topics: list[str], msg: str):
+async def pub(topics: Union[list[str], str], msg: str) -> list[Any]:
   tasks = []
-  if type(topics) == str:
+  if isinstance(topics, str):
     topics = [topics]
   for topic in topics:
     tasks.append(state.redis.publish(f"{NS}:{topic}", msg))
   return await gather(*tasks)
 
-async def sub(topics: list[str], handler: callable):
+async def sub(topics: list[str], handler: Callable) -> None:
   # Use the centralized pubsub
   await state.redis.pubsub.subscribe(*topics)
   async for msg in state.redis.pubsub.listen():
@@ -147,7 +177,7 @@ async def sub(topics: list[str], handler: callable):
       handler(msg["data"])
 
 # ingester registry
-def ingester_registry_key(name: str="all") -> str:
+def ingester_registry_key(name: str = "all") -> str:
   return f"{NS}:ingesters:{name}"
 
 async def register_ingester(ingester: Ingester, scope: Scope = Scope.ALL) -> bool:
@@ -165,6 +195,7 @@ async def register_ingester(ingester: Ingester, scope: Scope = Scope.ALL) -> boo
       cache(global_key, registry, pickled=True, raw_key=True),
       cache(specific_key, as_dict, pickled=True, raw_key=True),
       return_exceptions=True)
+    return True
   finally:
     await release_registry_lock()
 
@@ -173,40 +204,41 @@ async def unregister_ingester(ingester: Ingester) -> bool:
   global_key = ingester_registry_key()
   specific_key = ingester_registry_key(ingester.name)
   registry = await get_cache(global_key, pickled=True, raw_key=True) or {}
-  registry.pop(ingester.name)
-  return await gather(
+  registry.pop(ingester.name, None)
+  results = await gather(
     cache(global_key, registry, pickled=True, raw_key=True),
     state.redis.delete(specific_key),
     return_exceptions=True)
+  return all(not isinstance(r, Exception) for r in results)
 
-async def get_registered_ingester(name: str) -> dict:
+async def get_registered_ingester(name: str) -> dict[str, Any]:
   return await get_cache(ingester_registry_key(name), pickled=True, raw_key=True) or {}
 
-async def get_registered_ingesters() -> dict:
+async def get_registered_ingesters() -> dict[str, Any]:
   return await get_registered_ingester("all")
 
-_ingesters_cache: dict[str, tuple[datetime, 'Ingester']] = {}
+_ingesters_cache: dict[str, tuple[datetime, Ingester]] = {}
 CONFIG_CACHE_TTL = 300 # 5min ttl
 
-async def load_ingester_config(name: str) -> Ingester:
+async def load_ingester_config(name: str) -> Optional[Ingester]:
   key = ingester_registry_key(name)
   global _ingesters_cache
   n = now()
-  if key in _ingesters_cache and _ingesters_cache[key][0] < n:
+  if key in _ingesters_cache and _ingesters_cache[key][0] > n:
     return _ingesters_cache[key][1]
   config = await get_cache(key, pickled=True, raw_key=True)
   if not config:
     log_error(f"No ingester config found for {name}")
     return None
-  config = Ingester.from_dict(config)
-  _ingesters_cache[key] = (n + timedelta(seconds=CONFIG_CACHE_TTL), config)
-  return config
+  ingester_obj = Ingester.from_config(config)
+  _ingesters_cache[key] = (n + timedelta(seconds=CONFIG_CACHE_TTL), ingester_obj)
+  return ingester_obj
 
 async def inherit_fields(ingester: Ingester) -> Ingester:
   # dependency ingester names from field selectors
   dep_names = ingester.dependencies()
   log_info(f"{ingester.name} inheriting fields from {dep_names}...")
-  dep_configs = {}
+  dep_configs: dict[str, Optional[Ingester]] = {}
   # cached configs for each
   for dep_name in dep_names:
     dep_configs[dep_name] = await load_ingester_config(dep_name)
@@ -221,14 +253,18 @@ async def inherit_fields(ingester: Ingester) -> Ingester:
     if len(split) > 1 and split[0] in dep_names:
       dep_name, field_name = split
       # match field in dependency config
-      if not dep_configs[dep_name]:
+      dep_config = dep_configs[dep_name]
+      if not dep_config:
         log_warn(f"Missing dependency config: {dep_name}, make sure that the ingester running")
         continue
-      dep_field = dep_configs[dep_name].field_by_name().get(field_name)
+      dep_field = dep_config.field_by_name().get(field_name)
       if dep_field:
         # merge field attributes from dependency config
         # source (dep_field) takes precedence over destination (field)
-        field = merge_replace_empty(field.__dict__, dep_field.__dict__)
+        merged_dict = merge_replace_empty(field.__dict__, dep_field.__dict__)
+        # Update the field object with merged attributes
+        for key, value in merged_dict.items():
+          setattr(field, key, value)
   return ingester
 
 # status
@@ -239,42 +275,44 @@ async def get_cached_resources() -> list[str]:
   r = await state.redis.keys(cache_key("*"))
   return [key.decode().split(":")[-1] for key in r]
 
-async def get_topics(with_subs=False) -> list[str]:
+async def get_topics(with_subs: bool = False) -> Union[list[str], dict[str, Any]]:
   r = await state.redis.pubsub_channels(f"{NS}:*")
   chans = [chan.decode().split(":")[-1] for chan in r]
   if with_subs: # this is redundant since chans only contains subscribed topics
     async with state.redis.pipeline(transaction=True) as pipe:
       for chan in chans:
         pipe.pubsub_numsub(chan)
-      return {chan: await pipe.execute() for chan in chans}
+      results = await pipe.execute()
+      return {chan: results[i] for i, chan in enumerate(chans)}
   return chans
 
-async def hydrate_resources_status():
-
+async def hydrate_resources_status() -> dict[str, Any]:
   registered = await get_registered_ingesters()
   cached = set(await get_cached_resources())
-  streamed = set(await get_topics(with_subs=False))
+  streamed_result = await get_topics(with_subs=False)
+  streamed = set(streamed_result if isinstance(streamed_result, list) else list(streamed_result.keys()))
   for r in registered.keys():
     registered[r]["cached"] = r in cached
     registered[r]["streamed"] = r in streamed
   return registered
 
-async def get_resource_status():
+async def get_resource_status() -> dict[str, Any]:
   return await get_or_set_cache(get_status_key("resources"),
     callback=lambda: hydrate_resources_status(),
     expiry=60, pickled=True)
 
 # Manual cache for topics with a TTL
-_topics_cached_at = 0
-_topics_cache = None
+_topics_cached_at: float = 0
+_topics_cache: Optional[list[str]] = None
 
 async def get_cached_topics(ttl: int = 900) -> list[str]:
   global _topics_cached_at, _topics_cache
   current_time = time.time()
   if current_time > _topics_cached_at + ttl:
-    _topics_cache = await get_topics()
+    topics_result = await get_topics()
+    _topics_cache = topics_result if isinstance(topics_result, list) else list(topics_result.keys())
     _topics_cached_at = current_time
-  return _topics_cache
+  return _topics_cache or []
 
 async def topic_exist(topic: str, ttl: int = 900) -> bool:
   topics = await get_cached_topics(ttl)

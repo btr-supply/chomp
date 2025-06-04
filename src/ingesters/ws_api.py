@@ -4,18 +4,19 @@ from asyncio import gather, Task, sleep
 import orjson
 import websockets
 import websockets.protocol
+from typing import Callable, Dict, Any
 
-from ..model import Ingester, ResourceField, Tsdb
+from ..model import Ingester, ResourceField
 from ..utils import log_debug, log_error, log_warn, select_nested, floor_utc, safe_eval
 from ..actions import store, transform, scheduler
-from ..cache import claim_task, ensure_claim_task
+from ..cache import ensure_claim_task
 from .. import state
 from ..server.responses import ORJSON_OPTIONS
 
 async def schedule(c: Ingester) -> list[Task]:
 
   epochs_by_route: dict[str, deque[dict]] = {}
-  default_handler_by_route: dict[str, callable] = {}
+  default_handler_by_route: dict[str, Callable[..., Any]] = {}
   batched_fields_by_route: dict[str, list[ResourceField]] = {}
   subscriptions = set()
 
@@ -41,17 +42,19 @@ async def schedule(c: Ingester) -> list[Task]:
               break
             res = await ws.recv() # poll for data
             res = orjson.loads(res)
-            handled = {}
+            handled: Dict[str, Dict[str, bool]] = {}
             for field in batched_fields_by_route[route_hash]:
-              if field.handler and not handled.setdefault(field.handler, {}).get(field.selector, False):
-                try:
-                  data = select_nested(field.selector, res)
-                  if data:
-                    field.handler(data, epochs_by_route[url]) # map data with handler
-                    pass
-                except Exception as e:
-                  log_warn(f"Failed to handle websocket data from {url} for {c.name}.{field.name}: {e}")
-                handled.setdefault(field.handler, {})[field.selector] = True
+              if field.handler and callable(field.handler):
+                handler_name = getattr(field.handler, '__name__', str(field.handler))
+                if not handled.setdefault(handler_name, {}).get(field.selector, False):
+                  try:
+                    data = select_nested(field.selector, res)
+                    if data:
+                      field.handler(data, epochs_by_route[url]) # map data with handler
+                      pass
+                  except Exception as e:
+                    log_warn(f"Failed to handle websocket data from {url} for {c.name}.{field.name}: {e}")
+                  handled.setdefault(handler_name, {})[field.selector] = True
 
             # if state.args.verbose: # <-- way too verbose
             #   log_debug(f"Handled websocket data {data} from {url} for {c.name}, route state:\n{epochs_by_route[url][0]}")
@@ -92,7 +95,7 @@ async def schedule(c: Ingester) -> list[Task]:
       for field in batch:
         # reduce the state to a collectable value
         try:
-          field.value = field.reducer(epochs) if field.reducer else None
+          field.value = field.reducer(epochs) if field.reducer and callable(field.reducer) else None
         except Exception as e:
           log_warn(f"Failed to reduce {c.name}.{field.name} for {url}, epoch attributes maye be missing: {e}")
           continue
@@ -102,7 +105,7 @@ async def schedule(c: Ingester) -> list[Task]:
           log_debug(f"Reduced {c.name}.{field.name} -> {field.value}")
         # apply transformers to the field value if any
         if field.transformers:
-          field.value = transform(c, field)
+          field.value = await transform(c, field)
         if state.args.verbose:
           log_debug(f"Transformed {c.name}.{field.name} -> {field.value}")
       if state.args.verbose:
@@ -125,22 +128,22 @@ async def schedule(c: Ingester) -> list[Task]:
     if url:
       # make sure that a field handler is defined if a target url is set
       if field.selector and not field.handler:
-        if not route_hash in default_handler_by_route:
+        if route_hash not in default_handler_by_route:
           raise ValueError(f"Missing handler for field {c.name}.{field.name} (selector {field.selector})")
         log_warn(f"Using {field.target} default field handler for {c.name}...")
         field.handler = default_handler_by_route[route_hash]
         batched_fields_by_route[route_hash].append(field)
         continue
       if field.handler and isinstance(field.handler, str):
-        field.handler = safe_eval(field.handler, callable_check=True) # compile the handler
+        field.handler = safe_eval(field.handler, callable_check=True)  # type: ignore
       if field.reducer and isinstance(field.reducer, str):
         try:
-          field.reducer = safe_eval(field.reducer, callable_check=True) # compile the reducer
-        except Exception as e:
+          field.reducer = safe_eval(field.reducer, callable_check=True)  # type: ignore
+        except Exception:
           continue
       # batch the fields by route given we only need to subscribe once per route
       batched_fields_by_route.setdefault(route_hash, []).append(field)
-      if not route_hash in default_handler_by_route and field.handler:
+      if route_hash not in default_handler_by_route and field.handler and callable(field.handler):
         default_handler_by_route[route_hash] = field.handler
       # TODO: make sure that double subscriptions are not made possible since field.name is not part of the hash anymore
       if field.target_id in subscriptions:
@@ -152,4 +155,5 @@ async def schedule(c: Ingester) -> list[Task]:
   gather(*tasks)
 
   # register/schedule the ingester
-  return [await scheduler.add_ingester(c, fn=ingest, start=False)]
+  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+  return [task] if task is not None else []

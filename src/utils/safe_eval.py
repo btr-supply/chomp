@@ -4,6 +4,7 @@ import operator
 import re  # for math operators
 import numpy
 import polars
+from typing import Any
 
 SAFE_TYPES = (int, float, str, list, set, map, tuple, dict, type)  # Basic types
 SAFE_OPERATORS = [getattr(operator, op) for op in dir(operator) if not op.startswith('_') and op != 'not_']  # Math operators
@@ -23,7 +24,7 @@ BASE_NAMESPACE.update({name: getattr(module, func) for module in [numpy, polars]
 BASE_NAMESPACE.update({t.__name__: t for t in SAFE_TYPES})
 # BASE_NAMESPACE.update({'numpy': numpy, 'pd': polars}) # Add numpy and pd modules themselves
 SAFE_EXPR_CACHE = set()
-EVAL_CACHE = {}
+EVAL_CACHE: dict[str, Any] = {}
 
 def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
   """
@@ -60,7 +61,7 @@ def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
       raise ValueError("Expression must be callable")
 
     # basic AST safety analysis
-    if not expr in SAFE_EXPR_CACHE and not is_ast_safe(tree):
+    if expr not in SAFE_EXPR_CACHE and not is_ast_safe(tree):
       raise ValueError("Invalid or unsafe expression")
 
     # compile the AST and evaluate

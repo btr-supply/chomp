@@ -1,17 +1,21 @@
 from asyncio import gather, get_running_loop, Task
 from aiocron import Cron, crontab
+from typing import Callable, Optional, Dict, Any
 
-from ..cache import claim_task, ensure_claim_task, is_task_claimed, inherit_fields, register_ingester
+from ..cache import ensure_claim_task, inherit_fields, register_ingester
 from ..utils import log_debug, log_info, log_warn, log_error, submit_to_threadpool,\
   Interval, interval_to_cron
 from ..model import Ingester, IngesterType
 from .. import state
 
+# Type annotation for function with attributes
+scheduler_registry: Dict[IngesterType, Callable] = {}
 
-def get_scheduler(ingestor_type: IngesterType) -> callable:
-  if not hasattr(get_scheduler, "scheduler_by_type"): # singleton
+def get_scheduler(ingestor_type: IngesterType) -> Optional[Callable]:
+  global scheduler_registry
+  if not scheduler_registry: # singleton
     from .. import ingesters
-    get_scheduler.scheduler_by_type = {
+    scheduler_registry = {
       "scrapper": ingesters.static_scrapper.schedule,
       "http_api": ingesters.http_api.schedule,
       "ws_api": ingesters.ws_api.schedule,
@@ -26,7 +30,7 @@ def get_scheduler(ingestor_type: IngesterType) -> callable:
       # "ton_logger": ingesters.ton_logger.schedule,
       "processor": ingesters.processor.schedule,
     }
-  return get_scheduler.scheduler_by_type.get(ingestor_type, None)
+  return scheduler_registry.get(ingestor_type, None)
 
 async def monitor_cron(cron: Cron):
   while True:
@@ -42,22 +46,22 @@ async def check_ingesters_integrity(ingesters: list[Ingester]):
 
 class Scheduler:
   def __init__(self):
-    self.cron_by_job_id = {}
-    self.cron_by_interval = {}
-    self.jobs_by_interval = {}
-    self.job_by_id = {}
+    self.cron_by_job_id: Dict[str, Cron] = {}
+    self.cron_by_interval: Dict[Interval, Cron] = {}
+    self.jobs_by_interval: Dict[Interval, list[str]] = {}
+    self.job_by_id: Dict[str, tuple[Callable, tuple]] = {}
 
-  def run_threaded(self, job_ids: list[str]):
+  def run_threaded(self, job_ids: list[str]) -> list[Any]:
     jobs = [self.job_by_id[j] for j in job_ids]
     ft = [submit_to_threadpool(state.thread_pool, job[0], *job[1]) for job in jobs]
     return [f.result() for f in ft] # wait for all results
 
-  async def run_async(self, job_ids: list[str]):
+  async def run_async(self, job_ids: list[str]) -> list[Any]:
     jobs = [self.job_by_id[j] for j in job_ids]
     ft = [job[0](*job[1]) for job in jobs]
     return await gather(*ft)
 
-  async def add(self, id: str, fn: callable, args: list, interval: Interval="h1", start=True, threaded=False) -> Task:
+  async def add(self, id: str, fn: Callable, args: tuple, interval: Interval="h1", start=True, threaded=False) -> Optional[Task]:
     if id in self.job_by_id:
       raise ValueError(f"Duplicate job id: {id}")
     self.job_by_id[id] = (fn, args)
@@ -68,7 +72,7 @@ class Scheduler:
     if not start:
       return None
 
-    return start(self, interval, threaded)
+    return await self.start_interval(interval, threaded)
 
   async def start_interval(self, interval: Interval, threaded=False) -> Task:
     if interval in self.cron_by_interval:
@@ -91,26 +95,27 @@ class Scheduler:
   async def start(self, threaded=False) -> list[Task]:
     intervals, jobs = self.jobs_by_interval.keys(), self.job_by_id.keys()
     log_info(f"Starting {len(jobs)} jobs ({len(intervals)} crons: {list(intervals)})")
-    return [self.start_interval(i, threaded) for i in self.jobs_by_interval.keys()]
+    return await gather(*[self.start_interval(i, threaded) for i in self.jobs_by_interval.keys()])
 
-  async def add_ingester(self, c: Ingester, fn: callable, start=True, threaded=False) -> Task:
+  async def add_ingester(self, c: Ingester, fn: Callable, start=True, threaded=False) -> Optional[Task]:
     return await self.add(id=c.id, fn=fn, args=(c,), interval=c.interval, start=start, threaded=threaded)
 
-  async def add_ingesters(self, ingesters: list[Ingester], fn: callable, start=True, threaded=False) -> list[Task]:
+  async def add_ingesters(self, ingesters: list[Ingester], fn: Callable, start=True, threaded=False) -> Optional[list[Task]]:
     intervals = set([c.interval for c in ingesters])
-    added = await gather(*[self.add_ingester(c, fn, start=False, threaded=threaded) for c in ingesters])
+    await gather(*[self.add_ingester(c, fn, start=False, threaded=threaded) for c in ingesters])
     if start:
-      await gather(*[self.start_interval(i, threaded) for i in intervals])
+      return await gather(*[self.start_interval(i, threaded) for i in intervals])
+    return None
 
 async def schedule(c: Ingester) -> list[Task]:
   if c.ingester_type == "processor":
     c = await inherit_fields(c)
   await register_ingester(c)
-  schedule = get_scheduler(c.ingester_type)
-  if not schedule:
+  schedule_fn = get_scheduler(c.ingester_type)
+  if not schedule_fn:
     raise ValueError(f"Unsupported ingester type: {c.type}")
   await ensure_claim_task(c)
-  tasks = await schedule(c)
+  tasks = await schedule_fn(c)
   log_debug(f"Scheduled for ingestion: {c.name}.{c.interval} [{', '.join([field.name for field in c.fields])}]")
   return tasks
 

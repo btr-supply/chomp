@@ -1,6 +1,6 @@
+import math
 import numpy as np
 import polars as pl
-import math
 
 def round_sigfig(value: float, precision: int = 6) -> float:
   """
@@ -44,13 +44,12 @@ def normalize(s, min_val=0, max_val=1, scale='linear', standardize=False):
   Returns:
   - Normalized data as ndarray.
   """
-  
   # Convert input to numpy array if needed (from polars or polars Series)
   if hasattr(s, 'to_numpy'):
     s = s.to_numpy()
   else:
     s = np.array(s)
-  
+
   # Handle NaN and infinite values
   s = np.nan_to_num(s, nan=0.0, posinf=0.0, neginf=0.0)
 

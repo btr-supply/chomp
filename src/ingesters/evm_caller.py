@@ -1,15 +1,15 @@
-from asyncio import Task, create_task, wait_for, TimeoutError
+from asyncio import Task, TimeoutError
 from multicall import Call, Multicall, constants as mc_const
-from web3 import Web3 as EvmClient
 import asyncio
+from typing import Any, Dict, Optional
 
-from ..model import Ingester, ResourceField
+from ..model import Ingester
 from ..utils import log_debug, log_error, log_warn
-from ..actions import store, transform_and_store, scheduler
-from ..cache import ensure_claim_task, get_or_set_cache
+from ..actions import transform_and_store, scheduler
+from ..cache import ensure_claim_task
 from .. import state
 
-def parse_generic(data: any) -> any:
+def parse_generic(data: Any) -> Any:
   return data
 
 async def schedule(c: Ingester) -> list[Task]:
@@ -28,7 +28,7 @@ async def schedule(c: Ingester) -> list[Task]:
 
       chain_id, addr = field.chain_addr()
       if chain_id not in calls_by_chain:
-        client: EvmClient = await state.web3.client(chain_id, roll=True)  # Changed to async call
+        client = await state.web3.client(chain_id, roll=True)  # Keep as Any type for now
         calls_by_chain[chain_id] = Multicall(calls=[], _w3=client, require_success=True, gas_limit=mc_const.GAS_LIMIT)
       returns = [[f"{field.name}:{i}", parse_generic] for i in range(len(field.selector_outputs))]
       calls_by_chain[chain_id].calls.append(Call(target=addr, function=[field.selector, *field.params], returns=returns))
@@ -45,7 +45,7 @@ async def schedule(c: Ingester) -> list[Task]:
         except Exception as e:
           log_error(f"Multicall for chain {m.w3.eth.chain_id} failed: {e}, switching RPC...")
           prev_rpc = m.w3.provider.endpoint_uri
-          m.w3 = await state.web3.client(m.w3.eth.chain_id, roll=True)  # Changed to async call
+          m.w3 = await state.web3.client(m.w3.eth.chain_id, roll=True)  # Keep as Any type for now
           new_rpc = m.w3.provider.endpoint_uri
           if state.args.verbose:
             log_debug(f"Switched RPC {prev_rpc} -> {new_rpc}")
@@ -80,9 +80,9 @@ async def schedule(c: Ingester) -> list[Task]:
               log_warn(f"Batch {i//max_batch_size + 1} failed ({str(e)}), trying smaller batches...")
               sub_results = await handle_failed_batch(batch_multi, retry_batch_size)
               all_results.update(sub_results)
-          
+
           return all_results
-        
+
         # For calls within max_batch_size, try full multicall first
         output = await execute_multicall(m)
         if output:
@@ -141,14 +141,19 @@ async def schedule(c: Ingester) -> list[Task]:
 
     try:
       outputs = await asyncio.gather(*futures, return_exceptions=True)
-      
+
       for output in outputs:
         if isinstance(output, Exception):
           log_error(f"Error in multicall execution: {output}")
           continue
 
+        # Skip if output is not a dict-like object
+        if not isinstance(output, dict):
+          log_error(f"Unexpected output type: {type(output)}")
+          continue
+
         # Group values by field name (stripping array index)
-        field_values = {}
+        field_values: Dict[str, Any] = {}
         for key, value in output.items():
           field_name = key.split(':')[0]
           index = int(key.split(':')[1])
@@ -162,11 +167,11 @@ async def schedule(c: Ingester) -> list[Task]:
 
         # Update fields with grouped values
         for name, values in field_values.items():
-          field = field_by_name.get(name)
-          if field:
+          target_field: Optional[Any] = field_by_name.get(name)
+          if target_field is not None:
             # If only one value, store directly rather than as list
-            field.value = values[0] if len(values) == 1 else values
-            c.data_by_field[field.name] = field.value
+            target_field.value = values[0] if len(values) == 1 else values
+            c.data_by_field[target_field.name] = target_field.value
 
     except Exception as e:
       log_error(f"Error processing parallel multicalls: {e}")
@@ -177,4 +182,5 @@ async def schedule(c: Ingester) -> list[Task]:
     await transform_and_store(c)
 
   # globally register/schedule the ingester
-  return [await scheduler.add_ingester(c, fn=ingest, start=False)]
+  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+  return [task] if task is not None else []

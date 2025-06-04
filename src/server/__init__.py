@@ -7,7 +7,7 @@ import uvicorn
 from .. import state
 from .responses import ROUTER_ERROR_HANDLERS, ApiResponse
 from .routers import forwarder, retriever
-from .middlewares import Limiter, VersionResolver
+from .middlewares import Limiter
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,11 +44,11 @@ async def start():
   # app.add_middleware(VersionResolver) # redirects /v{latest} to /
   app.add_middleware(Limiter, **DEFAULT_LIMITS) # rate limiting (req count/bandwidth/points)
   app.add_middleware(GZipMiddleware, minimum_size=1e3) # only compress responses > 1kb
-  app.add_middleware(CORSMiddleware, 
+  app.add_middleware(CORSMiddleware,
     allow_origins=[],
     allow_origin_regex=r"^https?://localhost(:[0-9]+)?$|^https?://127\.0\.0\.1(:[0-9]+)?$|^wss?://localhost(:[0-9]+)?$|^wss?://127\.0\.0\.1(:[0-9]+)?$|^https?://[^/]+\.btr\.markets$|^wss?://[^/]+\.btr\.markets$|^https?://[^/]+\.btr\.supply$|^wss?://[^/]+\.btr\.supply$|^https?://[^/]+\.astrolab\.fi$|^wss?://[^/]+\.astrolab\.fi$",
-    allow_credentials=True, 
-    allow_methods=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"]
   )
 

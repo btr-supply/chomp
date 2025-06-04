@@ -1,22 +1,22 @@
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
+from typing import Optional
 
 from ...model import DataFormat, Interval, to_scope_mask
 from ...server.middlewares.limiter import limit
 from ...server.responses import ApiResponse
 from ...server.responses import handle_service_error as hse
 from ...services import converter, gatekeeeper, limiter, loader,\
-  price_analysis, status_checker
-from ...utils import fit_date_params, load_template, now, split
-from .. import state
+  ts_analysis, status_checker
+from ...utils import fit_date_params, load_template, split
 
 router = APIRouter()
-  
+
 _index_html = load_template("index.html")
 _docs_html = load_template("docs.html")
 
 @router.get("/")
-@router.get("/index") 
+@router.get("/index")
 async def get_root():
   return HTMLResponse(_index_html)
 
@@ -24,7 +24,7 @@ async def get_root():
 async def get_docs():
   return HTMLResponse(_docs_html)
 
-@router.get("/ping") 
+@router.get("/ping")
 @limit(points=1)
 async def ping(
   req: Request,
@@ -40,17 +40,17 @@ async def ping(
 @router.get("/schema/{resources:path}")
 @limit(points=1)
 async def get_schema(
-    req: Request, 
-    resources: str = None, 
-    fields: str = None, 
+    req: Request,
+    resources: Optional[str] = None,
+    fields: Optional[str] = None,
     scope: str = "default"
 ):
   parsed_resources = await hse(loader.parse_resources(resources)) if resources else None
-  fields = split(fields) if fields else None
+  parsed_fields = split(fields) if fields else None
   resources = await hse(
     loader.get_schema(
         parsed_resources,
-        fields,
+        parsed_fields,
         to_scope_mask({scope: True})
     )
   )
@@ -61,15 +61,15 @@ async def get_schema(
 @router.get("/last")
 @limit(points=1)
 async def get_last(
-  req: Request, 
+  req: Request,
   resources: str,
-  quote: str = None, 
+  quote: Optional[str] = None,
   precision: int = 6
 ):
   parsed_resources = await hse(loader.parse_resources(resources))
   last_values = await hse(loader.get_last_values(parsed_resources, quote, precision))
   return ApiResponse(
-    last_values if len(parsed_resources) > 1 
+    last_values if len(parsed_resources) > 1
     else last_values[parsed_resources[0]]
   )
 
@@ -77,15 +77,15 @@ async def get_last(
 @router.get("/history")
 @limit(points=10)
 async def get_history(
-  req: Request, 
-  resources: str, 
-  fields: str = "", 
-  from_date=None, 
-  to_date=None, 
-  interval: Interval = None,
-  target_epochs: int = None,
-  precision: int = 6, 
-  quote: str = None,
+  req: Request,
+  resources: str,
+  fields: str = "",
+  from_date=None,
+  to_date=None,
+  interval: Optional[Interval] = None,
+  target_epochs: Optional[int] = None,
+  precision: int = 6,
+  quote: Optional[str] = None,
   format: DataFormat = "json:row" # json default to json:row
 ):
   parsed_resources, parsed_fields = await hse(
@@ -111,8 +111,8 @@ async def get_history(
 async def get_convert(
   req: Request,
   pair: str,
-  base_amount: float = None,
-  quote_amount: float = None,
+  base_amount: Optional[float] = None,
+  quote_amount: Optional[float] = None,
   precision: int = 6
 ):
   result = await hse(
@@ -163,7 +163,7 @@ async def get_analysis(
   to_date=None,
   periods: str = "20",
   precision: int = 6,
-  quote: str = None,
+  quote: Optional[str] = None,
   format: DataFormat = "json:row"
 ):
   parsed_resources, parsed_fields = await hse(
@@ -175,14 +175,14 @@ async def get_analysis(
   if parsed_resources is None:
     return ApiResponse(parsed_resources, data_format=format)
   parsed_periods = [int(p) for p in split(periods)]
-  
+
   return ApiResponse(await hse(
-    price_analysis.get_all(
+    ts_analysis.get_all(
       parsed_resources,
       parsed_fields,
       from_date,
       to_date,
-      None,  # interval will be calculated automatically
+      "m5",  # default interval
       parsed_periods,
       quote,
       precision,
@@ -202,20 +202,20 @@ async def get_volatility(
   to_date=None,
   periods: str = "20",
   precision: int = 6,
-  quote: str = None,
+  quote: Optional[str] = None,
   format: DataFormat = "json:row"
 ):
   parsed_resources = await hse(loader.parse_resources(resources))
   parsed_fields = await hse(loader.parse_fields(parsed_resources[0], fields))
   parsed_periods = [int(p) for p in split(periods)]
-  
+
   return ApiResponse(await hse(
-    price_analysis.get_volatility(
+    ts_analysis.get_volatility(
       parsed_resources,
       parsed_fields,
       from_date,
       to_date,
-      None,  # interval will be calculated automatically
+      "m5",  # default interval
       parsed_periods,
       quote,
       precision,
@@ -234,20 +234,20 @@ async def get_trend(
   to_date=None,
   periods: str = "20",
   precision: int = 6,
-  quote: str = None,
+  quote: Optional[str] = None,
   format: DataFormat = "json:row"
 ):
   parsed_resources = await hse(loader.parse_resources(resources))
   parsed_fields = await hse(loader.parse_fields(parsed_resources[0], fields))
   parsed_periods = [int(p) for p in split(periods)]
-  
+
   return ApiResponse(await hse(
-    price_analysis.get_trend(
+    ts_analysis.get_trend(
       parsed_resources,
       parsed_fields,
       from_date,
       to_date,
-      None,  # interval will be calculated automatically
+      "m5",  # default interval
       parsed_periods,
       quote,
       precision,
@@ -266,20 +266,20 @@ async def get_momentum(
   to_date=None,
   periods: str = "20",
   precision: int = 6,
-  quote: str = None,
+  quote: Optional[str] = None,
   format: DataFormat = "json:row"
 ):
   parsed_resources = await hse(loader.parse_resources(resources))
   parsed_fields = await hse(loader.parse_fields(parsed_resources[0], fields))
   parsed_periods = [int(p) for p in split(periods)]
-  
+
   return ApiResponse(await hse(
-    price_analysis.get_momentum(
+    ts_analysis.get_momentum(
       parsed_resources,
       parsed_fields,
       from_date,
       to_date,
-      None,  # interval will be calculated automatically
+      "m5",  # default interval
       parsed_periods,
       quote,
       precision,
@@ -292,18 +292,21 @@ async def get_momentum(
 @limit(points=1)
 async def get_oprange(
   req: Request,
-  resources: str, 
+  resources: str,
   fields: str = "",
   from_date=None,
   to_date=None,
   precision: int = 6,
-  quote: str = None,
+  quote: Optional[str] = None,
   format: DataFormat = "json:row"
 ):
+  parsed_resources = await hse(loader.parse_resources(resources))
+  parsed_fields = await hse(loader.parse_fields(parsed_resources[0], fields))
+
   return ApiResponse(await hse(
-    price_analysis.get_oprange(
-      resources,
-      fields,
+    ts_analysis.get_oprange(
+      parsed_resources,
+      parsed_fields,
       from_date,
       to_date,
       precision,

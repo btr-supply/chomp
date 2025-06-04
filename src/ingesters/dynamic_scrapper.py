@@ -1,13 +1,11 @@
 from asyncio import sleep, gather
 import random
-from typing import Any, Callable, List, Literal, Tuple
-from playwright.async_api import async_playwright, ViewportSize, Page, Locator, Browser, Playwright, BrowserType, ElementHandle
-from hashlib import md5
+from typing import Literal, Any
+from playwright.async_api import async_playwright, ViewportSize, Page, Locator, Browser, Playwright, ElementHandle
 
-from ..utils import interval_to_seconds, log_error
+from ..utils import log_error
 from ..model import Ingester, ResourceField
-from ..cache import ensure_claim_task, get_or_set_cache
-from .. import state
+from ..cache import ensure_claim_task
 from ..actions import transform_and_store, scheduler
 
 SelectorType = Literal[
@@ -31,12 +29,13 @@ class Puppet:
   selector: Locator
   elements: list[ElementHandle] = []
 
-  def __init__(self, field: str, ingester: Ingester, play: Playwright):
+  def __init__(self, field: ResourceField, ingester: Ingester, play: Playwright):
     Puppet.by_id[field.id] = self
     self.field = field
     self.ingester = ingester
     self.play = play
 
+  @staticmethod
   async def from_field(field: ResourceField, ingester: Ingester, play: Playwright) -> "Puppet":
     p = Puppet(field, ingester, play)
     for a in field.actions:
@@ -56,15 +55,16 @@ class Puppet:
     target = target or self.field.target or "about:blank"
     if not self.pages:
       await self.ensure_browser()
-      pages = [await self.browser.new_page(target)]
-    return pages[-1]
+      page = await self.browser.new_page()
+      await page.goto(target)
+      self.pages = [page]
+    return self.pages[-1]
 
   async def ensure_selected(self, selector="html", by="auto") -> Locator:
-    if not self.selected:
+    if not hasattr(self, 'selector') or not self.selector:
       await self.ensure_page()
       self.selector = await self.select(selector=selector, by=by)
-      # self.elements = await self.selector.element_handles() #.query_all()
-    return self.selected[-1]
+    return self.selector
 
   async def ensure_elements(self) -> list[ElementHandle]:
     if not self.elements:
@@ -72,37 +72,57 @@ class Puppet:
       self.elements = await self.selector.element_handles()
     return self.elements
 
-  async def ensure_contents(self) -> list[any]:
+  async def ensure_contents(self) -> list[Any]:
     if not self.elements:
       await self.ensure_elements()
-    return gather(*[e.text_content() for e in self.elements])
+    return await gather(*[e.text_content() for e in self.elements])
 
   # TODO: add support for regex
-  async def select(self, selector: str="html", by: SelectorType|any="auto") -> Locator:
-    l: Locator
+  async def select(self, selector: str="html", by: SelectorType|Any="auto") -> Locator:
+    page = await self.ensure_page()
+    locator: Locator
     match by:
-      case "auto": l = self.ensure_page().locator(selector)
-      case "css": l = self.ensure_page().locator(f"css={selector}")
-      case "xpath": l = self.ensure_page().locator(f"xpath={selector}")
-      case "id": l = self.ensure_page().locator(f"id={selector}")
-      case "name": l = self.ensure_page().locator(f"name={selector}")
-      case "class": l = self.ensure_page().locator(f"class={selector}")
-      case "text" | "value": l = self.ensure_page().get_by_text(selector)
-      case "strict_text" | "strict_value": l = self.ensure_page().locator(f"text={selector}")
-      case "role": l = self.ensure_page().get_by_role(selector)
-      case "strict_role": l = self.ensure_page().locator(f"[role={selector}]")
-      case "alt_text": l = self.ensure_page().get_by_alt_text(selector)
-      case "strict_alt_text": l = self.ensure_page().locator(f"[alt={selector}]")
-      case "title": l = self.ensure_page().get_by_title(selector)
-      case "strict_title": l = self.ensure_page().locator(f"title={selector}")
-      case "label": l = self.ensure_page().get_by_label(selector)
-      case "strict_label": l = self.ensure_page().locator(f"label={selector}")
-      case "placeholder": l = self.ensure_page().get_by_placeholder(selector)
-      case "strict_placeholder": l = self.ensure_page().locator(f"placeholder={selector}")
+      case "auto":
+        locator = page.locator(selector)
+      case "css":
+        locator = page.locator(f"css={selector}")
+      case "xpath":
+        locator = page.locator(f"xpath={selector}")
+      case "id":
+        locator = page.locator(f"id={selector}")
+      case "name":
+        locator = page.locator(f"name={selector}")
+      case "class":
+        locator = page.locator(f"class={selector}")
+      case "text" | "value":
+        locator = page.get_by_text(selector)
+      case "strict_text" | "strict_value":
+        locator = page.locator(f"text={selector}")
+      case "role":
+        # Cast to AriaRole literal type for type safety
+        locator = page.get_by_role(selector)  # type: ignore
+      case "strict_role":
+        locator = page.locator(f"[role={selector}]")
+      case "alt_text":
+        locator = page.get_by_alt_text(selector)
+      case "strict_alt_text":
+        locator = page.locator(f"[alt={selector}]")
+      case "title":
+        locator = page.get_by_title(selector)
+      case "strict_title":
+        locator = page.locator(f"title={selector}")
+      case "label":
+        locator = page.get_by_label(selector)
+      case "strict_label":
+        locator = page.locator(f"label={selector}")
+      case "placeholder":
+        locator = page.get_by_placeholder(selector)
+      case "strict_placeholder":
+        locator = page.locator(f"placeholder={selector}")
       case _:
-        l = self.ensure_page().locator(f"[{by}={selector}]" if "data-" in by else f"[data-{by}={selector}]")
-    self.selector = l
-    return l
+        locator = page.locator(f"[{by}={selector}]" if "data-" in by else f"[data-{by}={selector}]")
+    self.selector = locator
+    return locator
 
   async def act(self, action: str, *args):
     """Executes a state-changing action on the browser and returns the modified browser."""
@@ -126,25 +146,35 @@ class Puppet:
             case "close":
               await self.pages.pop().close() if self.pages else None
             case "set_viewport_size":
-              await self.ensure_page().set_viewport_size(ViewportSize(width=int(args[0]), height=int(args[1])))
+              page = await self.ensure_page()
+              await page.set_viewport_size(ViewportSize(width=int(args[0]), height=int(args[1])))
             case "goto":
-              await self.ensure_page().goto(args[0])
+              page = await self.ensure_page()
+              await page.goto(args[0])
             case "go_back":
-              await self.ensure_page().go_back()
+              page = await self.ensure_page()
+              await page.go_back()
             case "go_forward":
-              await self.ensure_page().go_forward()
+              page = await self.ensure_page()
+              await page.go_forward()
             case "reload":
-              await self.ensure_page().reload()
+              page = await self.ensure_page()
+              await page.reload()
             case "add_init_script":
-              await self.ensure_page().add_init_script(args[0])
+              page = await self.ensure_page()
+              await page.add_init_script(args[0])
             case "evaluate":
-              await self.ensure_page().evaluate(args[0])
+              page = await self.ensure_page()
+              await page.evaluate(args[0])
             case "evaluate_handle":
-              await self.ensure_page().evaluate_handle(args[0])
+              page = await self.ensure_page()
+              await page.evaluate_handle(args[0])
             case "select":
-              await self.ensure_page().select(args[0], args[1])
+              page = await self.ensure_page()
+              await page.select_option(args[0], args[1])
             case "click":
-              await self.ensure_selected(args[0] if args else None).click()
+              locator = await self.ensure_selected(args[0] if args else None)
+              await locator.click()
             case "wait":
               await sleep(int(args[0]))
             case "wait_random":
@@ -155,42 +185,62 @@ class Puppet:
         case "element":
           match command:
             case "click":
-              await self.ensure_elements()[0].click()
+              elements = await self.ensure_elements()
+              await elements[0].click()
             case "hover":
-              await self.ensure_elements()[0].hover()
+              elements = await self.ensure_elements()
+              await elements[0].hover()
             case "focus":
-              await self.ensure_elements()[0].focus()
+              elements = await self.ensure_elements()
+              await elements[0].focus()
             case "press":
-              await self.ensure_elements()[0].press(args[0])
+              elements = await self.ensure_elements()
+              await elements[0].press(args[0])
             case "select_option":
-              await self.ensure_elements()[0].select_option(args[0]) # by value or label
+              elements = await self.ensure_elements()
+              await elements[0].select_option(args[0]) # by value or label
             case "drag_and_drop":
-              await self.ensure_elements()[0].drag_and_drop(args[0], args[1]) # src selector, dst selector
+              elements = await self.ensure_elements()
+              # ElementHandle doesn't have drag_and_drop, use locator instead
+              locator = await self.ensure_selected()
+              await locator.drag_to(page.locator(args[0]))
             case "upload":
-              await self.ensure_elements()[0].set_input_files(args[0])
+              elements = await self.ensure_elements()
+              await elements[0].set_input_files(args[0])
             case "fill":
-              await self.ensure_elements()[0].fill(args[0])
+              elements = await self.ensure_elements()
+              await elements[0].fill(args[0])
             case "type":
-              await self.ensure_elements()[0].press_sequentially(args[0]) # can add delay
+              elements = await self.ensure_elements()
+              # ElementHandle doesn't have press_sequentially, use locator instead
+              locator = await self.ensure_selected()
+              await locator.press_sequentially(args[0])
             case "check":
-              await self.ensure_elements()[0].check()
+              elements = await self.ensure_elements()
+              await elements[0].check()
             case "uncheck":
-              await self.ensure_elements()[0].uncheck()
+              elements = await self.ensure_elements()
+              await elements[0].uncheck()
             case "scroll_to":
-              await self.ensure_elements()[0].scroll_to(args[0], args[1])
+              elements = await self.ensure_elements()
+              await elements[0].scroll_into_view_if_needed()
             case _:
               log_error(f"Unknown element action: {action}")
 
         case "keyboard":
           match command:
             case "press":
-              await self.ensure_page().keyboard.press(args[0])
+              page = await self.ensure_page()
+              await page.keyboard.press(args[0])
             case "down":
-              await self.ensure_page().keyboard.down(args[0])
+              page = await self.ensure_page()
+              await page.keyboard.down(args[0])
             case "up":
-              await self.ensure_page().keyboard.up(args[0])
+              page = await self.ensure_page()
+              await page.keyboard.up(args[0])
             case "type":
-              await self.ensure_page().keyboard.type(args[0]) # can add delay
+              page = await self.ensure_page()
+              await page.keyboard.type(args[0]) # can add delay
             case _:
               log_error(f"Unknown keyboard action: {action}")
 
@@ -213,8 +263,8 @@ async def update_page(page: Page, action: str, selector: str, *args) -> Page:
         await page.press(selector, args[0])
       case "select_option":
         await page.select_option(selector, args[0])
-      case "wait_for_navigation":
-        await page.wait_for_navigation()
+      case "wait_for_load_state":
+        await page.wait_for_load_state()
       case "wait_for_event":
         await page.wait_for_event(selector)
       case "drag_and_drop":
@@ -228,7 +278,7 @@ async def update_page(page: Page, action: str, selector: str, *args) -> Page:
       case "wait_for_timeout":
         await page.wait_for_timeout(int(selector))
       case "scroll_to":  # Added scroll action
-        await page.evaluate(f'window.scrollTo({selector}, {args[0]})')  
+        await page.evaluate(f'window.scrollTo({selector}, {args[0]})')
       case "check":  # Added check action
         await page.check(selector)
       case "uncheck": # Added uncheck action
@@ -243,8 +293,8 @@ async def update_page(page: Page, action: str, selector: str, *args) -> Page:
 
       case "set_viewport_size":
         await page.set_viewport_size(ViewportSize(width=int(selector), height=int(args[0])))
-      case "emulate":
-        await page.emulate(args[0])  # Assuming args[0] contains emulation options (e.g., device name)
+      case "emulate_media":
+        await page.emulate_media(media=args[0])  # Fixed: use emulate_media instead of emulate
       case _:
         log_error(f"Unknown state action: {action}")
   except Exception as e:
@@ -267,9 +317,11 @@ async def schedule(c: Ingester) -> list:
         if Puppet.by_id.get(hashes[f.name]) is None]
       puppets = await gather(*futures) # run all puppets concurrently
       for i, result in enumerate(puppets):
-        c.fields[i].value = await puppets[i].ensure_contents()[0]
+        contents = await puppets[i].ensure_contents()
+        c.fields[i].value = contents[0] if contents else None
 
       await gather(*[p.kill() for p in puppets])
       await transform_and_store(c)
 
-  return [await scheduler.add_ingester(c, fn=ingest, start=False)]
+  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+  return [task] if task is not None else []

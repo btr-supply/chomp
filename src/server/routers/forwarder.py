@@ -1,19 +1,14 @@
 import orjson
-from asyncio import sleep, gather, Task
-import uvicorn
 from fastapi import APIRouter
 from fastapi.websockets import WebSocketState, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import asynccontextmanager
-from fastapi.responses import HTMLResponse
 from typing import Literal
 import os
 import fnmatch
-import asyncio
 import pickle
 
 from ...utils import log_debug, log_error, log_info
 from ... import state
-from ...cache import topic_exist, topics_exist
 from ..responses import ORJSON_OPTIONS
 
 WsAction = Literal["subscribe", "unsubscribe", "ping", "keepalive"]

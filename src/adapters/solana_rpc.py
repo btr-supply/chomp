@@ -1,5 +1,5 @@
 from .jsonrpc import JsonRpcClient
-from typing import Optional, Union
+from typing import Optional
 
 class SolanaRpcClient(JsonRpcClient):
   async def get_health(self) -> str:

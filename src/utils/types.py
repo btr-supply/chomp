@@ -1,4 +1,6 @@
-def is_bool(value: any) -> bool:
+from typing import Any
+
+def is_bool(value: Any) -> bool:
   return str(value).lower() in ["true", "false", "yes", "no", "1", "0"]
 
 def to_bool(value: str) -> bool:
@@ -11,11 +13,19 @@ def is_float(s: str) -> bool:
   except ValueError:
     return False
 
-def is_primitive(value: any) -> bool:
+def is_primitive(value: Any) -> bool:
   # return isinstance(value, (int, float, str, bool, type(None)))
   return not isinstance(value, (dict, list, tuple, set, frozenset))
 
-def is_iterable(value: any) -> bool:
+def is_epoch(value: Any) -> bool:
+  """Check if a value represents an epoch timestamp in seconds or milliseconds."""
+  try:
+    val = float(value) if isinstance(value, str) else value
+    return 0 <= val <= 32503680000
+  except ValueError:
+    return False
+
+def is_iterable(value: Any) -> bool:
   return isinstance(value, (list, tuple, set, frozenset))
 
 def flatten(items, depth=1, current_depth=0, flatten_maps=False):

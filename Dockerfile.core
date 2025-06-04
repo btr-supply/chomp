@@ -48,9 +48,9 @@ WORKDIR /app
 # Copy only necessary files for dependency installation
 COPY pyproject.toml ./pyproject.toml
 
-# Install dependencies using uv
+# Install dependencies using uv (with default extras for full ingestion capability)
 RUN uv venv --python ${PYTHON_VERSION}
-RUN uv pip install -r pyproject.toml
+RUN uv pip install -e ".[default]"
 
 ENV PYTHONPATH=$PYTHONPATH:/app
 

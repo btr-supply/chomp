@@ -27,14 +27,19 @@ class SuiRpcClient(JsonRpcClient):
 
   async def get_version(self) -> str:
     data = await self.get_protocol_config()
-    return data.get("protocolVersion")
+    if isinstance(data, dict):
+      return data.get("protocolVersion", "")
+    return ""
 
   async def get_chain_id(self) -> str:
     return await self.call("sui_getChainIdentifier", ensure_connected=False)
 
-  async def is_connected(self) -> str:
-    chain_id = await self.get_chain_id() # hex string
-    return chain_id is not None
+  async def is_connected(self) -> bool:
+    try:
+      chain_id = await self.get_chain_id() # hex string
+      return chain_id is not None
+    except Exception:
+      return False
 
   async def get_object(
     self,
@@ -44,7 +49,9 @@ class SuiRpcClient(JsonRpcClient):
     params = self.construct_query_params(**kwargs)
     params.insert(0, object_id)
     result = await self.call("sui_getObject", params)
-    return result.get("data") if result else None
+    if result and isinstance(result, dict):
+      return result.get("data")
+    return None
 
   async def get_multi_objects(
     self,
@@ -58,8 +65,10 @@ class SuiRpcClient(JsonRpcClient):
 
   async def get_object_fields(self, object_id: str) -> dict:
     o = await self.get_object(object_id)
-    return o.get("content", {}).get("fields", {})
+    if o and isinstance(o, dict):
+      return o.get("content", {}).get("fields", {})
+    return {}
 
   async def get_multi_object_fields(self, object_ids: list[str]) -> list[dict]:
     objects = await self.get_multi_objects(object_ids)
-    return [obj.get("content", {}).get("fields", {}) for obj in objects]
+    return [obj.get("content", {}).get("fields", {}) if obj else {} for obj in objects]

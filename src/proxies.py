@@ -1,17 +1,18 @@
-from asyncio import gather
 from concurrent.futures import ThreadPoolExecutor
 import yamale
 from os import cpu_count, environ as env, path
 from redis.asyncio import Redis, ConnectionPool
-from httpx import AsyncClient, Request, Response
+from httpx import Request, Response
+from httpx import AsyncBaseTransport
 from web3 import Web3 as EvmClient
+from typing import Any
 
 from .model import Config, Tsdb
-from .utils import log_error, log_info, flatten, is_iterable, PackageMeta
+from .utils import log_error, log_info, is_iterable, PackageMeta
 from .adapters.sui_rpc import SuiRpcClient
 from .adapters.solana_rpc import SolanaRpcClient
 
-args: any
+args: Any
 thread_pool: ThreadPoolExecutor
 meta = PackageMeta(package="chomp")
 
@@ -28,10 +29,8 @@ class ThreadPoolProxy:
   def __getattr__(self, name):
     return getattr(self.thread_pool, name)
 
-from httpx._transports.default import AsyncBaseTransport
-
 class NoCLTransport(AsyncBaseTransport):
-  def handle_request(self, request: Request) -> Response:
+  async def handle_async_request(self, request: Request) -> Response:
     # rm Content-Length header if present
     for h in ["content-length", "Content-Length", "Content-length"]:
       if h in request.headers:
@@ -43,7 +42,7 @@ class NoCLTransport(AsyncBaseTransport):
       content=request.content,
       stream=request.stream,
     )
-    return super().handle_request(request)
+    return await super().handle_async_request(request)
 
 class Web3Proxy:
 
@@ -64,17 +63,17 @@ class Web3Proxy:
       self._rpcs_by_chain[chain_id] = rpc_env.split(",")
     return self._rpcs_by_chain[chain_id]
 
-  async def client(self, chain_id: str | int, roll=True) -> EvmClient | SolanaRpcClient:
+  async def client(self, chain_id: str | int, roll=True) -> EvmClient | SolanaRpcClient | SuiRpcClient:
     is_evm = isinstance(chain_id, int)
 
-    async def connect(rpc_url: str) -> EvmClient | SolanaRpcClient:
+    async def connect(rpc_url: str) -> EvmClient | SolanaRpcClient | SuiRpcClient | None:
       try:
         if is_evm:
-          c = EvmClient(EvmClient.HTTPProvider(rpc_url))
+          c = EvmClient(EvmClient.HTTPProvider(rpc_url))  # type: ignore
         elif chain_id == "sui":
-          c = SuiRpcClient(rpc_url)
+          c = SuiRpcClient(rpc_url)  # type: ignore
         elif chain_id == "solana":
-          c = SolanaRpcClient(rpc_url)
+          c = SolanaRpcClient(rpc_url)  # type: ignore
         else:
           raise ValueError(f"Unsupported chain: {chain_id}")
         connected = await is_connected(c)
@@ -82,18 +81,21 @@ class Web3Proxy:
           log_info(f"Connected to chain {chain_id} using rpc {rpc_url}")
           return c
         else:
-          raise Exception(f"Connection failure")
+          raise Exception("Connection failure")
       except Exception as e:
         log_error(f"Could not connect to chain {chain_id} using rpc {rpc_url}: {e}")
         return None
 
-    async def is_connected(c: EvmClient | SolanaRpcClient):
+    async def is_connected(c: EvmClient | SolanaRpcClient | SuiRpcClient) -> bool:
       try:
         if is_evm:
-          return c.is_connected()
+          result = c.is_connected()  # type: ignore
+          if hasattr(result, '__await__'):
+            return await result  # type: ignore
+          return bool(result)
         else: # any of non evm rpc clients
-          return await c.is_connected()
-      except:
+          return await c.is_connected()  # type: ignore
+      except Exception:
         return False
 
     # Initialize chain clients list if not exists
@@ -108,7 +110,7 @@ class Web3Proxy:
         self._next_index_by_chain[chain_id] = index
 
     clients = self._by_chain[chain_id]
-    
+
     if index < len(clients):
       c = clients[index]
       if await is_connected(c):
@@ -122,11 +124,11 @@ class Web3Proxy:
     # Try each RPC until we get a valid connection
     max_attempts = len(rpcs)
     attempts = 0
-    
+
     while attempts < max_attempts:
       current_index = self._next_index_by_chain[chain_id]
       rpc_url = f"https://{rpcs[current_index]}"
-      
+
       c = await connect(rpc_url)
       if c is not None:
         # Store the successful connection
@@ -216,12 +218,12 @@ class ConfigProxy:
 
     def is_config_file_path(value: str) -> bool:
       return isinstance(value, str) and value.lower().endswith(('.yml', '.yaml', '.json'))
-    
+
     def load_and_merge_yaml(yaml_path: str) -> dict:
       config_data = yamale.make_data(yaml_path)[0]
       config_data = config_data[0] if is_iterable(config_data) else config_data
       parent_dir = path.dirname(yaml_path)
-      
+
       def resolve_nested_config(value):
         if is_config_file_path(value):
           nested_path = path.join(parent_dir, value)
@@ -260,7 +262,7 @@ class ConfigProxy:
 
     try:
       # validate the merged config
-      validation = yamale.validate(schema, [(config_data, abs_path)])
+      yamale.validate(schema, [(config_data, abs_path)])
     except yamale.YamaleError as e:
       msg = ""
       for result in e.results:
@@ -269,7 +271,7 @@ class ConfigProxy:
           msg += f" - {error}\n"
       log_error(msg)
       exit(1)
-      
+
     return Config.from_dict(config_data)
 
   @property

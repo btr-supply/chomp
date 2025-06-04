@@ -1,11 +1,12 @@
 from fastapi import FastAPI
 from multicall import constants as mc_const
+from typing import Any
 
-from .utils import log_info, PackageMeta
+from .utils import PackageMeta
 from .proxies import ThreadPoolProxy, Web3Proxy, TsdbProxy, RedisProxy, ConfigProxy, meta
 import asyncio
 
-args: any
+args: Any
 server: FastAPI
 tsdb: TsdbProxy
 redis: RedisProxy
@@ -17,7 +18,7 @@ meta: PackageMeta = meta
 # Global pubsub task management
 redis_task = None
 
-def init(args_: any):
+def init(args_: Any):
   global args, meta, thread_pool, rpcs, web3, tsdb, redis, config
   args = args_
   config = ConfigProxy(args)
@@ -29,15 +30,15 @@ def init(args_: any):
 async def start_redis_listener(pattern: str):
   """Start the Redis pubsub listener task if not already running"""
   global redis_task
-  
+
   if redis_task is None:
     from .server.routers.forwarder import handle_redis_messages
     redis_task = asyncio.create_task(handle_redis_messages())
-    
+
 async def stop_redis_listener():
   """Stop the Redis pubsub listener task"""
   global redis_task
-  
+
   if redis_task is not None:
     redis_task.cancel()
     try:

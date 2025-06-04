@@ -1,17 +1,17 @@
 from datetime import datetime, timedelta
-from fastapi import Request
-from ..utils import now, fmt_date, secs_to_ceil_date, UTC
+from typing import Optional
+from ..utils import fmt_date, secs_to_ceil_date, UTC
 from .. import state
 from ..cache import NS as REDIS_NS
 from ..model import ServiceResponse
 
-async def check_limits(user: str, path: str = None) -> ServiceResponse[dict]:
+async def check_limits(user: str, path: Optional[str] = None) -> ServiceResponse[dict]:
   """Check if user has exceeded any limits"""
-  limiter = state.server.limiter
-  
+  limiter = getattr(state.server, 'limiter')
+
   if user in limiter.blacklist:
-    return "User is blacklisted", None
-    
+    return "User is blacklisted", {}
+
   if user in limiter.whitelist:
     return "", {"whitelisted": True}
 
@@ -36,14 +36,14 @@ async def check_limits(user: str, path: str = None) -> ServiceResponse[dict]:
   # Check if limits have been breached
   for (name, (max_val, _)), current in zip(limiter.limits.items(), current_counts):
     if max_val > 0 and current >= max_val:
-      return f"Rate limit exceeded ({name}: {current}/{max_val})", None
+      return f"Rate limit exceeded ({name}: {current}/{max_val})", {}
 
   return "", {"current_counts": current_counts, "ppr": ppr}
 
 async def get_user_limits(user: str) -> ServiceResponse[dict]:
   """Get current limits for a user"""
-  limiter = state.server.limiter
-  
+  limiter = getattr(state.server, 'limiter')
+
   # Get all limit keys for user
   user_limit_keys = [f"{REDIS_NS}:limiter:{name}:{user}" for name in limiter.limits]
   theoretical_ttl_by_interval = {i: secs_to_ceil_date(secs=i) for i in [60, 3600, 86400]}
@@ -74,12 +74,12 @@ async def get_user_limits(user: str) -> ServiceResponse[dict]:
 
     return "", limits
   except Exception as e:
-    return f"Error fetching limits: {str(e)}", None
+    return f"Error fetching limits: {str(e)}", {}
 
 async def increment_counters(user: str, response_size: int, ppr: int) -> ServiceResponse[dict]:
   """Increment rate limit counters for a user"""
-  limiter = state.server.limiter
-  
+  limiter = getattr(state.server, 'limiter')
+
   increments = [1, 1, 1, response_size, response_size, response_size, ppr, ppr, ppr]
   ttls = [
     secs_to_ceil_date(secs=60),
@@ -91,21 +91,21 @@ async def increment_counters(user: str, response_size: int, ppr: int) -> Service
     limit_pairs, remaining_pairs = [], []
     async with state.redis.pipeline() as pipe:
       for (name, (max_val, _)), increment, ttl in zip(
-        limiter.limits.items(), 
-        increments, 
+        limiter.limits.items(),
+        increments,
         ttls * 3
       ):
         key = f"{REDIS_NS}:limiter:{name}:{user}"
         pipe.incrby(key, increment)
         pipe.expire(key, ttl)
-        
+
         # Get current value for calculating remaining
         current = int(await state.redis.get(key) or 0)
         remaining = max(max_val - (current + increment), 0)
-        
+
         limit_pairs.append(f"{name}={max_val}")
         remaining_pairs.append(f"{name}={remaining}")
-      
+
       await pipe.execute()
 
     return "", {
@@ -114,4 +114,4 @@ async def increment_counters(user: str, response_size: int, ppr: int) -> Service
       "reset": f"rpm,spm,ppm={ttls[0]};rph,sph,pph={ttls[1]};rpd,spd,ppd={ttls[2]}"
     }
   except Exception as e:
-    return f"Error incrementing counters: {str(e)}", None
+    return f"Error incrementing counters: {str(e)}", {}

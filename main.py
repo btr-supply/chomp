@@ -5,21 +5,22 @@ from src.utils import log_info, log_warn, ArgParser, generate_hash, prettify
 from src import state
 from src.model import Config, Tsdb, TsdbAdapter
 
-def get_adapter_class(adapter: TsdbAdapter) -> Type[Tsdb]:
+def get_adapter_class(adapter: TsdbAdapter) -> Type[Tsdb] | None:
   from src import adapters
   implementations: dict[TsdbAdapter, Type[Tsdb]] = {
     "tdengine": adapters.tdengine.Taos,
+    "sqlite": adapters.sqlite.SQLite,
+    "clickhouse": adapters.clickhouse.ClickHouse,
+    "duckdb": adapters.duckdb.DuckDB,
     # "timescale": adapters.timescale.TimescaleDb,
     # "opentsdb": adapters.opentsdb.OpenTsdb,
     # "questdb": adapters.questdb.QuestDb,
     # "mongodb": adapters.mongodb.MongoDb,
-    # "duckdb": adapters.duckdb.DuckDb,
     # "influxdb": adapters.influxdb.InfluxDb,
-    # "clickhouse": adapters.clickhouse.ClickHouse,
     # "victoriametrics": adapters.victoriametrics.VictoriaMetrics,
     # "kx": adapters.kx.Kdb,
   }
-  return implementations.get(adapter.lower(), bool)
+  return implementations.get(adapter.lower())  # type: ignore
 
 async def start_ingester(config: Config):
   # ingester specific imports
@@ -48,16 +49,17 @@ async def start_ingester(config: Config):
   from src.cache import ensure_claim_task
 
   # claim tasks before scheduling
-  tasks = [ensure_claim_task(c) for c in in_range]
-  await gather(*tasks)
-  tasks = [schedule(c) for c in in_range]
-  await gather(*tasks)
+  claim_tasks = [ensure_claim_task(c) for c in in_range]
+  await gather(*claim_tasks)
+  schedule_tasks = [schedule(c) for c in in_range]
+  scheduled_results = await gather(*schedule_tasks)
+  await gather(*[result[0] for result in scheduled_results])  # type: ignore
 
   cron_monitors = await scheduler.start(threaded=state.args.threaded)
   if not cron_monitors:
     log_warn("No cron scheduled, tasks picked up by other workers. Shutting down...")
     return
-  await gather(*cron_monitors)
+  await gather(*cron_monitors)  # type: ignore
 
 async def start_server(config: Config):
   # server specific imports
@@ -74,11 +76,17 @@ async def main(ap: ArgParser):
   tsdb_class = get_adapter_class(state.args.tsdb_adapter)
   if not tsdb_class:
     raise ValueError(
-      f"Unsupported TSDB_ADAPTER adapter: {state.tsdb_adapter}. "
-      f"Please use one of {[a.value for a in TsdbAdapter]}."
+      f"Unsupported TSDB_ADAPTER adapter: {state.args.tsdb_adapter}. "
+      f"Please use one of {TsdbAdapter.__args__}."  # type: ignore
     )
 
-  state.tsdb.set_adapter(await tsdb_class.connect())
+  state.tsdb.set_adapter(await tsdb_class.connect(
+    host=getattr(state.args, 'db_host', 'localhost'),
+    port=getattr(state.args, 'db_port', 6030),
+    db=getattr(state.args, 'db_name', 'test'),
+    user=getattr(state.args, 'db_user', 'root'),
+    password=getattr(state.args, 'db_password', 'taosdata')
+  ))
 
   # ping dbs for readiness checks
   if state.args.ping:
@@ -90,7 +98,7 @@ async def main(ap: ArgParser):
 
   # start server or ingester
   try:
-    config = state.config
+    config = state.config.config  # Get the actual Config object from ConfigProxy
     await (start_server(config) if state.args.server else start_ingester(config))
   except KeyboardInterrupt:
     log_info("Shutting down...")

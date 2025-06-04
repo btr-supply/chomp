@@ -1,6 +1,5 @@
 import polars as pl
 import numpy as np
-from .maths import normalize
 
 # Volatility Estimators
 
@@ -14,7 +13,7 @@ def wstd(s: pl.Series, period: int = 20) -> pl.Series:
     weights = np.linspace(1, period, period)
     weights = weights / weights.sum()
     return s.rolling_std(window_size=period, weights=weights)
-  except:
+  except Exception:
     return s.rolling_std(window_size=period)
 
 def ewstd(s: pl.Series, period: int = 20) -> pl.Series:
@@ -107,7 +106,7 @@ def theil_sen(s: pl.Series, period: int = 20) -> pl.Series:
       return None
     y = np.array(window)
     x = np.arange(len(y))
-    
+
     # Create meshgrid of all pairs of points
     i, j = np.triu_indices(len(x), k=1)
 
@@ -129,11 +128,19 @@ def simple_mom(s: pl.Series, period: int = 1) -> pl.Series:
 
 def macd(s: pl.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> tuple[pl.Series, pl.Series, pl.Series]:
   """MACD (Moving Average Convergence Divergence)"""
+  # Calculate EMAs directly from the Series
   fast_ema = ewma(s, fast)
   slow_ema = ewma(s, slow)
+
+  # Calculate MACD line
   macd_line = fast_ema - slow_ema
+
+  # Calculate signal line
   signal_line = ewma(macd_line, signal)
+
+  # Calculate histogram
   histogram = macd_line - signal_line
+
   return macd_line, signal_line, histogram
 
 def rsi(s: pl.Series, period: int = 14) -> pl.Series:
@@ -179,7 +186,7 @@ def zscore(s: pl.Series, period: int = 20) -> pl.Series:
 
 def cumulative_returns(s: pl.Series) -> pl.Series:
   """Cumulative returns"""
-  return (1 + roc(s)).cumprod()
+  return (1 + roc(s)).cum_prod()
 
 def vol_adjusted_momentum(s: pl.Series, period: int = 20) -> pl.Series:
   """Volatility-adjusted momentum"""
@@ -190,30 +197,64 @@ def vol_adjusted_momentum(s: pl.Series, period: int = 20) -> pl.Series:
 # FIXME
 def adx(high: pl.Series, low: pl.Series, close: pl.Series, period: int = 14) -> tuple[pl.Series, pl.Series, pl.Series]:
   """Average Directional Index"""
-  # True Range
-  tr = pl.max_horizontal(
-    high - low,
-    (high - close.shift()).abs(),
-    (low - close.shift()).abs()
-  )
+  # Create a DataFrame to work with expressions properly
+  df = pl.DataFrame({
+    "high": high,
+    "low": low,
+    "close": close
+  })
 
-  # Directional Movement
-  up_move = high - high.shift()
-  down_move = low.shift() - low
+  # True Range calculation using expressions
+  df = df.with_columns([
+    pl.max_horizontal([
+      pl.col("high") - pl.col("low"),
+      (pl.col("high") - pl.col("close").shift()).abs(),
+      (pl.col("low") - pl.col("close").shift()).abs()
+    ]).alias("tr"),
 
-  pos_dm = pl.when(up_move > down_move).then(up_move.clip(lower_bound=0)).otherwise(0)
-  neg_dm = pl.when(down_move > up_move).then(down_move.clip(lower_bound=0)).otherwise(0)
+    # Directional Movement
+    (pl.col("high") - pl.col("high").shift()).alias("up_move"),
+    (pl.col("low").shift() - pl.col("low")).alias("down_move")
+  ])
+
+  # Calculate directional indicators
+  df = df.with_columns([
+    pl.when(pl.col("up_move") > pl.col("down_move"))
+      .then(pl.col("up_move"))
+      .otherwise(0)
+      .clip(lower_bound=0)
+      .alias("pos_dm"),
+    pl.when(pl.col("down_move") > pl.col("up_move"))
+      .then(pl.col("down_move"))
+      .otherwise(0)
+      .clip(lower_bound=0)
+      .alias("neg_dm")
+  ])
 
   # Smoothed values
-  tr14 = tr.ewm_mean(alpha=1/period)
-  plus_di14 = 100 * (pos_dm.ewm_mean(alpha=1/period) / tr14)
-  minus_di14 = 100 * (neg_dm.ewm_mean(alpha=1/period) / tr14)
+  df = df.with_columns([
+    pl.col("tr").ewm_mean(alpha=1/period).alias("tr14"),
+    pl.col("pos_dm").ewm_mean(alpha=1/period).alias("pos_dm_smooth"),
+    pl.col("neg_dm").ewm_mean(alpha=1/period).alias("neg_dm_smooth")
+  ])
 
-  # ADX
-  dx = 100 * ((plus_di14 - minus_di14).abs() / (plus_di14 + minus_di14))
-  adx = dx.ewm_mean(alpha=1/period)
+  # Calculate DI values
+  df = df.with_columns([
+    (100 * pl.col("pos_dm_smooth") / pl.col("tr14")).alias("plus_di14"),
+    (100 * pl.col("neg_dm_smooth") / pl.col("tr14")).alias("minus_di14")
+  ])
 
-  return plus_di14, minus_di14, adx
+  # ADX calculation
+  df = df.with_columns([
+    (100 * (pl.col("plus_di14") - pl.col("minus_di14")).abs() /
+     (pl.col("plus_di14") + pl.col("minus_di14"))).alias("dx")
+  ])
+
+  df = df.with_columns([
+    pl.col("dx").ewm_mean(alpha=1/period).alias("adx_value")
+  ])
+
+  return df["plus_di14"], df["minus_di14"], df["adx_value"]
 
 # FIXME
 def close_dmi(s: pl.Series, period: int = 14) -> tuple[pl.Series, pl.Series, pl.Series]:
@@ -224,12 +265,18 @@ def close_dmi(s: pl.Series, period: int = 14) -> tuple[pl.Series, pl.Series, pl.
   # Calculate price changes
   price_change = s.diff()
 
-  # Reuse existing logic for directional movement
+  # Simple directional movement from close prices
   pos_dm = price_change.clip(lower_bound=0)
   neg_dm = (-price_change).clip(lower_bound=0)
 
-  # Calculate directional indicators using existing functions
-  plus_di, minus_di, _ = adx(pos_dm, neg_dm, s, period)
+  # Calculate simple directional indicators
+  pos_dm_smooth = pos_dm.ewm_mean(alpha=1/period)
+  neg_dm_smooth = neg_dm.ewm_mean(alpha=1/period)
+
+  # Normalize to get directional indicators
+  total_movement = pos_dm_smooth + neg_dm_smooth
+  plus_di = 100 * (pos_dm_smooth / total_movement).fill_null(0)
+  minus_di = 100 * (neg_dm_smooth / total_movement).fill_null(0)
 
   # Calculate trend strength (similar to ADX)
   di_diff = (plus_di - minus_di).abs()
