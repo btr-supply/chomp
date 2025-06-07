@@ -52,8 +52,8 @@ def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
     should_be_lambda = match and match.group(1).startswith('lambda')
 
     tree = ast.parse(expr, mode='exec' if should_be_func else 'eval')
-    is_func = should_be_func and isinstance(tree.body[0], ast.FunctionDef)
-    is_lambda = should_be_lambda and isinstance(tree.body, ast.Lambda)
+    is_func = should_be_func and isinstance(tree, ast.Module) and len(tree.body) > 0 and isinstance(tree.body[0], ast.FunctionDef)
+    is_lambda = should_be_lambda and isinstance(tree, ast.Expression) and isinstance(tree.body, ast.Lambda)
 
     if lambda_check and not is_lambda:
       raise ValueError("Expression must be a lambda")
@@ -65,14 +65,16 @@ def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
       raise ValueError("Invalid or unsafe expression")
 
     # compile the AST and evaluate
-    if is_func:
+    if is_func and isinstance(tree, ast.Module):
       code = compile(tree, filename='<ast>', mode='exec')
-      func_name = tree.body[0].name if is_func else None
+      func_name = tree.body[0].name if isinstance(tree.body[0], ast.FunctionDef) else None
       exec(code, ns)
-      result = ns[func_name] # function reference to be used as lambda
-    else:
+      result = ns[func_name] if func_name else None # function reference to be used as lambda
+    elif isinstance(tree, ast.Expression):
       code = compile(tree, filename='<ast>', mode='eval')
       result = eval(code, ns)
+    else:
+      raise ValueError("Invalid AST type for compilation")
 
     # cache the expression as safe for faster evals
     SAFE_EXPR_CACHE.add(expr)
@@ -90,29 +92,37 @@ def is_ast_safe(tree, allowed_functions=SAFE_FUNCTIONS):
   :param allowed_functions: dictionary of allowed functions per module
   :return: True if the AST is safe, False otherwise
   """
-  # if isinstance(tree, ast.Expr):
-  #   return is_ast_safe(tree.value, allowed_functions)
-  # elif isinstance(tree, ast.Call):
-  #   # Check if the function call is to an allowed function within a allowed module
-  #   if isinstance(tree.func, ast.Attribute):
-  #     # Function call on an attribute (e.g., pd.DataFrame.head)
-  #     module_name = tree.func.value.id
-  #     func_name = tree.func.attr
-  #     return module_name in allowed_functions and func_name in allowed_functions[module_name]
-  #   elif isinstance(tree.func, ast.Name):
-  #     # Direct function call (e.g., sin)
-  #     func_name = tree.func.id
-  #     return any(module_name in allowed_functions and func_name in allowed_functions[module_name] for module_name in allowed_functions)
-  #   return False  # Disallow calls to other types of functions
-  # elif isinstance(tree, ast.Name):
-  #   # Disallow access to system variables regardless of namespace exclusions
-  #   if tree.id in ['__import__', '__builtins__', '__globals__', '__locals__']:
-  #     return False
-  #   return True
-  # elif isinstance(tree, ast.Num):
-  #   return True
-  # else:
-  #   return False
+  # Handle different node types
+  for node in ast.walk(tree):
+    # Check for dangerous function calls
+    if isinstance(node, ast.Call):
+      if isinstance(node.func, ast.Name):
+        func_name = node.func.id
+        # Block dangerous built-in functions
+        if func_name in ['exec', 'eval', '__import__', 'open', 'compile', 'globals', 'locals', 'vars', 'dir', 'getattr', 'setattr', 'delattr', 'hasattr']:
+          return False
+      elif isinstance(node.func, ast.Attribute):
+        # Block dangerous attribute access
+        if isinstance(node.func.value, ast.Name):
+          if node.func.value.id == '__builtins__':
+            return False
+
+    # Check for dangerous name access
+    elif isinstance(node, ast.Name):
+      name = node.id
+      # Block access to dangerous names
+      if name in ['__import__', '__builtins__', '__globals__', '__locals__', 'exec', 'eval', 'open', 'compile']:
+        return False
+
+    # Check for dangerous attribute access
+    elif isinstance(node, ast.Attribute):
+      if isinstance(node.value, ast.Name):
+        if node.value.id in ['__builtins__', '__class__', '__dict__']:
+          return False
+      # Block dunder attributes
+      if node.attr.startswith('__') and node.attr.endswith('__'):
+        return False
+
   return True
 
 def safe_eval_to_lambda(expr, **kwargs):

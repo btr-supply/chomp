@@ -1,9 +1,11 @@
 from pathlib import Path
 import re
+import time
 from asyncio import iscoroutinefunction, new_event_loop
 from importlib import metadata, resources
 import tomli
 from typing import Coroutine, Optional, Any
+from functools import wraps
 
 from .format import log_error, log_warn
 
@@ -26,6 +28,9 @@ class PackageMeta:
 
   def _parse_pyproject_toml(self):
     pyproject_path = Path(__file__).parent.parent.parent / "pyproject.toml"
+    # Set root to the project directory (parent of pyproject.toml)
+    self.root = pyproject_path.parent
+
     if pyproject_path.exists():
       with pyproject_path.open("rb") as f:
         project_data = tomli.load(f).get("project", {})
@@ -37,6 +42,8 @@ class PackageMeta:
     else:
       print("pyproject.toml not found, using fallback values...")
       self._set_metadata({})
+      # Still set the root to current directory as fallback
+      self.root = Path(__file__).parent.parent.parent
 
 def run_async_in_thread(fn: Coroutine):
   loop = new_event_loop()
@@ -102,3 +109,78 @@ def merge_replace_empty(dest: dict, src: dict) -> dict:
       if dest.get(key) in [None, [], {}, ""]:
         dest[key] = value
   return dest
+
+def _cache_decorator(ttl=None, maxsize=128, is_async=False):
+  def decorator(func):
+    cache_data: dict[Any, tuple[Any, float]] = {}
+    access_order: list[Any] = []
+
+    @wraps(func)
+    async def async_wrapper(*args, **kwargs):
+      key = (args, frozenset(kwargs.items()))
+      now = time.time()
+
+      if key in cache_data:
+        value, timestamp = cache_data[key]
+        if ttl is None or now - timestamp < ttl:
+          # LRU update
+          access_order.remove(key)
+          access_order.append(key)
+          return value
+
+      # Cache miss
+      result = await func(*args, **kwargs)
+      cache_data[key] = (result, now)
+
+      # Update LRU
+      if key in access_order:
+        access_order.remove(key)
+      access_order.append(key)
+
+      # Evict oldest if needed
+      while len(cache_data) > maxsize:
+        oldest_key = access_order.pop(0)
+        cache_data.pop(oldest_key, None)
+
+      return result
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+      key = (args, frozenset(kwargs.items()))
+      now = time.time()
+
+      if key in cache_data:
+        value, timestamp = cache_data[key]
+        if ttl is None or now - timestamp < ttl:
+          # LRU update
+          access_order.remove(key)
+          access_order.append(key)
+          return value
+
+      # Cache miss
+      result = func(*args, **kwargs)
+      cache_data[key] = (result, now)
+
+      # Update LRU
+      if key in access_order:
+        access_order.remove(key)
+      access_order.append(key)
+
+      # Evict oldest if needed
+      while len(cache_data) > maxsize:
+        oldest_key = access_order.pop(0)
+        cache_data.pop(oldest_key, None)
+
+      return result
+
+    return async_wrapper if is_async else sync_wrapper
+
+  return decorator
+
+def cache(ttl=None, maxsize=128):
+  """Sync cache decorator with TTL and LRU support"""
+  return _cache_decorator(ttl=ttl, maxsize=maxsize, is_async=False)
+
+def async_cache(ttl=None, maxsize=128):
+  """Async cache decorator with TTL and LRU support"""
+  return _cache_decorator(ttl=ttl, maxsize=maxsize, is_async=True)

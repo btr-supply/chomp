@@ -5,6 +5,9 @@ from .date import *  # noqa: F403
 from .argparser import *  # noqa: F403
 from .safe_eval import *  # noqa: F403
 from .runtime import *  # noqa: F403
+from .uid import *  # noqa: F403
+from .imports import *  # noqa: F403
+
 
 __all__ = [  # noqa: F405
   # From types
@@ -33,5 +36,11 @@ __all__ = [  # noqa: F405
   "EVAL_CACHE", "safe_eval", "is_ast_safe", "safe_eval_to_lambda",
 
   # From runtime
-  "PackageMeta", "run_async_in_thread", "submit_to_threadpool", "select_nested", "merge_replace_empty"
+  "PackageMeta", "run_async_in_thread", "submit_to_threadpool", "select_nested", "merge_replace_empty",
+
+  # From uid
+  "get_instance_uid", "generate_instance_uid", "generate_instance_name", "get_local_ip",
+
+  # From imports
+  "safe_import"
 ]

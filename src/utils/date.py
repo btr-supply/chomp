@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import re
-from typing import Literal, Callable, Any, Optional, cast
+from typing import Literal, Callable, Any, Optional
 from dateutil.relativedelta import relativedelta
 from .format import parse_date
 
@@ -27,6 +27,7 @@ MONTH_SECONDS = round(2.592e+6)
 YEAR_SECONDS = round(3.154e+7)
 
 CRON_BY_TF: dict[str, str] = {
+  "s1": "* * * * * */1", # every second
   "s2": "* * * * * */2", # every 2 seconds
   "s5": "* * * * * */5", # every 5 seconds
   "s10": "* * * * * */10", # every 10 seconds
@@ -60,6 +61,7 @@ CRON_BY_TF: dict[str, str] = {
 }
 
 SEC_BY_TF: dict[str, int] = {
+  "s1": 1,
   "s2": 2,
   "s5": 5,
   "s10": 10,
@@ -219,15 +221,15 @@ def fit_interval(from_date: datetime, to_date: Optional[datetime]=None, target_e
     target_interval_seconds = diff_seconds / target_epochs
     for interval, seconds in SEC_BY_TF.items():
       if seconds >= target_interval_seconds:  # Find the smallest interval that fits
-        return cast(Interval, interval)
+        return interval  # type: ignore[return-value]
 
-  return cast(Interval, "h6")
+  return "h6"
 
 def round_interval(seconds: float, margin: float = 0.25) -> Interval:
   for interval in SEC_BY_TF:
     if SEC_BY_TF[interval] >= seconds * (1 - margin):
-      return cast(Interval, interval)
-  return cast(Interval, "h1")  # Default to hourly if no match
+      return interval  # type: ignore[return-value]
+  return "h1"  # Default to hourly if no match
 
 def fit_date_params(from_date: Optional[datetime] = None, to_date: Optional[datetime] = None, interval: Optional[Interval] = None, target_epochs: Optional[int] = None) -> tuple[datetime, datetime, Interval, int]:
 

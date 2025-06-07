@@ -5,11 +5,22 @@ from hashlib import md5, sha256
 import logging
 from os import urandom, environ as env
 from typing import Literal
-from web3 import Web3
 import re
 from .types import is_float
+from ..deps import safe_import
+
+# Safe import optional dependencies
+web3_module = safe_import('web3')
 
 UTC = timezone.utc
+
+__all__ = [
+  "UTC", "DATETIME_FMT", "DATETIME_FMT_TZ", "DATETIME_FMT_ISO", "GENERIC_NO_DOT_SPLITTER",
+  "LOGFILE", "LogLevel", "split", "log", "log_debug", "log_info", "log_error", "log_warn",
+  "fmt_date", "parse_date", "rebase_epoch_to_sec", "loggingToLevel", "LogHandler", "logger",
+  "generate_hash", "split_chain_addr", "truncate", "prettify", "function_signature", "load_template",
+  "selector_inputs", "selector_outputs"
+]
 
 DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 DATETIME_FMT_TZ = f"{DATETIME_FMT} %Z"
@@ -108,13 +119,16 @@ def generate_hash(length=32, derive_from="") -> str:
   return hash_fn((str(derive_from) + urandom(64).hex()).encode()).hexdigest()[:length]
 
 def split_chain_addr(target: str) -> tuple[str|int, str]:
+  if web3_module is None:
+    raise ImportError("Missing optional dependency 'web3'. Install with 'pip install web3' or 'pip install chomp[evm]'")
+
   tokens = target.split(":")
   n = len(tokens)
   if n == 1:
     tokens = ["1", tokens[0]] # default to ethereum L1
   if n > 2:
     raise ValueError(f"Invalid target format for evm: {target}, expected chain_id:address")
-  return int(tokens[0]), Web3.to_checksum_address(tokens[1])
+  return int(tokens[0]), web3_module.Web3.to_checksum_address(tokens[1])
 
 def truncate(value, max_width=32):
   value = str(value)

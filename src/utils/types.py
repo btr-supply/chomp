@@ -8,6 +8,9 @@ def to_bool(value: str) -> bool:
 
 def is_float(s: str) -> bool:
   try:
+    # Check for leading/trailing whitespace - these should be invalid
+    if s != s.strip():
+      return False
     float(s)
     return True
   except ValueError:
@@ -20,9 +23,13 @@ def is_primitive(value: Any) -> bool:
 def is_epoch(value: Any) -> bool:
   """Check if a value represents an epoch timestamp in seconds or milliseconds."""
   try:
+    # Skip non-numeric types that can't be converted
+    if isinstance(value, (list, dict, tuple, set)):
+      return False
     val = float(value) if isinstance(value, str) else value
+    # Fixed upper bound: 32503680000 seconds (year 3000) - not 32503680000000
     return 0 <= val <= 32503680000
-  except ValueError:
+  except (ValueError, TypeError):
     return False
 
 def is_iterable(value: Any) -> bool:
@@ -31,6 +38,8 @@ def is_iterable(value: Any) -> bool:
 def flatten(items, depth=1, current_depth=0, flatten_maps=False):
   if not is_iterable(items):
     yield items
+    return
+
   for x in items:
     if is_iterable(x) or (flatten_maps and isinstance(x, dict)):
       if current_depth < depth:

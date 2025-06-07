@@ -25,7 +25,12 @@ class ArgParser(ArgumentParser):
     else:
       action = super().add_argument(*args, **kwargs)
     if not action.type:
-      action.type = bool if is_bool(action.const or action.default) else (type(action.default) or str)
+      if is_bool(action.const or action.default):
+        action.type = bool
+      elif action.default is not None:
+        action.type = type(action.default)
+      else:
+        action.type = str  # Default to str when no type and no default
     self.info[action.dest] = (action.type, action.default) # arg type and default value
     return action
 

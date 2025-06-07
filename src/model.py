@@ -2,10 +2,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import md5
 from aiocron import Cron
+from asyncio import gather
+import httpx
+from socket import gethostname
+from os import getpid
 from typing import Literal, Optional, TypeVar, Any, get_args, cast, Union, Callable
 from enum import Flag, auto
+import time
 
+from .utils.uid import generate_instance_name, get_instance_uid
 from .utils import now, is_primitive, is_epoch, Interval, TimeUnit, extract_time_unit, interval_to_seconds, split_chain_addr, function_signature, selector_inputs, selector_outputs
+from .utils.runtime import async_cache
 
 T = TypeVar('T')
 
@@ -18,7 +25,7 @@ ResourceType = Literal[
 IngesterType = Literal[
   "scrapper", "http_api", "ws_api", "fix_api", # web2
   "evm_caller", "evm_logger", # web3
-  "solana_caller", "solana_logger",
+  "svm_caller", "svm_logger",
   "sui_caller", "sui_logger",
   "aptos_caller", "aptos_logger",
   "ton_caller", "ton_logger",
@@ -90,6 +97,48 @@ def to_scope_mask(names: dict[str, bool]) -> Scope:
     if enabled and hasattr(Scope, name.upper()):
       mask |= getattr(Scope, name.upper())
   return mask if mask else Scope.DEFAULT
+
+@dataclass
+class RequestVitals:
+  """Minimal container for request performance metrics"""
+  instance_name: str = ""
+  field_count: int = 0
+  latency_ms: float = 0.0
+  response_bytes: int = 0
+  status_code: Optional[int] = None
+
+@dataclass
+class InstanceVitals:
+  """Minimal container for instance performance metrics"""
+  instance_name: str = ""
+  resources_count: int = 0
+  cpu_usage: float = 0.0 # percent of cpu or cpu count
+  memory_usage: float = 0.0 # bytes
+  disk_usage: float = 0.0 # bytes per second
+
+class Monitor:
+  """Minimal monitoring for ingester requests"""
+
+  def __init__(self):
+    self._start_time: float = 0.0
+
+  def start_timer(self) -> None:
+    """Start timing a request"""
+    self._start_time = time.time()
+
+  def stop_timer(self, response_bytes: int, status_code: Optional[int] = None) -> RequestVitals:
+    """Stop timer and return metrics"""
+    end_time = time.time()
+    latency_ms = (end_time - self._start_time) * 1000 if self._start_time > 0 else 0.0
+
+    # Store vitals on the monitor for later collection by store()
+    self.vitals = RequestVitals(
+      latency_ms=latency_ms,
+      response_bytes=response_bytes,
+      status_code=status_code
+    )
+
+    return self.vitals
 
 @dataclass
 class Targettable:
@@ -181,11 +230,17 @@ class Ingester(Resource, Targettable):
   started: datetime | None = None
   last_ingested: datetime | None = None
   cron: Optional[Cron] = None
+  monitor: Optional[Monitor] = field(default_factory=lambda: Monitor())
 
   @classmethod
   def from_config(cls, d: dict):
+    # Convert field dictionaries to ResourceField objects
+    if 'fields' in d and isinstance(d['fields'], list):
+      d['fields'] = [ResourceField.from_dict(field) if isinstance(field, dict) else field for field in d['fields']]
+
     r = cls(**d)
     r.started = now()
+
     for field_item in r.fields:
       if not field_item.tags and r.tags:
         field_item.tags = r.tags
@@ -276,6 +331,8 @@ class Ingester(Resource, Targettable):
       if field.selector and field.selector[0] != '.' and '.' in field.selector
     })
 
+
+
 class ConfigMeta(type):
   def __new__(cls, name, bases, dct):
     # iterate over all IngesterType
@@ -287,6 +344,22 @@ class ConfigMeta(type):
 
 @dataclass
 class Config(metaclass=ConfigMeta):
+  # Explicitly define attributes for mypy (these are also added by the metaclass)
+  scrapper: list[Ingester] = field(default_factory=list)
+  http_api: list[Ingester] = field(default_factory=list)
+  ws_api: list[Ingester] = field(default_factory=list)
+  fix_api: list[Ingester] = field(default_factory=list)
+  evm_caller: list[Ingester] = field(default_factory=list)
+  evm_logger: list[Ingester] = field(default_factory=list)
+  svm_caller: list[Ingester] = field(default_factory=list)
+  svm_logger: list[Ingester] = field(default_factory=list)
+  sui_caller: list[Ingester] = field(default_factory=list)
+  sui_logger: list[Ingester] = field(default_factory=list)
+  aptos_caller: list[Ingester] = field(default_factory=list)
+  aptos_logger: list[Ingester] = field(default_factory=list)
+  ton_caller: list[Ingester] = field(default_factory=list)
+  ton_logger: list[Ingester] = field(default_factory=list)
+  processor: list[Ingester] = field(default_factory=list)
   @classmethod
   def from_dict(cls, data: dict) -> 'Config':
     config_dict = {}
@@ -303,7 +376,7 @@ class Config(metaclass=ConfigMeta):
   def ingesters(self):
     return self.scrapper + self.http_api + self.ws_api \
       + self.evm_caller + self.evm_logger \
-      + self.solana_caller + self.sui_caller + self.aptos_caller + self.ton_caller \
+      + self.svm_caller + self.sui_caller + self.aptos_caller + self.ton_caller \
       + self.processor # + ...
 
   def to_dict(self, scope: Scope = Scope.DEFAULT) -> dict:
@@ -352,3 +425,144 @@ class Tsdb:
     raise NotImplementedError
 
 ServiceResponse = tuple[str, T]  # (error_message, result)
+
+@dataclass
+class Instance:
+  """Represents an instance of chomp (either ingester or server)"""
+  pid: int
+  hostname: str
+  uid: str = ""  # computed from launch command, config, hostname - internal use only
+  ipv4: str = ""
+  ipv6: str = ""
+  name: str = ""  # human-friendly name from uid-masks
+  mode: Literal["ingester", "server"] = "ingester"
+  resources_count: int = 0
+  monitored: bool = False
+  started_at: datetime = field(default_factory=now)
+  updated_at: datetime = field(default_factory=now)
+
+  # Geolocation and ISP information (cached, transient)
+  coordinates: str = ""  # "lat,lon" format
+  timezone: str = ""
+  country_code: str = ""
+  location: str = ""  # "city, region, country" format
+  isp: str = ""
+
+  @property
+  def id(self) -> str:
+    """Use UID as primary identifier"""
+    return self.uid
+
+  def __hash__(self) -> int:
+    """Make Instance hashable for cache keys using UID"""
+    return hash(self.uid)
+
+  def to_dict(self) -> dict:
+    """Convert instance to dictionary for storage/serialization"""
+    return {
+      "uid": self.uid,
+      "pid": self.pid,
+      "hostname": self.hostname,
+      "ipv4": self.ipv4,
+      "ipv6": self.ipv6,
+      "name": self.name,
+      "mode": self.mode,
+      "resources_count": self.resources_count,
+      "monitored": self.monitored,
+      "started_at": self.started_at.isoformat(),
+      "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+      "coordinates": self.coordinates,
+      "timezone": self.timezone,
+      "country_code": self.country_code,
+      "location": self.location,
+      "isp": self.isp,
+    }
+
+  @classmethod
+  async def from_dict(cls, data: dict) -> 'Instance':
+    """Create instance from dictionary with async name generation"""
+    # Handle datetime strings
+    started_at = data.get('started_at') or now()
+    if isinstance(started_at, str):
+      started_at = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+
+    updated_at = data.get('updated_at') or now()
+    if isinstance(updated_at, str):
+      updated_at = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+
+    uid = data.get('uid') or get_instance_uid()
+    name = data.get('name') or await generate_instance_name()
+    pid = data.get('pid') or getpid()
+    hostname = data.get('hostname') or gethostname()
+    instance = cls(
+      uid=uid,
+      pid=pid,
+      hostname=hostname,
+      name=name,
+      mode=data.get('mode', 'ingester'),
+      resources_count=data.get('resources_count', 0),
+      monitored=data.get('monitored', False),
+      started_at=started_at,
+      updated_at=updated_at,
+      coordinates=data.get('coordinates', ''),
+      timezone=data.get('timezone', ''),
+      country_code=data.get('country_code', ''),
+      location=data.get('location', ''),
+      isp=data.get('isp', ''),
+    )
+    await instance.get_ip_addresses()
+    return instance
+
+  @async_cache(ttl=21600, maxsize=1)
+  async def get_ip_addresses(self) -> tuple[Optional[str], Optional[str]]:
+    """Get instance IPv4 and IPv6 addresses with geolocation data, 6-hour caching"""
+
+    async def get_ip(url: str) -> Optional[str]:
+        try:
+            response = await session.get(url)
+            return response.json().get("ip") if response.status_code == 200 else None
+        except Exception:
+            return None
+
+    async def get_geolocation(ip: str) -> dict:
+        """Get geolocation and ISP data for an IP address"""
+        try:
+            response = await session.get(f"http://ip-api.com/json/{ip}")
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("status") == "success":
+                    return data
+        except Exception:
+            pass
+        return {}
+
+    async with httpx.AsyncClient(timeout=3.0) as session:
+        # Get IP addresses - split tuple unpacking to avoid mypy crash
+        ip_results = await gather(
+            get_ip("https://api4.ipify.org/?format=json"),
+            get_ip("https://api6.ipify.org/?format=json")
+        )
+        self.ipv4 = ip_results[0] or ""
+        self.ipv6 = ip_results[1] or ""
+
+        # Get geolocation data for the primary IP (IPv4 preferred, fallback to IPv6)
+        primary_ip = self.ipv4 or self.ipv6
+        if primary_ip:
+            geo_data = await get_geolocation(primary_ip)
+            if geo_data:
+                # Extract and format the data as requested
+                lat = geo_data.get("lat", "")
+                lon = geo_data.get("lon", "")
+                self.coordinates = f"{lat},{lon}" if lat and lon else ""
+
+                city = geo_data.get("city", "")
+                region = geo_data.get("regionName", "")
+                country = geo_data.get("country", "")
+                location_parts = [part for part in [city, region, country] if part]
+                self.location = ", ".join(location_parts)
+
+                self.timezone = geo_data.get("timezone", "")
+                self.country_code = geo_data.get("countryCode", "")
+                self.isp = geo_data.get("isp", "")
+
+    return self.ipv4, self.ipv6
