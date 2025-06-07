@@ -16,9 +16,9 @@ dependencies = [
     "pyyaml>=6.0.2",
     "yamale==5.2.1",
     "aiocron==1.8",
-    "aiohttp>=3.11.7",
     "fastapi>=0.115.5",
     "uvicorn[standard]>=0.32.1",
+    "python-multipart>=0.0.6",
     "orjson>=3.10.3",
     "python-dateutil>=2.9.0",
     "httpx>=0.28.1",
@@ -27,10 +27,21 @@ dependencies = [
     "pyarrow>=19.0.0",
     "numpy>=1.26.4",
     "types-python-dateutil>=2.9.0.20250516",
-    "mypy>=1.16.0",
+    "diff-match-patch>=20230430",
+    "psutil>=5.9.0",
 ]
 
 # Optional dependencies for specific adapters and ingesters
+#
+# USAGE PATTERNS:
+# - Individual components: pip install chomp[evm,web2]
+# - Common combinations: pip install chomp[default,all-adapters]
+# - Everything: pip install chomp[all]
+#
+# GROUPS:
+# - Database adapters: Individual database support (tdengine, clickhouse, etc.)
+# - Ingesters: Web2 (scraper/web2), Web3 (evm, svm, sui, aptos, ton)
+# - Combinations: default (most common), all-adapters, all-ingesters, all
 [project.optional-dependencies]
 
 # Database adapters
@@ -42,17 +53,17 @@ mongodb = ["motor>=3.3.0"]
 influxdb = ["influxdb-client>=1.38.0"]
 kx = ["pykx>=2.4.0"]
 sqlite = ["aiosqlite>=0.19.0"]
-questdb = []  # Uses aiohttp which is already in core
-opentsdb = []  # Uses aiohttp which is already in core
-victoriametrics = []  # Uses aiohttp which is already in core
+questdb = []  # Uses httpx which is already in core
+opentsdb = []  # Uses httpx which is already in core
+victoriametrics = []  # Uses httpx which is already in core
 
 # Web2 ingesters
-scraper = [
+web2 = [
     "beautifulsoup4>=4.12.3",
     "lxml>=5.3.0",
     "playwright>=1.49.0"
 ]
-web2 = [
+scraper = [
     "beautifulsoup4>=4.12.3",
     "lxml>=5.3.0",
     "playwright>=1.49.0"
@@ -66,63 +77,55 @@ evm = [
     "eth-account>=0.9.0",
     "hexbytes>=0.3.0"
 ]
-solana = ["solana>=0.36.2", "solders>=0.23.0"]
+svm = ["solana>=0.36.2", "solders>=0.23.0"]
 sui = []  # Uses httpx which is already in core
 aptos = []  # Uses httpx which is already in core
 ton = []  # Uses httpx which is already in core
 
-# Data processing (numpy is now in core dependencies)
-
 # Common combinations
 default = [
-    # Default adapter - TDengine
-    "taospy==2.7.16",
-    # All web2 ingesters
-    "beautifulsoup4>=4.12.3",
+    "taospy==2.7.16",          # Default adapter - TDengine
+    "beautifulsoup4>=4.12.3",  # Web2 scraping
     "lxml>=5.3.0",
     "playwright>=1.49.0",
-    # All web3 ingesters
-    "web3==6.20.3",
+    "web3==6.20.3",            # EVM support
     "multicall==0.9.0",
     "eth-utils>=2.0.0",
     "eth-account>=0.9.0",
     "hexbytes>=0.3.0",
-    "solana>=0.36.2",
+    "solana>=0.36.2",          # SVM support
     "solders>=0.23.0"
 ]
 
 # All database adapters
 all-adapters = [
-    "taospy==2.7.16",      # tdengine
-    "asyncpg>=0.29.0",     # timescale
-    "asynch>=0.2.0",       # clickhouse
-    "duckdb>=0.9.0",       # duckdb
-    "motor>=3.3.0",        # mongodb
+    "taospy==2.7.16",         # tdengine
+    "asyncpg>=0.29.0",        # timescale
+    "asynch>=0.2.0",          # clickhouse
+    "duckdb>=0.9.0",          # duckdb
+    "motor>=3.3.0",           # mongodb
     "influxdb-client>=1.38.0", # influxdb
-    "pykx>=2.4.0",         # kx
-    "aiosqlite>=0.19.0"    # sqlite
+    "pykx>=2.4.0",            # kx
+    "aiosqlite>=0.19.0"       # sqlite
 ]
 
-# All ingesters
+# All ingesters (web2 + web3)
 all-ingesters = [
-    # Web2
-    "beautifulsoup4>=4.12.3",
+    "beautifulsoup4>=4.12.3", # web2
     "lxml>=5.3.0",
     "playwright>=1.49.0",
-    # Web3
-    "web3==6.20.3",
+    "web3==6.20.3",           # evm
     "multicall==0.9.0",
     "eth-utils>=2.0.0",
     "eth-account>=0.9.0",
     "hexbytes>=0.3.0",
-    "solana>=0.36.2",
+    "solana>=0.36.2",         # svm
     "solders>=0.23.0"
 ]
 
 # Everything
 all = [
-    # All adapters
-    "taospy==2.7.16",
+    "taospy==2.7.16",         # all adapters
     "asyncpg>=0.29.0",
     "asynch>=0.2.0",
     "duckdb>=0.9.0",
@@ -130,8 +133,7 @@ all = [
     "influxdb-client>=1.38.0",
     "pykx>=2.4.0",
     "aiosqlite>=0.19.0",
-    # All ingesters
-    "beautifulsoup4>=4.12.3",
+    "beautifulsoup4>=4.12.3", # all ingesters
     "lxml>=5.3.0",
     "playwright>=1.49.0",
     "web3==6.20.3",
@@ -147,8 +149,22 @@ all = [
 dev = [
     "ruff>=0.11.12",
     "mypy>=1.16.0",
-    "pytest>=8.0.0",
-    "pytest-cov>=4.0.0,<5.0.0",
+    "pytest>=8.4.0",
+    "pytest-cov>=4.1.0",
     "pytest-asyncio>=0.25.0",
     "pre-commit>=4.0.0",
+    "coverage>=7.8.2",
 ]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "."
+packages = ["src"]
+explicit_package_bases = true
+namespace_packages = true
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_redundant_casts = true
+warn_unused_ignores = true
+check_untyped_defs = true
+no_implicit_optional = true

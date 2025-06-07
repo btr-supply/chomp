@@ -1,17 +1,7 @@
 #!/usr/bin/env python3
 """
 Check Naming Conventions Script - Validates Git branch and commit message formats
-
-Validates Git branch and commit message formats according to BTR Supply Backend
-contributing guidelines. Used in Git hooks to enforce development workflow standards.
-
-Branch format: feat/, fix/, refac/, ops/, docs/ + description
-Commit format: [feat], [fix], [refac], [ops], [docs] + capitalized message
-
-Usage:
-  python scripts/check_name.py -b  # Check branch name
-  python scripts/check_name.py -c  # Check commit message
-  python scripts/check_name.py -p  # Check pre-push (branch + commits)
+Used in Git hooks to enforce development workflow standards
 """
 
 import re
@@ -19,15 +9,15 @@ import sys
 import os
 import subprocess
 
-# Naming conventions from chomp/CONTRIBUTING.md
-BRANCH_RE = re.compile(r'^(feat|fix|refac|ops|docs)/')
-COMMIT_RE = re.compile(r'^\[(feat|fix|refac|ops|docs)\] [A-Z]')  # Must be capitalized
-
+BRANCH_RE = re.compile(
+    r'^(feat|fix|refac|ops|docs)/')  # Branches must start with type/
+COMMIT_RE = re.compile(r'^\[(feat|fix|refac|ops|docs)\] '
+                       )  # Commits must start with [type] and a space
 is_invalid = False
 
 
+# Helper function to run shell commands silently and return output
 def run_cmd(cmd):
-  """Run shell command silently and return output."""
   return subprocess.run(cmd,
                         shell=True,
                         stdout=subprocess.PIPE,
@@ -36,26 +26,24 @@ def run_cmd(cmd):
 
 
 def record_failure(check_type, value):
-  """Print error message and set global invalid flag."""
+  """Prints an error message and sets the global invalid flag."""
   global is_invalid
   print(f'[POLICY] Invalid {check_type}: {value.splitlines()[0]}',
         file=sys.stderr)
   is_invalid = True
 
 
-# Parse command line arguments
 script_args = sys.argv[1:]
 check_branch = '-b' in script_args or '--check-branch' in script_args
 check_commit = '-c' in script_args or '--check-commit' in script_args
 check_push = '-p' in script_args or '--check-push' in script_args
 
-# Get git repository root
 project_root = run_cmd('git rev-parse --show-toplevel')
 if not project_root:
   print("[POLICY] Error: Not a git repository?", file=sys.stderr)
   sys.exit(1)
 
-# Determine commit message file path
+# Determine commit message file path, defaulting if checking commit
 commit_msg_file = None
 if '--commit-msg-file' in script_args:
   try:
@@ -75,8 +63,6 @@ is_protected_branch = current_branch in ('main', 'dev', 'HEAD')
 if (check_branch or check_push) and not is_protected_branch:
   if not BRANCH_RE.match(current_branch):
     record_failure('branch name', current_branch)
-    print("[POLICY] Branch names must start with: feat/, fix/, refac/, ops/, docs/", 
-          file=sys.stderr)
 
 # 2. Check Commit Message (if checking commit)
 if check_commit:
@@ -87,11 +73,10 @@ if check_commit:
       # Only fail if the message is not empty and doesn't match the pattern
       if commit_msg and not COMMIT_RE.match(commit_msg):
         record_failure('commit message format', commit_msg)
-        print("[POLICY] Commit messages must start with: [feat], [fix], [refac], [ops], [docs] + capitalized message", 
-              file=sys.stderr)
     except Exception as e:
       print(f"[POLICY] Error reading {commit_msg_file}: {e}", file=sys.stderr)
       is_invalid = True
+  # Silently skip if file missing (e.g. interactive rebase) or path not determined
 
 # 3. Check Pre-push Commit Format (if checking push, and not protected)
 if check_push and not is_protected_branch:
@@ -105,13 +90,8 @@ if check_push and not is_protected_branch:
       [msg for msg in commit_log.split('\n\n\n') if msg.strip()]):
     if not COMMIT_RE.match(commit_text):
       record_failure(f'pushed commit #{i+1} format', commit_text)
-      print("[POLICY] All pushed commit messages must follow format: [type] Capitalized message", 
-            file=sys.stderr)
 
 if is_invalid:
-  print('[POLICY] Failed - See chomp/CONTRIBUTING.md for naming conventions', 
-        file=sys.stderr)
+  print('[POLICY] Failed', file=sys.stderr)
   sys.exit(1)
-
-print('[POLICY] Passed', file=sys.stderr)
-sys.exit(0) 
+sys.exit(0)
