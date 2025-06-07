@@ -30,8 +30,13 @@ class SQLite(SqlAdapter):
   """SQLite adapter extending SqlAdapter."""
 
   TYPES = TYPES
-  conn: aiosqlite.Connection
-  cursor: aiosqlite.Cursor
+  conn: aiosqlite.Connection | None = None
+  cursor: aiosqlite.Cursor | None = None
+
+  def __init__(self, host: str = "localhost", port: int = 0, db: str = "./data.db",
+               user: str = "", password: str = ""):
+    """Initialize SQLite adapter with SQLite-specific defaults."""
+    super().__init__(host=host, port=port, db=db, user=user, password=password)
 
   @property
   def timestamp_column_type(self) -> str:
@@ -74,16 +79,23 @@ class SQLite(SqlAdapter):
 
   async def _execute(self, query: str, params: tuple = ()):
     """Execute SQLite query."""
+    if self.cursor is None or self.conn is None:
+      raise RuntimeError("SQLite connection not established")
     await self.cursor.execute(query, params)
     await self.conn.commit()
 
   async def _fetch(self, query: str, params: tuple = ()) -> list[tuple]:
     """Execute SQLite query and fetch results."""
+    if self.cursor is None:
+      raise RuntimeError("SQLite connection not established")
     await self.cursor.execute(query, params)
-    return await self.cursor.fetchall()
+    result = await self.cursor.fetchall()
+    return [tuple(row) for row in result]
 
   async def _executemany(self, query: str, params_list: list[tuple]):
     """Execute many SQLite queries."""
+    if self.cursor is None or self.conn is None:
+      raise RuntimeError("SQLite connection not established")
     await self.cursor.executemany(query, params_list)
     await self.conn.commit()
 

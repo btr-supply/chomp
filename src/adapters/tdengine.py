@@ -2,7 +2,7 @@ from datetime import datetime
 from os import environ as env
 from typing import Any
 
-from ..utils import log_error, log_info, log_warn, Interval
+from ..utils import log_error, log_info, log_warn, log_debug, Interval
 from ..model import Ingester, FieldType
 from .sql import SqlAdapter
 
@@ -67,18 +67,18 @@ class Taos(SqlAdapter):
   def __init__(self, host: str = "localhost", port: int = 40002, db: str = "default",
                user: str = "rw", password: str = "pass"):
     super().__init__(host, port, db, user, password)
-    self._taos_module = None
+    self._DB_module = None
 
   @property
-  def taos_module(self):
+  def DB_module(self):
     """Lazy load TDengine module to avoid import errors if not installed."""
-    if self._taos_module is None:
+    if self._DB_module is None:
       try:
         import taos
-        self._taos_module = taos
+        self._DB_module = taos
       except ImportError as e:
         raise ImportError("TDengine Python client (taospy) is required for TDengine adapter. Install with: pip install taospy") from e
-    return self._taos_module
+    return self._DB_module
 
   @property
   def timestamp_column_type(self) -> str:
@@ -93,12 +93,26 @@ class Taos(SqlAdapter):
     user: str | None = None,
     password: str | None = None
   ) -> "Taos":
+    # Debug: Print environment variables being used
+    actual_host = host or env.get("DB_HOST") or "localhost"
+    actual_port = int(port or env.get("DB_PORT") or 40002)
+    actual_db = db or env.get("DB_NAME") or "default"
+    actual_user = user or env.get("DB_RW_USER") or "rw"
+    actual_password = password or env.get("DB_RW_PASS") or "pass"
+
+    print("🔍 TDengine Connect Debug:")
+    print(f"  Environment DB_HOST: {env.get('DB_HOST')}")
+    print(f"  Environment DB_PORT: {env.get('DB_PORT')}")
+    print(f"  Environment DB_NAME: {env.get('DB_NAME')}")
+    print(f"  Environment DB_RW_USER: {env.get('DB_RW_USER')}")
+    print(f"  Actual values: {actual_user}@{actual_host}:{actual_port}/{actual_db}")
+
     self = cls(
-      host=host or env.get("TAOS_HOST") or "localhost",
-      port=int(port or env.get("TAOS_PORT") or 40002),  # 6030
-      db=db or env.get("TAOS_DB") or "default",
-      user=user or env.get("DB_RW_USER") or "rw",
-      password=password or env.get("DB_RW_PASS") or "pass"
+      host=actual_host,
+      port=actual_port,
+      db=actual_db,
+      user=actual_user,
+      password=actual_password
     )
     await self.ensure_connected()
     return self
@@ -106,7 +120,7 @@ class Taos(SqlAdapter):
   async def _connect(self):
     """TDengine-specific connection."""
     try:
-      taos = self.taos_module
+      taos = self.DB_module
       self.conn = taos.connect(
         host=self.host,
         port=self.port,
@@ -121,7 +135,7 @@ class Taos(SqlAdapter):
       if "not exist" in e_str:
         log_warn(f"Database '{self.db}' does not exist on {self.host}:{self.port}, creating it now...")
         # Connect without database to create it
-        taos = self.taos_module
+        taos = self.DB_module
         self.conn = taos.connect(host=self.host, port=self.port, user=self.user, password=self.password)
         self.cursor = self.conn.cursor()
         await self.create_db(self.db)
@@ -154,19 +168,41 @@ class Taos(SqlAdapter):
     if params:
       formatted_query = query
       for param in params:
-        if isinstance(param, str):
+        if isinstance(param, datetime):
+          # Use proper timestamp formatting for TDengine
+          formatted_query = formatted_query.replace("?", self._format_timestamp(param), 1)
+        elif isinstance(param, str):
           formatted_query = formatted_query.replace("?", f"'{param}'", 1)
         else:
           formatted_query = formatted_query.replace("?", str(param), 1)
     else:
       formatted_query = query
 
+    # Only log debug messages when verbose flag is enabled
+    from .. import state
+    if state.args.verbose:
+      log_debug(f"TDengine executing: {formatted_query[:200]}...")  # Just show first 200 chars
+
     self.cursor.execute(formatted_query)
+    return self.cursor
 
   async def _fetch(self, query: str, params: tuple = ()) -> list[tuple]:
     """Execute TDengine query and fetch results."""
     await self._execute(query, params)
-    return self.cursor.fetchall()
+    result = self.cursor.fetchall()
+
+    # Debug: Log the structure to understand the issue
+    from .. import state
+    if state.args.verbose:
+      log_debug(f"TDengine _fetch result type: {type(result)}")
+      if result:
+        log_debug(f"TDengine _fetch result length: {len(result)}")
+        log_debug(f"TDengine _fetch first row type: {type(result[0])}")
+        log_debug(f"TDengine _fetch first row content: {result[0]}")
+        if hasattr(result[0], '__len__') and len(result[0]) > 0:
+          log_debug(f"TDengine _fetch first row first element type: {type(result[0][0])}")
+
+    return result
 
   async def _executemany(self, query: str, params_list: list[tuple]):
     """Execute many TDengine queries."""
@@ -176,6 +212,12 @@ class Taos(SqlAdapter):
   def _quote_identifier(self, identifier: str) -> str:
     """TDengine uses backticks for identifiers."""
     return f"`{identifier}`"
+
+  def _format_timestamp(self, timestamp: datetime) -> str:
+    """Format timestamp for TDengine - remove timezone suffix."""
+    # TDengine doesn't handle ISO 8601 timezone suffixes well
+    # Use format: 'YYYY-MM-DD HH:MM:SS.mmm'
+    return f"'{timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}'"
 
   async def create_db(self, name: str, options: dict = {}, force: bool = False):
     """TDengine-specific database creation."""

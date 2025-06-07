@@ -16,6 +16,12 @@ def lazy_import(module_name: str, package: Optional[str] = None, alias: Optional
   Returns:
     The imported module or None if import fails
   """
+  # Handle edge cases for invalid inputs
+  if module_name is None:
+    raise TypeError("module_name cannot be None")
+  if module_name == '':
+    raise ValueError("module_name cannot be empty")
+
   try:
     return importlib.import_module(module_name)
   except ImportError:
@@ -31,7 +37,11 @@ def safe_import(module_name: str) -> Optional[Any]:
   Safely import a module, returning None if not available.
   Use this for optional features that should degrade gracefully.
   """
+  # Handle edge cases for invalid inputs
+  if module_name is None:
+    raise TypeError("module_name cannot be None")
+
   try:
     return importlib.import_module(module_name)
-  except ImportError:
+  except (ImportError, ValueError):
     return None

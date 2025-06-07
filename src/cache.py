@@ -1,6 +1,6 @@
 # TODO: batch state.redis tx commit whenever possible (cf. limiter.py)
 from asyncio import gather, iscoroutinefunction, iscoroutine, sleep
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from time import monotonic
 from os import environ as env
 import pickle
@@ -36,10 +36,28 @@ async def claim_task(c: Ingester, until: int = 0, key: str = "") -> bool:
   return await state.redis.setex(key, round(until or (c.interval_sec + 8)), state.args.proc_id) # 8 sec overtime buffer for long running tasks
 
 async def ensure_claim_task(c: Ingester, until: int = 0) -> bool:
+  if state.args.verbose:
+    log_debug(f"Attempting to claim task {c.name}.{c.interval}")
+
   if not await claim_task(c, until):
-    raise ValueError(f"Failed to claim task {c.name}.{c.interval}): probably claimed by another worker")
+    # Check if task is claimed by another worker
+    key = claim_key(c)
+    current_owner = await state.redis.get(key)
+    if current_owner:
+      current_owner = current_owner.decode()
+      if current_owner == state.args.proc_id:
+        log_warn(f"Task {c.name}.{c.interval} already claimed by this worker ({state.args.proc_id})")
+        return True  # Already claimed by us, treat as success
+      else:
+        raise ValueError(f"Failed to claim task {c.name}.{c.interval}: already claimed by worker {current_owner}")
+    else:
+      raise ValueError(f"Failed to claim task {c.name}.{c.interval}: unknown claiming error")
+
   if c.probablity < 1.0 and random() > c.probablity:
-    raise ValueError(f"Task {c.name}.{c.interval} was probabilistically skipped")
+    raise ValueError(f"Task {c.name}.{c.interval} was probabilistically skipped (probability: {c.probablity})")
+
+  if state.args.verbose:
+    log_debug(f"Successfully claimed task {c.name}.{c.interval}")
   return True
 
 async def is_task_claimed(c: Ingester, exclude_self: bool = False, key: str = "") -> bool:
@@ -94,7 +112,7 @@ async def cache(name: str, value: Any, expiry: int = YEAR_SECONDS, raw_key: bool
   elif not isinstance(value, (str, bytes)):
     processed_value = str(value)
   else:
-    processed_value = value  # type: ignore
+    processed_value = value
 
   return await state.redis.setex(
     name if raw_key else cache_key(name),
@@ -115,7 +133,7 @@ async def cache_batch(data: dict, expiry: int = YEAR_SECONDS, pickled: bool = Fa
     elif not isinstance(value, (str, bytes)):
       processed_value = str(value)
     else:
-      processed_value = value  # type: ignore
+      processed_value = value
     keys_values[key] = processed_value
 
   async with state.redis.pipeline() as pipe:
@@ -128,7 +146,7 @@ async def get_cache(name: str, pickled: bool = False, encoding: str = "", raw_ke
   if r in (None, b"", ""):
     return None
   if pickled:
-    return pickle.loads(r)  # type: ignore
+    return pickle.loads(r)
   elif encoding and isinstance(r, bytes):
     return r.decode(encoding)
   else:
@@ -184,20 +202,35 @@ async def register_ingester(ingester: Ingester, scope: Scope = Scope.ALL) -> boo
   log_info(f"Registering {ingester.name}...")
   global_key = ingester_registry_key()
   specific_key = ingester_registry_key(ingester.name)
+
   # lock registry to prevent race conditions
   if not await wait_acquire_registry_lock():
     raise ValueError(f"Failed to acquire registry lock for {ingester.name}")
   try:
     registry = await get_cache(global_key, pickled=True, raw_key=True) or {}
     as_dict = ingester.to_dict(scope)
+
+    # Add runtime metadata to the registry entry
+    as_dict["runtime_metadata"] = {
+      "process_id": state.args.proc_id if hasattr(state, 'args') and state.args else "unknown",
+      "instance_uid": getattr(state, 'instance_uid', 'unknown'),
+      "instance_ip": getattr(state, 'instance_ip', 'unknown'),
+      "registered_at": datetime.now(timezone.utc).isoformat(),
+      "monitoring_enabled": getattr(state.args, 'monitored', False) if hasattr(state, 'args') else False
+    }
+
     registry[ingester.name] = as_dict
     await gather(
       cache(global_key, registry, pickled=True, raw_key=True),
       cache(specific_key, as_dict, pickled=True, raw_key=True),
       return_exceptions=True)
+
+
     return True
   finally:
     await release_registry_lock()
+
+
 
 async def unregister_ingester(ingester: Ingester) -> bool:
   log_info(f"Unregistering {ingester.name}...")

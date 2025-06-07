@@ -1,6 +1,6 @@
 from datetime import datetime
 from os import environ as env
-import aiohttp
+import httpx
 from typing import Any
 
 from ..utils import log_error, log_info, Interval
@@ -67,7 +67,7 @@ class QuestDb(SqlAdapter):
   """QuestDB adapter that extends SqlAdapter but uses HTTP API."""
 
   TYPES = TYPES
-  session: aiohttp.ClientSession | None = None
+  session: httpx.AsyncClient | None = None
   base_url: str
 
   @property
@@ -101,15 +101,15 @@ class QuestDb(SqlAdapter):
       # Create session with basic auth if credentials provided
       auth = None
       if self.user and self.password:
-        auth = aiohttp.BasicAuth(self.user, self.password)
+        auth = httpx.BasicAuth(self.user, self.password)
 
-      self.session = aiohttp.ClientSession(auth=auth)
+      self.session = httpx.AsyncClient(auth=auth)
       log_info(f"Connected to QuestDB on {self.host}:{self.port}")
 
   async def _close_connection(self):
     """Close QuestDB HTTP session."""
     if self.session:
-      await self.session.close()
+      await self.session.aclose()
       self.session = None
 
   async def _execute(self, query: str, params: tuple = ()) -> Any:
@@ -133,14 +133,14 @@ class QuestDb(SqlAdapter):
 
     if self.session is None:
       raise Exception("QuestDB session not connected")
-    async with self.session.get(
+    response = await self.session.get(
       f"{self.base_url}/exec",
       params={"query": formatted_query}
-    ) as resp:
-      if resp.status != 200:
-        error_text = await resp.text()
-        raise Exception(f"QuestDB query failed: {resp.status} - {error_text}")
-      return await resp.json()
+    )
+    if response.status_code != 200:
+      error_text = response.text
+      raise Exception(f"QuestDB query failed: {response.status_code} - {error_text}")
+    return response.json()
 
   async def _fetch(self, query: str, params: tuple = ()) -> list[tuple]:
     """Execute SQL query and return results."""
@@ -260,14 +260,14 @@ class QuestDb(SqlAdapter):
     try:
       if self.session is None:
         raise Exception("QuestDB session not connected")
-      async with self.session.post(
+      resp = await self.session.post(
         f"{self.base_url}/write",
-        data=ilp_line,
+        content=ilp_line,
         headers={"Content-Type": "text/plain"}
-      ) as resp:
-        if resp.status not in [200, 204]:
-          error_text = await resp.text()
-          raise Exception(f"QuestDB ILP insert failed: {resp.status} - {error_text}")
+      )
+      if resp.status_code not in [200, 204]:
+        error_text = resp.text
+        raise Exception(f"QuestDB ILP insert failed: {resp.status_code} - {error_text}")
     except Exception as e:
       error_message = str(e).lower()
       if "does not exist" in error_message:
@@ -276,14 +276,14 @@ class QuestDb(SqlAdapter):
         # Retry the insert
         if self.session is None:
           raise Exception("QuestDB session not connected")
-        async with self.session.post(
+        resp = await self.session.post(
           f"{self.base_url}/write",
-          data=ilp_line,
+          content=ilp_line,
           headers={"Content-Type": "text/plain"}
-        ) as resp:
-          if resp.status not in [200, 204]:
-            error_text = await resp.text()
-            raise Exception(f"QuestDB ILP insert failed: {resp.status} - {error_text}")
+        )
+        if resp.status_code not in [200, 204]:
+          error_text = resp.text
+          raise Exception(f"QuestDB ILP insert failed: {resp.status_code} - {error_text}")
       else:
         log_error(f"Failed to insert data into {table}", e)
         raise e

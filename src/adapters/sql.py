@@ -1,7 +1,7 @@
 from asyncio import gather
 from datetime import datetime, timezone
 from os import environ as env
-from typing import Dict, Any, cast
+from typing import Dict, Any
 from abc import ABC, abstractmethod
 
 from ..utils import log_error, log_info, log_warn, Interval, ago, now
@@ -405,9 +405,13 @@ class SqlAdapter(Tsdb, ABC):
 
     for column_name, column_type in add_columns:
       try:
-        # Cast column_type to FieldType for type safety
-        field_type = cast(FieldType, column_type) if column_type in self.TYPES else cast(FieldType, "string")
-        sql = f"ALTER TABLE {self._quote_identifier(table)} ADD COLUMN {self._quote_identifier(column_name)} {self.TYPES.get(field_type, 'TEXT')}"
+        # Determine field_type from column_type
+        from typing import cast
+        if column_type in self.TYPES:
+          sql_type = self.TYPES[cast(FieldType, column_type)]
+        else:
+          sql_type = 'TEXT'
+        sql = f"ALTER TABLE {self._quote_identifier(table)} ADD COLUMN {self._quote_identifier(column_name)} {sql_type}"
         await self._execute(sql)
         log_info(f"Added column {column_name} of type {column_type} to {self.db}.{table}")
       except Exception as e:

@@ -9,7 +9,7 @@ from concurrent.futures import Executor
 
 from ..server.responses import ORJSON_OPTIONS
 from ..cache import get_cache_batch, get_cache, get_resource_status
-from ..utils import now, round_sigfig, split, Interval, numeric_columns, log_info
+from ..utils import now, round_sigfig, split, Interval, numeric_columns, log_info, log_debug
 from .. import state
 from ..model import SCOPE_ATTRS, UNALIASED_FORMATS, FillMode, Scope, ServiceResponse, DataFormat
 
@@ -74,8 +74,8 @@ async def get_resources(scope: Scope = Scope.DEFAULT) -> ServiceResponse[dict]:
 
 async def parse_resources(resources: str, scope: Scope = Scope.DEFAULT) -> ServiceResponse[list[str]]:
   """Parse and validate resource strings"""
-  resource_list = split(resources) or ['*']
   try:
+    resource_list = split(resources) or ['*']
     if resource_list[0] in ["all", "*"]:
       err, res = await get_resources(scope)
       if err:
@@ -85,16 +85,18 @@ async def parse_resources(resources: str, scope: Scope = Scope.DEFAULT) -> Servi
       # Ensure resources are initialized and valid for scope
       if _resources_by_scope.get(scope) is None:
         log_info(f"Initializing resources for scope: {scope}")
-        await get_resources()  # Initialize cache if not already done
+        err, _ = await get_resources(scope)  # Initialize cache if not already done
+        if err:
+          return "Problem initializing resources", []
       cached_resources = _resources_by_scope.get(scope)
       if cached_resources is None:
-        return "Problem initializing resources", []
+        return "No resources found", []
       resource_list = [resource for resource in resource_list if resource in cached_resources]
     if not resource_list:
       return "No resources found", []
     return "", resource_list
   except Exception as e:
-    return f"Error parsing resources: {resources} - {e}", []
+    return f"Error parsing resources: {e}", []
 
 # TODO: merge with get_schema
 async def parse_fields(resource: str, fields: str, scope: Scope = Scope.ALL) -> ServiceResponse[list[str]]:
@@ -160,16 +162,26 @@ def format_table(
   columns: Optional[list[str]] = None
 ) -> ServiceResponse[Any]:
 
-  empty = data.is_empty() if isinstance(data, pl.DataFrame) else \
-    data in [None, "", [], {}, ()]
+  try:
+    # Check if data is empty
+    if isinstance(data, pl.DataFrame):
+      empty = data.is_empty()
+    elif isinstance(data, pl.Series):
+      empty = data.is_empty()
+    else:
+      empty = data in [None, "", [], {}, ()] if data is not None else True
+  except Exception:
+    # Fallback if data doesn't have is_empty method or isn't comparable
+    empty = data in [None, "", [], {}, ()] if data is not None else True
 
   if empty:
     return "No dataset to format", None
 
   from_fmt = UNALIASED_FORMATS.get(from_format, from_format)
   to_fmt = UNALIASED_FORMATS.get(to_format, to_format)
-  # Validate inputs
-  if from_fmt == to_fmt:
+  # Validate inputs - only return early if no conversion is needed
+  needs_conversion = (isinstance(data, pl.Series) and to_fmt == "polars") or columns
+  if from_fmt == to_fmt and not needs_conversion:
     return "", data
 
   # Load JSON if needed
@@ -213,7 +225,7 @@ def format_table(
         if isinstance(data, pl.DataFrame):
           df = data
         elif isinstance(data, pl.Series):
-          df = data.to_frame()  # type: ignore[assignment]
+          df = data.to_frame()
         else:
           df = pl.DataFrame(data)
       case _:
@@ -225,9 +237,10 @@ def format_table(
 
     # Convert timestamps to milliseconds since epoch for (JS Date compatible)
     if to_fmt and not to_fmt.startswith(("py:", "polars", "np:", "pd:")):
-      df = df.with_columns([
-        (pl.col('ts').cast(pl.Datetime).dt.timestamp(time_unit="ms")).cast(pl.Int64).alias('ts')
-      ])
+      if 'ts' in df.columns:
+        df = df.with_columns([
+          (pl.col('ts').cast(pl.Datetime).dt.timestamp(time_unit="ms")).cast(pl.Int64).alias('ts')
+        ])
 
     # Export from Polars DataFrame
     match to_fmt:
@@ -338,8 +351,40 @@ async def get_history(
   if not base_data:
     return "No data found", None
 
+  # Debug: Log the structure of base_data to understand the issue
+  # if state.args.verbose:
+  log_debug(f"base_data type: {type(base_data)}")
+  log_debug(f"base_data length: {len(base_data) if base_data else 0}")
+  if base_data and len(base_data) > 0:
+    log_debug(f"base_data[0] type: {type(base_data[0])}")
+    if hasattr(base_data[0], '__len__'):
+      log_debug(f"base_data[0] length: {len(base_data[0])}")
+    log_debug(f"base_data[0] content: {base_data[0]}")
+
   # Filter out rows where ts is null before creating DataFrame
-  filtered_base_data = [row for row in base_data[0] if row[0] is not None]
+  filtered_base_data = []
+  for row in base_data:
+    # Handle different row data formats from various databases
+    if isinstance(row, (list, tuple)):
+      # Row is a sequence (tuple/list) - standard format
+      if row[0] is not None:
+        filtered_base_data.append(row)
+    else:
+      # Row might be an object or single value - this can happen with some database drivers
+      # Try to convert to a proper tuple format
+      try:
+        if hasattr(row, '__iter__') and not isinstance(row, (str, bytes)):
+          # Row is iterable but not a string/bytes - convert to list
+          row_list = list(row)
+          if row_list and row_list[0] is not None:
+            filtered_base_data.append(tuple(row_list))
+        else:
+          # Single value case - could be just a timestamp
+          if row is not None:
+            filtered_base_data.append((row,))
+      except Exception:
+        # If all else fails, skip this row
+        continue
 
   # Explicitly specify orientation and ensure datetime conversion
   df = pl.DataFrame(
@@ -372,7 +417,30 @@ async def get_history(
     if not quote_data:
       return "No quote data found", None
 
-    filtered_quote_data = [row for row in quote_data if row[0] is not None]
+    filtered_quote_data = []
+    for row in quote_data:
+      # Handle different row data formats from various databases
+      if isinstance(row, (list, tuple)):
+        # Row is a sequence (tuple/list) - standard format
+        if row[0] is not None:
+          filtered_quote_data.append(row)
+      else:
+        # Row might be an object or single value - this can happen with some database drivers
+        # Try to convert to a proper tuple format
+        try:
+          if hasattr(row, '__iter__') and not isinstance(row, (str, bytes)):
+            # Row is iterable but not a string/bytes - convert to list
+            row_list = list(row)
+            if row_list and row_list[0] is not None:
+              filtered_quote_data.append(tuple(row_list))
+          else:
+            # Single value case - could be just a timestamp
+            if row is not None:
+              filtered_quote_data.append((row,))
+        except Exception:
+          # If all else fails, skip this row
+          continue
+
     quote_col_id = f'{quote_resource}.{quote_field}'
     # Create quote DataFrame with prefixed column names
     quote_df = pl.DataFrame(

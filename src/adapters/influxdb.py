@@ -74,6 +74,7 @@ class InfluxDb(Tsdb):
     self._org = env.get("INFLUXDB_ORG", "chomp")
     self._token = env.get("INFLUXDB_TOKEN", "")
     self._bucket = db
+    self.client = None
 
   @property
   def influxdb_client(self):
@@ -122,7 +123,7 @@ class InfluxDb(Tsdb):
 
   async def ensure_connected(self):
     """Ensure InfluxDB connection is established."""
-    if not self.client:
+    if not hasattr(self, 'client') or not self.client:
       try:
         # Build connection URL
         if self.port == 443:
@@ -133,7 +134,7 @@ class InfluxDb(Tsdb):
         # Create InfluxDB client for v2.x
         self.client = self.influxdb_client.InfluxDBClient(
           url=url,
-          token=self.token,
+          token=self._token,
           org=self._org,
           timeout=30000  # 30 seconds
         )
@@ -148,6 +149,8 @@ class InfluxDb(Tsdb):
     await self.ensure_connected()
 
     try:
+      if not self.client:
+        raise ValueError("InfluxDB client not connected")
       buckets_api = self.client.buckets_api()
 
       if force:
@@ -227,6 +230,8 @@ class InfluxDb(Tsdb):
 
     try:
       # Write point to InfluxDB
+      if not self.client:
+        raise ValueError("InfluxDB client not connected")
       write_api = self.client.write_api(write_options=self.influxdb_client.client.write_api.SYNCHRONOUS)
       write_api.write(bucket=self.db, org=self._org, record=point)
     except Exception as e:
@@ -279,6 +284,8 @@ class InfluxDb(Tsdb):
 
     try:
       # Write all points to InfluxDB
+      if not self.client:
+        raise ValueError("InfluxDB client not connected")
       write_api = self.client.write_api(write_options=self.influxdb_client.client.write_api.SYNCHRONOUS)
       write_api.write(bucket=self.db, org=self._org, record=points)
     except Exception as e:
@@ -321,6 +328,8 @@ class InfluxDb(Tsdb):
 
     try:
       # Execute query
+      if not self.client:
+        raise ValueError("InfluxDB client not connected")
       query_api = self.client.query_api()
       tables = query_api.query(query=query, org=self._org)
 
@@ -400,6 +409,8 @@ class InfluxDb(Tsdb):
       schema.measurements(bucket: "{self.db}")
       '''
 
+      if not self.client:
+        raise ValueError("InfluxDB client not connected")
       query_api = self.client.query_api()
       tables = query_api.query(query=query, org=self._org)
 
