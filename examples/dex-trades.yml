@@ -20,8 +20,8 @@ evm_logger:
       # - { name: tick, type: int16, transformers: ["{self}[6]"] }
 
 # non-evm chain ingesters
-solana_caller: []
-solana_logger: []
+svm_caller: []
+svm_logger: []
 sui_caller: []
 sui_logger: []
 aptos_caller: []

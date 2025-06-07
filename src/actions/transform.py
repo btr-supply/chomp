@@ -207,9 +207,8 @@ async def apply_transformer(c: Ingester, field: ResourceField, transformer: str)
             target_field = field
           else:
             # filter the resource field that match the target
-            default_field = ResourceField(name="", value=None, transformers=[], type="float64")
-            target_field = next((f for f in c.fields if f.name == target), default_field)
-            if target_field == default_field:
+            target_field = next((f for f in c.fields if f.name == target), None)  # type: ignore[arg-type]
+            if target_field is None:
               raise ValueError(f"Invalid transformer target: {target}")
           # step 7: extract the series from the target field
           from datetime import datetime, timezone

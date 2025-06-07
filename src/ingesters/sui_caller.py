@@ -82,7 +82,7 @@ async def schedule(c: Ingester) -> list[Task]:
           log_error(f"Object not found: {field.target}")
           continue
 
-        # TODO: handle comma separatted multi selectors cf. solana_caller.py
+        # TODO: handle comma separatted multi selectors cf. svm_caller.py
         if field.selector and data_by_object[field.target]:
           data = data_by_object[field.target]
           results[field.target] = [data[field.selector]]

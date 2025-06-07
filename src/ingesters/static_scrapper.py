@@ -1,36 +1,44 @@
 from asyncio import Task, gather
-from aiohttp import ClientError, ClientSession
+import httpx
 from hashlib import md5
-from lxml import html
-from bs4 import BeautifulSoup
+from typing import Any
 
 from ..utils import interval_to_seconds, log_error
 from ..model import Ingester
 from ..cache import ensure_claim_task, get_or_set_cache
 from .. import state
 from ..actions import transform_and_store, scheduler
+from ..deps import safe_import
+
+# Safe import optional dependencies
+lxml_html = safe_import('lxml.html')
+bs4 = safe_import('bs4')
 
 def is_xpath(selector: str) -> bool:
   return selector.startswith(("//", "./"))
 
 async def get_page(url: str) -> str:
-  async with ClientSession() as session:
+  async with httpx.AsyncClient() as session:
     try:
-      async with session.get(url) as response:
-        if response.status == 200:
-          return await response.text()
-        else:
-          log_error(f"Failed to fetch page {url}, status code: {response.status}")
-    except ClientError as e:
+      response = await session.get(url)
+      if response.status_code == 200:
+        return response.text
+      else:
+        log_error(f"Failed to fetch page {url}, status code: {response.status_code}")
+    except httpx.RequestError as e:
       log_error(f"Error fetching page {url}: {e}")
   return ""
 
 async def schedule(c: Ingester) -> list[Task]:
+  # Check for required dependencies
+  if lxml_html is None or bs4 is None:
+    log_error("Missing optional dependencies for static scraper. Install with 'pip install chomp[scraper]'")
+    return []
 
   # NB: not thread/async safe when multiple ingesters run with same target URL
   pages: dict[str, str] = {}
-  soups: dict[str, BeautifulSoup] = {}
-  trees: dict[str, html.HtmlElement] = {}
+  soups: dict[str, Any] = {}  # BeautifulSoup objects
+  trees: dict[str, Any] = {}  # lxml Element objects
   hashes: dict[str, str] = {}
 
   async def ingest(c: Ingester):
@@ -49,8 +57,8 @@ async def schedule(c: Ingester) -> list[Task]:
 
       # cache page both for CSS selection and XPath
       pages[h] = page
-      trees[h] = html.fromstring(page)
-      soups[h] = BeautifulSoup(page, 'html.parser')
+      trees[h] = lxml_html.fromstring(page)
+      soups[h] = bs4.BeautifulSoup(page, 'html.parser')
       return page
 
     urls = set([f.target for f in c.fields if f.target])

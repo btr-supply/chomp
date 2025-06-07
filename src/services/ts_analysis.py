@@ -21,7 +21,7 @@ async def ensure_df(
   target_epochs: int = 1000
 ) -> ServiceResponse[pl.DataFrame]:
 
-  if df:
+  if df is not None and not df.is_empty():
     return "", df
 
   if not fields:
@@ -121,7 +121,7 @@ async def get_volatility(
   precision: int = 6,
   format: DataFormat = "json:row",
   df: Optional[pl.DataFrame] = None
-) -> ServiceResponse[pl.DataFrame]:
+) -> ServiceResponse[Any]:
   """Calculate various volatility metrics for given fields"""
 
   def compute(df: pl.DataFrame, col: str, period: int) -> dict:
@@ -139,21 +139,16 @@ async def get_volatility(
     quote, precision, df, compute
   )
   if err:
-    return err, pl.DataFrame()
+    return err, None
 
   if df is None:
-    return "Failed to compute volatility metrics", pl.DataFrame()
+    return "Failed to compute volatility metrics", None
 
   err_fmt, result = loader.format_table(df, from_format="polars", to_format=format)
   if err_fmt:
-    return err_fmt, pl.DataFrame()
+    return err_fmt, None
 
-  # Ensure result is a DataFrame for return type consistency
-  if format == "polars" and isinstance(result, pl.DataFrame):
-    return "", result
-  else:
-    # For non-polars formats, we need to return the original df since the return type expects DataFrame
-    return "", df
+  return "", result
 
 async def get_trend(
   resources: list[str],
@@ -166,7 +161,7 @@ async def get_trend(
   precision: int = 6,
   format: DataFormat = "json:row",
   df: Optional[pl.DataFrame] = None
-) -> ServiceResponse[pl.DataFrame]:
+) -> ServiceResponse[Any]:
   """Calculate various trend metrics for given fields"""
 
   def compute(df: pl.DataFrame, col: str, period: int) -> dict:
@@ -198,21 +193,16 @@ async def get_trend(
     quote, precision, df, compute
   )
   if err:
-    return err, pl.DataFrame()
+    return err, None
 
   if df is None:
-    return "Failed to compute trend metrics", pl.DataFrame()
+    return "Failed to compute trend metrics", None
 
   err_fmt, result = loader.format_table(df, from_format="polars", to_format=format)
   if err_fmt:
-    return err_fmt, pl.DataFrame()
+    return err_fmt, None
 
-  # Ensure result is a DataFrame for return type consistency
-  if format == "polars" and isinstance(result, pl.DataFrame):
-    return "", result
-  else:
-    # For non-polars formats, we need to return the original df since the return type expects DataFrame
-    return "", df
+  return "", result
 
 async def get_momentum(
   resources: List[str],
@@ -225,7 +215,7 @@ async def get_momentum(
   precision: int = 6,
   format: DataFormat = "json:row",
   df: Optional[pl.DataFrame] = None
-) -> ServiceResponse[pl.DataFrame]:
+) -> ServiceResponse[Any]:
   """Calculate various momentum metrics for given fields"""
 
   def compute(df: pl.DataFrame, col: str, period: int) -> dict:
@@ -247,21 +237,16 @@ async def get_momentum(
     quote, precision, df, compute
   )
   if err:
-    return err, pl.DataFrame()
+    return err, None
 
   if df is None:
-    return "Failed to compute momentum metrics", pl.DataFrame()
+    return "Failed to compute momentum metrics", None
 
   err_fmt, result = loader.format_table(df, from_format="polars", to_format=format)
   if err_fmt:
-    return err_fmt, pl.DataFrame()
+    return err_fmt, None
 
-  # Ensure result is a DataFrame for return type consistency
-  if format == "polars" and isinstance(result, pl.DataFrame):
-    return "", result
-  else:
-    # For non-polars formats, we need to return the original df since the return type expects DataFrame
-    return "", df
+  return "", result
 
 async def get_all(
   resources: list[str],

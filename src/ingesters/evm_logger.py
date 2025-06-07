@@ -24,16 +24,29 @@ def decode_log_data(client: Web3, log: dict, topics_first: list[str], indexed: l
   return tuple(reorder_decoded_params(list(decoded), indexed))
 
 def reorder_decoded_params(decoded: list, indexed: list[bool]) -> list:
+  """
+  Reorders decoded parameters from [indexed_params..., non_indexed_params...]
+  back to their original order based on the indexed flag list.
+
+  Args:
+    decoded: List with indexed params first, then non-indexed params
+    indexed: Boolean list indicating which positions should be indexed
+
+  Returns:
+    List with parameters in their original order
+  """
   reordered = []
-  index_count, non_index_count = 0, 0
+  indexed_ptr = 0  # pointer for indexed params
+  non_indexed_ptr = sum(indexed)  # pointer for non-indexed params (start after all indexed)
 
   for is_indexed in indexed:
     if is_indexed:
-      reordered.append(decoded[index_count])
-      index_count += 1
+      reordered.append(decoded[indexed_ptr])
+      indexed_ptr += 1
     else:
-      reordered.append(decoded[index_count + non_index_count])
-      non_index_count += 1
+      reordered.append(decoded[non_indexed_ptr])
+      non_indexed_ptr += 1
+
   return reordered
 
 async def schedule(c: Ingester) -> list[Task]:
@@ -57,11 +70,11 @@ async def schedule(c: Ingester) -> list[Task]:
     addr = Web3.to_checksum_address(addr) # enforce checksum
 
     for event in events_by_contract[contract].copy(): # copy to avoid modifying while iterating
-      event_name, param_types, indexed = parse_event_signature(field.selector)
+      event_name, param_types, indexed = parse_event_signature(event)
       index_types, non_index_types = [], []
-      event_id = f"{field.target}:{field.selector}"
+      event_id = f"{contract}:{event}"
 
-      event_hash = Web3.keccak(text=field.selector.replace('indexed ', '')).hex()
+      event_hash = Web3.keccak(text=event.replace('indexed ', '')).hex()
       event_hashes[event_id] = event_hash
       event_hashes[event_hash] = event_id
 
@@ -69,17 +82,17 @@ async def schedule(c: Ingester) -> list[Task]:
         index_types.append(param_types[i]) if is_indexed else non_index_types.append(param_types[i])
       index_first_types_by_event[event_id] = list(index_types) + non_index_types
 
-      events_by_contract.setdefault(field.target, set()).add(event_id)
+      events_by_contract.setdefault(contract, set()).add(event_id)
       data_by_event.setdefault(event_id, {})
 
-      filter_by_contract.setdefault(field.target, {
+      filter_by_contract.setdefault(contract, {
         "fromBlock": "latest",
         "toBlock": "latest",
         "address": addr,
         "topics": []
       })["topics"].append(event_hashes[event_id])
 
-      filter_index_by_event[event_id] = len(filter_by_contract[field.target]["topics"]) - 1
+      filter_index_by_event[event_id] = len(filter_by_contract[contract]["topics"]) - 1
 
     filter_by_contract[contract]["topics"] = list(set(filter_by_contract[contract]["topics"])) # remove duplicates
 
@@ -108,12 +121,12 @@ async def schedule(c: Ingester) -> list[Task]:
         log_info(f"No new blocks for {contract}, skipping event polling for {c.interval}")
         break
       try:
-        logs = client.eth.get_logs(f)  # type: ignore
+        logs = client.eth.get_logs(f)
         for log_entry in logs:
-          event_id = event_hashes[log_entry["topics"][0].hex()]  # type: ignore
+          event_id = event_hashes[log_entry["topics"][0].hex()]
           # Ensure we have a Web3 client for decoding
           if hasattr(client, 'eth'):
-            decoded_event = decode_log_data(client, log_entry, index_first_types_by_event[event_id], indexed)  # type: ignore
+            decoded_event = decode_log_data(client, log_entry, index_first_types_by_event[event_id], indexed)
             if state.args.verbose:
               log_debug(f"Block: {log_entry['blockNumber']} | Event: {decoded_event}")
         start_block = end_block + 1

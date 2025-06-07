@@ -48,7 +48,8 @@ async def schedule(c: Ingester) -> list[Task]:
     # Wait for dependencies to be processed (half the interval)
     wait_time = c.interval_sec // 2
     if wait_time > 0:
-      if state.args.verbose:
+      # Check if state.args exists and is not None before checking verbose
+      if hasattr(state, 'args') and state.args is not None and hasattr(state.args, 'verbose') and state.args.verbose:
         log_debug(f"Waiting {wait_time}s for dependencies to be processed...")
       await sleep(wait_time)
 
@@ -61,8 +62,14 @@ async def schedule(c: Ingester) -> list[Task]:
     inputs = {}
     deps = c.dependencies()
     cache_tasks = [get_cache(dep, pickled=True) for dep in deps]
-    cache_results = await gather(*cache_tasks)
-    inputs = dict(zip(deps, cache_results))
+
+    # Handle empty cache_tasks properly
+    if cache_tasks:
+      cache_results = await gather(*cache_tasks)
+      inputs = dict(zip(deps, cache_results))
+    else:
+      cache_results = []
+      inputs = {}
 
     if not any(inputs.values()):
       log_warn(f"No dependency data available for {c.name}")

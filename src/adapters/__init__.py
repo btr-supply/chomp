@@ -1,4 +1,5 @@
 from . import tdengine
+# from . import sqlite
 # from . import influxdb
 from . import timescale
 # from . import clickhouse
@@ -11,6 +12,7 @@ from . import opentsdb
 
 __all__ = [
   "tdengine",
+  # "sqlite",
   "timescale",
   "kx",
   "questdb",

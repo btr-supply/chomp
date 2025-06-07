@@ -1,56 +1,74 @@
 from asyncio import Task, gather, sleep
 from hashlib import md5
 import orjson
-from aiohttp import ClientSession, ClientTimeout, TCPConnector
-from typing import Any
-from socket import AddressFamily
+import httpx
+from typing import Any, Optional
 
 from ..utils import log_debug, log_error, log_warn, select_nested
-from ..model import Ingester
+from ..model import Ingester, Monitor
 from ..cache import ensure_claim_task, get_or_set_cache
 from ..actions.schedule import scheduler
 from ..actions.store import transform_and_store
 from ..utils import safe_eval
 from .. import state
 
-# reusable ClientSession proxy for better performance (connection pooling)
+# reusable AsyncClient proxy for better performance (connection pooling)
 class HTTPIngester:
   def __init__(self):
     self.session = None
 
-  async def get_session(self) -> ClientSession:
-    if self.session is None or self.session.closed:
-      timeout = ClientTimeout(total=30, connect=10, sock_connect=10)
-      connector = TCPConnector(
-        verify_ssl=False,
-        family=AddressFamily.AF_UNSPEC, # IPv4 + IPv6
-        enable_cleanup_closed=True,
-        force_close=False,
-        use_dns_cache=True,
-        ttl_dns_cache=300, # cache DNS results for 5 minutes to avoid DNS rate limiting
-        limit=512,
-        limit_per_host=32
+  async def get_session(self) -> httpx.AsyncClient:
+    if self.session is None or self.session.is_closed:
+      limits = httpx.Limits(max_keepalive_connections=512, max_connections=512)
+      self.session = httpx.AsyncClient(
+        verify=False,
+        timeout=httpx.Timeout(30.0, connect=10.0),
+        limits=limits,
+        follow_redirects=True
       )
-      self.session = ClientSession(connector=connector, timeout=timeout)
     return self.session
 
   async def close(self):
-    if self.session and not self.session.closed:
-      await self.session.close()
+    if self.session and not self.session.is_closed:
+      await self.session.aclose()
 
 http_ingester = HTTPIngester()
 
-async def fetch_json(url: str, retry_delay: float = 2.5, max_retries: int = state.args.max_retries) -> str:
+async def fetch_json(url: str, retry_delay: float = 2.5, max_retries: int | None = None, monitor: Optional['Monitor'] = None) -> str:
+  """
+  Fetch JSON data from URL
+  Returns: response_text
+  """
+  if max_retries is None:
+    max_retries = getattr(state.args, 'max_retries', 3) if hasattr(state, 'args') else 3
+
   for attempt in range(max_retries):
+    if monitor:
+      monitor.start_timer()
+
     try:
       if state.args.verbose:
         log_debug(f"Fetching {url}" + (f" (attempt {attempt + 1})" if attempt > 0 else ""))
+
       session = await http_ingester.get_session()
-      async with session.get(url) as response:
-        if response.status == 200:
-          return await response.text()
-        log_error(f"HTTP error {response.status} for {url}")
+
+      response = await session.get(url)
+      if response.status_code == 200:
+        response_text = response.text
+
+        if monitor:
+          monitor.stop_timer(len(response_text.encode('utf-8')), response.status_code)
+
+        return response_text
+      log_error(f"HTTP error {response.status_code} for {url}")
+
+      if monitor:
+        monitor.stop_timer(0, response.status_code)
+
     except Exception as e:
+      if monitor:
+        monitor.stop_timer(0, None)
+
       if attempt < max_retries - 1:
         log_warn(f"Failed to fetch {url} (attempt {attempt + 1}): {str(e)}")
         await sleep(retry_delay)
@@ -66,9 +84,16 @@ async def schedule(c: Ingester) -> list[Task]:
   async def ingest(c: Ingester) -> None:
     await ensure_claim_task(c)
 
+
+
     async def fetch_hashed(url: str) -> dict:
       try:
-        data_str = await get_or_set_cache(hashes[url], lambda: fetch_json(url), c.interval_sec)
+                # Create a wrapper for the cache that returns just the data string
+        async def fetch_data_only():
+          data_str = await fetch_json(url, monitor=c.monitor)
+          return data_str
+
+        data_str = await get_or_set_cache(hashes[url], fetch_data_only, c.interval_sec)
         data = orjson.loads(data_str)
         data_by_route[hashes[url]] = data
 

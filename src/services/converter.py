@@ -25,8 +25,16 @@ async def convert(pair: str, base_amount: Optional[float] = None, quote_amount: 
 
   # Extract and validate the fields
   try:
-    base_value = round_sigfig(lasts[base_resource][base_field], precision)
-    quote_value = round_sigfig(lasts[quote_resource][quote_field], precision)
+    raw_base_value = lasts[base_resource][base_field]
+    raw_quote_value = lasts[quote_resource][quote_field]
+
+    # Validate that values are numeric
+    try:
+      base_value = round_sigfig(float(raw_base_value), precision)
+      quote_value = round_sigfig(float(raw_quote_value), precision)
+    except (ValueError, TypeError):
+      return "Field values must be numeric", {}
+
   except (KeyError, TypeError):
     return "Required fields not found in resources", {}
 
@@ -66,8 +74,16 @@ async def pegcheck(pair: str, factor: float = 1.0, max_deviation: float = .002, 
 
   # Extract prices
   try:
-    base_price = lasts[base_resource][base_field]
-    quote_price = lasts[quote_resource][quote_field]
+    raw_base_price = lasts[base_resource][base_field]
+    raw_quote_price = lasts[quote_resource][quote_field]
+
+    # Validate that prices are numeric
+    try:
+      base_price = float(raw_base_price)
+      quote_price = float(raw_quote_price)
+    except (ValueError, TypeError):
+      return "Price values must be numeric", {}
+
   except (KeyError, TypeError):
     return "Required fields not found in resources", {}
 

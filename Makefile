@@ -1,114 +1,98 @@
-# Chomp Makefile - BTR Supply Data Ingestion Framework
-.PHONY: help install format lint test build clean
-.PHONY: db-setup core-setup api-setup full-setup health-check ping
-.PHONY: start-ingester start-server start-cluster stop-cluster stop-all cleanup monitor logs
-.PHONY: build-images dev-setup ci-test push-images
+# Chomp Makefile - Lean Data Ingestion Framework
+.PHONY: help setup run ingesters api stop cleanup logs monitor monitor-local format lint check-name pre-commit
 
 # Variables
-ENV_FILE ?= .env
-CONFIG_FILE ?= examples/diverse.yml
-MAX_JOBS ?= 8
-REGISTRY ?=
+MAX_JOBS ?= 15
 
 # Default target
 help:
-	@echo "Chomp - Data Ingestion Framework"
+	@echo "Chomp - Lean Data Ingestion Framework"
 	@echo ""
-	@echo "Dev: install format lint test build clean pre-commit"
-	@echo "Git Hooks: validate-commit-msg validate-branch-name pre-push"
-	@echo "Docker: build-images db-setup core-setup api-setup full-setup"
-	@echo "Runtime: start-ingester start-server start-cluster stop-cluster ping health-check"
-	@echo "Ops: stop-all cleanup monitor logs"
-	@echo "Utils: dev-setup ci-test push-images"
+	@echo "Commands:"
+	@echo "  setup [deps|images|all] - Install dependencies and/or build images"
+	@echo "  run [MODE] [DEPLOYMENT] [API] - Start services"
+	@echo "  debug [MODE] [DEPLOYMENT] [API] - Start services with verbose debug logging"
+	@echo "  api [MODE] [DEPLOYMENT] - Start API server only"
+	@echo "  ingesters [MODE] [DEPLOYMENT] - Start ingesters only"
+	@echo "  stop - Stop all services"
+	@echo "  cleanup - Stop and remove all containers/data"
+	@echo "  logs [container] - Show service logs"
+	@echo "  monitor - Monitor running services (Docker)"
+	@echo "  monitor-local - Monitor local services and logs"
+	@echo "  format - Format code with yapf"
+	@echo "  lint - Lint code with ruff and mypy"
+	@echo "  check-name - Validate branch/commit naming"
+	@echo "  pre-commit - Run format + lint + check-name"
+	@echo ""
+	@echo "Run Arguments:"
+	@echo "  MODE: dev|prod (default: dev)"
+	@echo "  DEPLOYMENT: local|docker (default: docker)"
+	@echo "  API: api|noapi (default: api)"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make run              # dev docker with API"
+	@echo "  make run prod         # prod docker with API"
+	@echo "  make run dev local    # dev local with API"
+	@echo "  make run prod noapi   # prod docker without API"
+	@echo "  make debug dev local  # dev local with API and verbose debug logs"
+	@echo "  make debug dev docker # dev docker with API and verbose debug logs"
+	@echo ""
+	@echo "Environment:"
 
-# Development
-install:
-	@bash scripts/install_deps.sh $(EXTRA)
+	@echo "  MAX_JOBS - Workers per service (default: 15)"
 
-format:
-	@bash scripts/format_code.sh
+# Setup command
+setup:
+	@bash scripts/setup.sh $(filter-out setup,$(MAKECMDGOALS))
 
-lint:
-	@bash scripts/lint.sh
+# Universal run command
+run:
+	@bash scripts/run.sh $(filter-out run,$(MAKECMDGOALS))
 
-test:
-	@bash scripts/test.sh
+# Debug command with verbose flag
+debug:
+	@VERBOSE=true bash scripts/run.sh $(filter-out debug,$(MAKECMDGOALS))
 
-build: format lint test
-	@echo "Build completed."
+# Service-specific commands
+ingesters:
+	@bash scripts/services.sh ingester $(filter-out ingesters,$(MAKECMDGOALS))
 
-clean:
-	@bash scripts/clean.sh
+api:
+	@bash scripts/services.sh api $(filter-out api,$(MAKECMDGOALS))
 
-# Git Hook Validations
-pre-commit: format lint
-
-validate-commit-msg:
-	@echo "Validating commit message format..."
-	@uv run --active python scripts/check_name.py -c
-
-validate-branch-name:
-	@echo "Validating current branch name format..."
-	@uv run --active python scripts/check_name.py -b
-
-pre-push:
-	@echo "Validating format of commits+branch name to be pushed..."
-	@uv run --active python scripts/check_name.py -p
-
-# Docker
-build-images:
-	@bash scripts/build_images.sh
-
-db-setup:
-	@sudo bash scripts/db_setup.sh
-
-core-setup:
-	@sudo bash scripts/core_setup.sh
-
-api-setup:
-	@sudo bash scripts/api_setup.sh
-
-full-setup:
-	@sudo bash scripts/full_setup.sh
-
-# Runtime
-start-ingester:
-	@ENV_FILE=$(ENV_FILE) CONFIG_FILE=$(CONFIG_FILE) MAX_JOBS=$(MAX_JOBS) bash scripts/start_ingester.sh
-
-start-server:
-	@ENV_FILE=$(ENV_FILE) bash scripts/start_server.sh
-
-start-cluster:
-	@ENV_FILE=$(ENV_FILE) CONFIG_FILE=$(CONFIG_FILE) MAX_JOBS=$(MAX_JOBS) bash scripts/start_cluster.sh
-
-stop-cluster:
-	@bash scripts/stop_cluster.sh
-
-ping health-check:
-	@ENV_FILE=$(ENV_FILE) bash scripts/health_check.sh
+database:
+	@bash scripts/database.sh $(filter-out database,$(MAKECMDGOALS))
 
 # Operations
-stop-all:
-	@bash scripts/stop_all.sh
+stop:
+	@bash scripts/stop.sh
 
-cleanup: stop-all
-	@docker ps -a --format '{{.Names}}' | grep "^chomp" | xargs -r docker rm 2>/dev/null || true
-	@docker network ls --format '{{.Name}}' | grep "^chomp_net" | xargs -r docker network rm 2>/dev/null || true
-
-monitor:
-	@bash scripts/monitor.sh
+cleanup:
+	@bash -c "source scripts/utils.sh && docker_cleanup_all"
 
 logs:
-	@bash scripts/show_logs.sh
+	@bash -c "source scripts/utils.sh && docker_show_logs $(filter-out logs,$(MAKECMDGOALS))"
 
-# Utilities
-dev-setup: install db-setup
-	@echo "Dev environment ready. Try: make start-ingester"
+monitor:
+	@bash -c "source scripts/utils.sh && docker_monitor"
 
-ci-test: install lint test
+monitor-local:
+	@bash scripts/monitor_local.sh
 
-push-images: build-images
-	@[ -n "$(REGISTRY)" ] || { echo "Error: REGISTRY not set"; exit 1; }
-	@docker tag chomp-core:latest $(REGISTRY)/chomp-core:latest
-	@docker tag chomp-db:latest $(REGISTRY)/chomp-db:latest
-	@docker push $(REGISTRY)/chomp-core:latest $(REGISTRY)/chomp-db:latest
+# Pre-commit commands
+format:
+	@bash scripts/format.sh chomp
+
+lint:
+	@bash scripts/lint.sh chomp
+
+check-name:
+	@echo "Validating branch and commit naming..."
+	@uv run python scripts/check_name.py -b -c
+
+pre-commit: format lint check-name
+	@echo "✅ Pre-commit checks completed successfully"
+
+# Allow passing arguments to targets
+%:
+	@:

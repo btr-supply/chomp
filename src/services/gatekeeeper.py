@@ -3,7 +3,7 @@ from fastapi import Request
 
 def requester_id(req: Request) -> str:
   """Get requester ID from request"""
-  if hasattr(req.state, 'requester_id'):
+  if hasattr(req, 'state') and hasattr(req.state, 'requester_id'):
     return req.state.requester_id
   if req.client is not None:
     return req.client.host

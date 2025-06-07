@@ -28,7 +28,7 @@ ALLOWED_TOPICS_PATTERN = os.getenv("WS_ALLOWED_TOPICS", "chomp:*") # Default to 
 async def lifespan(router: APIRouter):
   # on startup
   await state.start_redis_listener(ALLOWED_TOPICS_PATTERN)
-  
+
   try:
     yield
   finally:
@@ -68,10 +68,13 @@ async def broadcast_message(topic, msg):
     if ws.client_state == WebSocketState.DISCONNECTED:
       await disconnect_client(ws)
     try:
-      if isinstance(msg, (str, bytes)):
+      if isinstance(msg, str):
         await ws.send_text(msg)
+      elif isinstance(msg, bytes):
+        await ws.send_text(msg.decode('utf-8'))
       else:
-        await ws.send_text(orjson.dumps(msg, option=ORJSON_OPTIONS).decode('utf-8'))
+        text_msg = orjson.dumps(msg, option=ORJSON_OPTIONS).decode('utf-8')
+        await ws.send_text(text_msg)
     except Exception as e:
       log_error(f"Error sending message to client: {e}")
 
@@ -81,7 +84,7 @@ async def disconnect_client(ws: WebSocket):
   except RuntimeError:
     # Connection might already be closed
     pass
-  
+
   # Unsubscribe from topics that have no more clients
   for topic in topics_by_client[ws]:
     clients = clients_by_topic[topic]
@@ -112,13 +115,13 @@ async def websocket_endpoint(ws: WebSocket):
           topics = msg["topics"]
           accepted_topics = []
           rejected_topics = []
-          
+
           for topic in topics:
             # Check if topic matches allowed pattern
             if not fnmatch.fnmatch(topic, ALLOWED_TOPICS_PATTERN):
               rejected_topics.append(topic)
               continue
-            
+
             # Check if topic exists using the new function
             # TODO: implement a better resource status check since the first subscription will always be rejected
             # if not await topic_exist(topic):
@@ -129,16 +132,16 @@ async def websocket_endpoint(ws: WebSocket):
             clients = clients_by_topic.setdefault(topic, set())
             clients.add(ws)
             topics_by_client[ws].add(topic)
-            
+
             # Only subscribe if not already subscribed
             if topic not in forwarded_topics:
               await state.redis.pubsub.subscribe(topic)
               forwarded_topics.add(topic)
               if state.args.verbose:
                 log_debug(f"New Redis subscription: {topic}")
-            
+
             accepted_topics.append(topic)
-          
+
           # Send subscription response
           if rejected_topics:
             await ws.send_text(orjson.dumps({
@@ -150,7 +153,7 @@ async def websocket_endpoint(ws: WebSocket):
               "success": True,
               "subscribed": accepted_topics
             }, option=ORJSON_OPTIONS).decode())
-            
+
         case "unsubscribe":
           topics = msg["topics"]
           for topic in topics:

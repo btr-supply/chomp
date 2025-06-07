@@ -1,7 +1,7 @@
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
-import src.state as state
+from ... import state
 
 class VersionResolver(BaseHTTPMiddleware):
   async def dispatch(self, request: Request, call_next):

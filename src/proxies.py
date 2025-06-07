@@ -4,13 +4,16 @@ from os import cpu_count, environ as env, path
 from redis.asyncio import Redis, ConnectionPool
 from httpx import Request, Response
 from httpx import AsyncBaseTransport
-from web3 import Web3 as EvmClient
 from typing import Any
 
 from .model import Config, Tsdb
 from .utils import log_error, log_info, is_iterable, PackageMeta
 from .adapters.sui_rpc import SuiRpcClient
-from .adapters.solana_rpc import SolanaRpcClient
+from .adapters.svm_rpc import SvmRpcClient
+from .deps import safe_import
+
+# Safe import optional dependencies
+web3_module = safe_import('web3')
 
 args: Any
 thread_pool: ThreadPoolExecutor
@@ -63,17 +66,20 @@ class Web3Proxy:
       self._rpcs_by_chain[chain_id] = rpc_env.split(",")
     return self._rpcs_by_chain[chain_id]
 
-  async def client(self, chain_id: str | int, roll=True) -> EvmClient | SolanaRpcClient | SuiRpcClient:
+  async def client(self, chain_id: str | int, roll=True) -> Any:
     is_evm = isinstance(chain_id, int)
 
-    async def connect(rpc_url: str) -> EvmClient | SolanaRpcClient | SuiRpcClient | None:
+    async def connect(rpc_url: str) -> Any:
       try:
         if is_evm:
-          c = EvmClient(EvmClient.HTTPProvider(rpc_url))  # type: ignore
+          if web3_module is None:
+            raise ImportError("Missing optional dependency 'web3'. Install with 'pip install web3' or 'pip install chomp[evm]'")
+          EvmClient = web3_module.Web3
+          c = EvmClient(EvmClient.HTTPProvider(rpc_url))
         elif chain_id == "sui":
-          c = SuiRpcClient(rpc_url)  # type: ignore
+          c = SuiRpcClient(rpc_url)
         elif chain_id == "solana":
-          c = SolanaRpcClient(rpc_url)  # type: ignore
+          c = SvmRpcClient(rpc_url)
         else:
           raise ValueError(f"Unsupported chain: {chain_id}")
         connected = await is_connected(c)
@@ -86,15 +92,15 @@ class Web3Proxy:
         log_error(f"Could not connect to chain {chain_id} using rpc {rpc_url}: {e}")
         return None
 
-    async def is_connected(c: EvmClient | SolanaRpcClient | SuiRpcClient) -> bool:
+    async def is_connected(c: Any) -> bool:
       try:
         if is_evm:
-          result = c.is_connected()  # type: ignore
+          result = c.is_connected()
           if hasattr(result, '__await__'):
-            return await result  # type: ignore
+            return await result
           return bool(result)
         else: # any of non evm rpc clients
-          return await c.is_connected()  # type: ignore
+          return await c.is_connected()
       except Exception:
         return False
 
@@ -190,14 +196,31 @@ class RedisProxy:
 
   async def close(self):
     if self._pubsub:
-      await self._pubsub.close()
+      try:
+        await self._pubsub.close()
+      except Exception:
+        pass  # Ignore close errors
       self._pubsub = None
     if self._redis:
-      await self._redis.close()
+      try:
+        await self._redis.close()
+      except Exception:
+        pass  # Ignore close errors
       self._redis = None
     if self._pool:
-      await self._pool.disconnect()
+      try:
+        await self._pool.disconnect()
+      except Exception:
+        pass  # Ignore close errors
       self._pool = None
+
+  async def ping(self) -> bool:
+    """Ping the Redis server and return True if successful, False otherwise."""
+    try:
+      await self.redis.ping()
+      return True
+    except Exception:
+      return False
 
   def __getattr__(self, name):
     return getattr(self.redis, name)
@@ -207,14 +230,16 @@ class ConfigProxy:
     global args
     args = _args
     self._config = None
+    self._ingester_configs = _args.ingester_configs  # Store the value to avoid proxy recursion
 
   @staticmethod
-  def load_config(config_path: str) -> Config:
+  def load_config(INGESTER_CONFIGS: str) -> Config:
 
     schema_path = meta.root / 'src' / 'config-schema.yml'
     schema = yamale.make_schema(str(schema_path))
 
-    abs_path = config_path
+    # Handle comma-delimited list of config files
+    config_files = [path.strip() for path in INGESTER_CONFIGS.split(',') if path.strip()]
 
     def is_config_file_path(value: str) -> bool:
       return isinstance(value, str) and value.lower().endswith(('.yml', '.yaml', '.json'))
@@ -258,11 +283,31 @@ class ConfigProxy:
                 config_data[key] = el
       return config_data
 
-    config_data = load_and_merge_yaml(abs_path)
+    # Process each config file and merge all configurations
+    merged_config_data: dict[str, Any] = {}
+
+    for config_file in config_files:
+      workdir = env.get('WORKDIR', '')
+      abs_path = path.abspath(path.join(workdir, config_file))
+      if not path.exists(abs_path):
+        log_error(f"Config file not found: {abs_path}")
+        continue
+
+      config_data = load_and_merge_yaml(abs_path)
+
+      # Merge with existing config data
+      for key, value in config_data.items():
+        if key in merged_config_data:
+          if is_iterable(value) and is_iterable(merged_config_data[key]):
+            merged_config_data[key].extend(value)
+          else:
+            merged_config_data[key] = value
+        else:
+          merged_config_data[key] = value
 
     try:
       # validate the merged config
-      yamale.validate(schema, [(config_data, abs_path)])
+      yamale.validate(schema, [(merged_config_data, INGESTER_CONFIGS)])
     except yamale.YamaleError as e:
       msg = ""
       for result in e.results:
@@ -272,13 +317,19 @@ class ConfigProxy:
       log_error(msg)
       exit(1)
 
-    return Config.from_dict(config_data)
+    return Config.from_dict(merged_config_data)
 
   @property
   def config(self) -> Config:
     if not self._config:
-      self._config = self.load_config(path.abspath(path.join(env.get('WORKDIR', ''), args.config_path)))
+      workdir = env.get('WORKDIR', '')
+      self._config = self.load_config(path.abspath(path.join(workdir, self._ingester_configs)))
     return self._config
 
   def __getattr__(self, name):
-    return getattr(self.config, name)
+    # Delegate to the loaded config object, but avoid recursion
+    if not hasattr(self, '_config') or self._config is None:
+      # Load config without going through __getattr__ again
+      workdir = env.get('WORKDIR', '')
+      self._config = self.load_config(path.abspath(path.join(workdir, self._ingester_configs)))
+    return getattr(self._config, name)

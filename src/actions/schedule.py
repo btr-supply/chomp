@@ -3,7 +3,7 @@ from aiocron import Cron, crontab
 from typing import Callable, Optional, Dict, Any
 
 from ..cache import ensure_claim_task, inherit_fields, register_ingester
-from ..utils import log_debug, log_info, log_warn, log_error, submit_to_threadpool,\
+from ..utils import log_debug, log_info, log_error, submit_to_threadpool,\
   Interval, interval_to_cron
 from ..model import Ingester, IngesterType
 from .. import state
@@ -15,24 +15,30 @@ def get_scheduler(ingestor_type: IngesterType) -> Optional[Callable]:
   global scheduler_registry
   if not scheduler_registry: # singleton
     from .. import ingesters
+
+    # Core modules (always available)
     scheduler_registry = {
-      "scrapper": ingesters.static_scrapper.schedule,
       "http_api": ingesters.http_api.schedule,
       "ws_api": ingesters.ws_api.schedule,
-      # "fix_api": ingesters.fix_api.schedule,
-      "evm_caller": ingesters.evm_caller.schedule,
-      "evm_logger": ingesters.evm_logger.schedule,
-      "solana_caller": ingesters.solana_caller.schedule,
-      # "solana_logger": ingesters.solana_logger.schedule,
-      "sui_caller": ingesters.sui_caller.schedule,
-      # "sui_logger": ingesters.sui_logger.schedule,
-      # "ton_caller": ingesters.ton_caller.schedule,
-      # "ton_logger": ingesters.ton_logger.schedule,
       "processor": ingesters.processor.schedule,
     }
+
+    # Optional modules - add if available
+    optional_modules = [
+      "static_scrapper", "evm_caller", "evm_logger",
+      "svm_caller", "sui_caller"
+    ]
+
+    for module_name in optional_modules:
+      if hasattr(ingesters, module_name):
+        # Map some module names to different scheduler keys
+        scheduler_key = "scrapper" if module_name == "static_scrapper" else module_name
+        scheduler_registry[scheduler_key] = getattr(ingesters, module_name).schedule  # type: ignore[index]
+
   return scheduler_registry.get(ingestor_type, None)
 
 async def monitor_cron(cron: Cron):
+  """Monitor a cron job and handle exceptions"""
   while True:
     try:
       await cron.next()
@@ -41,8 +47,6 @@ async def monitor_cron(cron: Cron):
       get_running_loop().stop()
       break
 
-async def check_ingesters_integrity(ingesters: list[Ingester]):
-  log_warn("Ingesters integrity check not implemented (eg. if claimed resource, check last ingestion time+tsdb table schema vs resource schema...)")
 
 class Scheduler:
   def __init__(self):
@@ -113,10 +117,12 @@ async def schedule(c: Ingester) -> list[Task]:
   await register_ingester(c)
   schedule_fn = get_scheduler(c.ingester_type)
   if not schedule_fn:
-    raise ValueError(f"Unsupported ingester type: {c.type}")
+    raise ValueError(f"Unsupported ingester type: {c.ingester_type} (available: {list(scheduler_registry.keys())})")
   await ensure_claim_task(c)
   tasks = await schedule_fn(c)
   log_debug(f"Scheduled for ingestion: {c.name}.{c.interval} [{', '.join([field.name for field in c.fields])}]")
   return tasks
 
 scheduler = Scheduler()
+
+

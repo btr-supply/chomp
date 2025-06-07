@@ -135,10 +135,10 @@ async def schedule(c: Ingester) -> list[Task]:
         batched_fields_by_route[route_hash].append(field)
         continue
       if field.handler and isinstance(field.handler, str):
-        field.handler = safe_eval(field.handler, callable_check=True)  # type: ignore
+        field.handler = safe_eval(field.handler, callable_check=True)
       if field.reducer and isinstance(field.reducer, str):
         try:
-          field.reducer = safe_eval(field.reducer, callable_check=True)  # type: ignore
+          field.reducer = safe_eval(field.reducer, callable_check=True)
         except Exception:
           continue
       # batch the fields by route given we only need to subscribe once per route

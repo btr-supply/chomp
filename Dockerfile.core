@@ -48,7 +48,7 @@ WORKDIR /app
 # Copy only necessary files for dependency installation
 COPY pyproject.toml ./pyproject.toml
 
-# Install dependencies using uv (with default extras for full ingestion capability)
+# Install dependencies using uv (production dependencies only, no dev group)
 RUN uv venv --python ${PYTHON_VERSION}
 RUN uv pip install -e ".[default]"
 
@@ -60,8 +60,9 @@ COPY . .
 # Make main.py executable
 RUN chmod +x main.py
 
-# Entrypoint for running the application
-ENTRYPOINT ["uv", "run", "python", "main.py"]
+# Activate virtual environment and run directly without uv run
+ENV PATH="/app/.venv/bin:$PATH"
+ENTRYPOINT ["python", "main.py"]
 
 # Default command options
 CMD ["-v", "-s"]

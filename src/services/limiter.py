@@ -55,7 +55,7 @@ async def get_user_limits(user: str) -> ServiceResponse[dict]:
         pipe.get(key)
         pipe.ttl(key)
       res = await pipe.execute()
-      values, ttls = [int(v if v else 0) for v in res[::2]], [int(ttl if ttl > 0 else 0) for ttl in res[1::2]]
+      values, ttls = [int(v if v else 0) for v in res[::2]], [int(ttl) if ttl is not None and int(ttl) > 0 else 0 for ttl in res[1::2]]
 
     limits = {}
     for key, (name, (max_val, interval)), current, ttl in zip(
@@ -63,10 +63,10 @@ async def get_user_limits(user: str) -> ServiceResponse[dict]:
     ):
       ttl = ttl or theoretical_ttl_by_interval[interval]
       reset_time_str = fmt_date(datetime.now(UTC) + timedelta(seconds=ttl)) if ttl > 0 else None
-      remaining = max(max_val - int(current or 0), 0)
+      remaining = max(int(max_val) - int(current or 0), 0)
 
       limits[name] = {
-        "cap": max_val,
+        "cap": int(max_val),
         "remaining": remaining,
         "ttl": interval,
         "reset": reset_time_str

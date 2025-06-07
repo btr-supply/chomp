@@ -16,6 +16,8 @@ async def schedule(c: Ingester) -> list[Task]:
 
   async def ingest(c: Ingester):
     await ensure_claim_task(c)
+
+
     unique_calls, calls_by_chain = set(), {}
     field_by_name = c.field_by_name(include_transient=True)
 
@@ -39,10 +41,22 @@ async def schedule(c: Ingester) -> list[Task]:
       output = None
       retry_count = 0
       while not output and retry_count < max_retries:
+        if c.monitor:
+          c.monitor.start_timer()
+
         try:
           output = tp.submit(m).result(timeout=3)
+
+          if c.monitor:
+            # Estimate response size (rough approximation)
+            response_size = len(str(output)) * 2 if output else 0
+            c.monitor.stop_timer(response_size, 200)
+
           return output
         except Exception as e:
+          if c.monitor:
+            c.monitor.stop_timer(0, None)
+
           log_error(f"Multicall for chain {m.w3.eth.chain_id} failed: {e}, switching RPC...")
           prev_rpc = m.w3.provider.endpoint_uri
           m.w3 = await state.web3.client(m.w3.eth.chain_id, roll=True)  # Keep as Any type for now

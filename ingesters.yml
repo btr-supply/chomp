@@ -1,0 +1,5 @@
+# Minimal ingesters configuration for API server
+# This is just for API startup - actual ingester configs should be in examples/
+
+# Empty configuration - API server doesn't need active ingesters
+ingesters: []
