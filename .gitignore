@@ -149,3 +149,6 @@ bs.py # Assuming this is a temporary script, if not, remove from here
 *.pyc # Already covered by *.py[cod] but kept for explicitness by some
 *.tmp
 *dump.txt
+
+# Chomp-specific temporary and generated files
+uid
