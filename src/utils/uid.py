@@ -14,7 +14,7 @@ from os import environ as env
 
 from .format import log_info, log_debug, log_error, log_warn
 
-UID_FILE = "uid"
+UID_FILE = ".uid"
 
 # Roman numeral mapping for name suffixes
 ROMAN_NUMERALS = [

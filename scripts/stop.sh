@@ -8,38 +8,21 @@ echo "🛑 Stopping Chomp services..."
 stop_local_processes() {
   echo "🔧 Stopping local processes..."
 
-  # Stop API server
-  if [ -f ".api.pid" ]; then
-    local api_pid=$(cat .api.pid)
-    if ps -p "$api_pid" > /dev/null 2>&1; then
-      echo "Stopping API server (PID: $api_pid)..."
-      kill "$api_pid" 2>/dev/null || true
+    # Stop using unified .pid file
+  if [ -f ".pid" ]; then
+    local pid=$(cat .pid)
+    if ps -p "$pid" > /dev/null 2>&1; then
+      echo "Stopping chomp service (PID: $pid)..."
+      kill "$pid" 2>/dev/null || true
       sleep 2
       # Force kill if still running
-      if ps -p "$api_pid" > /dev/null 2>&1; then
-        echo "Force stopping API server..."
-        kill -9 "$api_pid" 2>/dev/null || true
+      if ps -p "$pid" > /dev/null 2>&1; then
+        echo "Force stopping chomp service..."
+        kill -9 "$pid" 2>/dev/null || true
       fi
     fi
-    rm -f .api.pid
-    echo "✅ API server stopped"
-  fi
-
-  # Stop ingesters
-  if [ -f ".ingester.pid" ]; then
-    local ingester_pid=$(cat .ingester.pid)
-    if ps -p "$ingester_pid" > /dev/null 2>&1; then
-      echo "Stopping ingesters (PID: $ingester_pid)..."
-      kill "$ingester_pid" 2>/dev/null || true
-      sleep 2
-      # Force kill if still running
-      if ps -p "$ingester_pid" > /dev/null 2>&1; then
-        echo "Force stopping ingesters..."
-        kill -9 "$ingester_pid" 2>/dev/null || true
-      fi
-    fi
-    rm -f .ingester.pid
-    echo "✅ Ingesters stopped"
+    rm -f .pid
+    echo "✅ Chomp service stopped"
   fi
 
   # Kill any remaining python processes related to chomp
@@ -72,3 +55,4 @@ stop_local_processes
 stop_docker_containers
 
 echo "✅ All Chomp services stopped"
+

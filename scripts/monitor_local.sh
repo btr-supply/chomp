@@ -5,22 +5,21 @@ source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 echo "📊 Chomp Local Monitor"
 echo "====================="
 
-# Check if PID files exist and processes are running
+# Check if PID file exists and process is running
 check_service() {
-  local service=$1
-  local pid_file="chomp/.${service}.pid"
+  local pid_file="chomp/.pid"
 
   if [ -f "$pid_file" ]; then
     local pid=$(cat "$pid_file")
     if ps -p "$pid" > /dev/null 2>&1; then
-      echo "✅ $service is running (PID: $pid)"
+      echo "✅ Chomp service is running (PID: $pid)"
       return 0
     else
-      echo "❌ $service PID file exists but process is not running (PID: $pid)"
+      echo "❌ PID file exists but process is not running (PID: $pid)"
       return 1
     fi
   else
-    echo "❌ $service is not running (no PID file)"
+    echo "❌ Chomp service is not running (no PID file)"
     return 1
   fi
 }
@@ -31,15 +30,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 echo ""
 echo "Service Status:"
 echo "---------------"
-api_running=false
-ingester_running=false
+service_running=false
 
-if check_service "api"; then
-  api_running=true
-fi
-
-if check_service "ingester"; then
-  ingester_running=true
+if check_service; then
+  service_running=true
 fi
 
 echo ""
@@ -69,9 +63,9 @@ echo "📋 View full logs: tail -f $(realpath "$LOG_FILE" 2>/dev/null || echo "$
 echo "🛑 Stop services: make stop"
 echo "🚀 Restart: make run dev local"
 
-# Exit with error only if both services are down
-if [ "$api_running" = false ] && [ "$ingester_running" = false ]; then
+# Exit with error if service is down
+if [ "$service_running" = false ]; then
   echo ""
-  echo "⚠️ All services are down"
+  echo "⚠️ Service is down"
   exit 1
 fi

@@ -88,11 +88,14 @@ else
     VERBOSE_FLAG="-v"
   fi
 
+  # Unified PID file: .pid
+  PID_FILE="chomp/.pid"
+
   if [ "$SERVICE" = "api" ]; then
     # API server uses configs for startup
     nohup uv run python chomp/main.py ${ENV:+-e "$ENV"} --server --host "$host" --port "$port" --ingester_configs "$ingester_configs" $VERBOSE_FLAG >> "$LOG_FILE" 2>&1 &
-    echo $! > chomp/.api.pid
-    echo "✅ API started (PID: $!)"
+    echo $! > "$PID_FILE"
+    echo "✅ API started (PID: $!, file: $PID_FILE)"
   else
     # Validate configs exist in parent directory
     IFS=',' read -ra configs <<< "$ingester_configs"
@@ -102,7 +105,7 @@ else
     done
 
     nohup uv run python chomp/main.py ${ENV:+-e "$ENV"} --ingester_configs "$ingester_configs" --max_jobs "$max_jobs" $VERBOSE_FLAG >> "$LOG_FILE" 2>&1 &
-    echo $! > chomp/.ingester.pid
-    echo "✅ Ingesters started (PID: $!)"
+    echo $! > "$PID_FILE"
+    echo "✅ Ingesters started (PID: $!, file: $PID_FILE)"
   fi
 fi

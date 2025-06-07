@@ -107,6 +107,10 @@ venv.bak/
 celerybeat-schedule
 celerybeat.pid
 
+# Chomp runtime files
+.pid
+.uid
+
 # SageMath parsed files
 *.sage.py
 
