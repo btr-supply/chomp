@@ -19,7 +19,7 @@ All adapters implement the abstract `Tsdb` base class with these core methods:
 - **Class**: `Taos(Tsdb)`
 - **Purpose**: High-performance time-series database
 - **Features**: Columnar storage, built-in compression, SQL interface
-- **Configuration**: `TAOS_HOST`, `TAOS_PORT`, `TAOS_DB`, `DB_RW_USER`, `DB_RW_PASS`
+- **Configuration**: `DB_HOST`, `DB_PORT`, `DB_DB`, `DB_RW_USER`, `DB_RW_PASS`
 - **Status**: ✅ **Extensively tested and production-ready**
 
 ### SQLite (`src/adapters/sqlite.py`)

@@ -78,6 +78,7 @@ main     ← production-ready, stable releases
 - **Linting**: `ruff` checks
 - **Type Hints**: Use for all function parameters and return values
 - **Docstrings**: Google-style for all public functions and classes
+- **Environment Variables**: Always import `os.environ` as `env` for ease of use: `from os import environ as env`
 
 ```python
 def process_data(data: Dict[str, Any], timeout: float = 5.0) -> List[Dict[str, Any]]:

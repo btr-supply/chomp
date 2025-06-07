@@ -2,11 +2,10 @@
   <img style="border-radius=25px; max-height=250px;" height="400" src="./banner.png" />
   <!-- <h1>Chomp</h1> -->
   <p>
-    <a href="https://t.me/chomp_ingester"><img alt="Chomp" src="https://img.shields.io/badge/Chomp--white?style=social&logo=telegram">
-    <a href="https://discord.gg/xEEHAY2v5t"><img alt="Discord Chat" src="https://img.shields.io/badge/Astrolab%20DAO--white?logo=discord&style=social"/></a>
+    <a href="https://t.me/chomp_ingester"><img alt="Chomp" src="https://img.shields.io/badge/Chomp--white?style=social&logo=telegram"></a>
     <a href="https://twitter.com/AstrolabDAO"><img alt="Twitter Follow" src="https://img.shields.io/twitter/follow/AstrolabDAO?label=@AstrolabDAO&style=social"></a>
-    <!-- <a href="https://docs.astrolab.fi"><img alt="Astrolab Docs" src="https://img.shields.io/badge/astrolab_docs-F9C3B3" /></a> -->
-    <a href="https://opensource.org/licenses/MIT"><img alt="License" src="https://img.shields.io/github/license/AstrolabDAO/chomp?style=social" /></a>
+    <a href="https://btr.supply/docs"><img alt="BTR Docs" src="https://img.shields.io/badge/btr_docs-F9C3B3" /></a>
+    <a href="https://opensource.org/licenses/MIT"><img alt="License" src="https://img.shields.io/github/license/btr-supply/chomp?style=social" /></a>
   </p>
   <!-- <p>
     <strong>by <a href="https://astrolab.fi">Astrolab DAO</a> & friends</strong>
@@ -35,7 +34,7 @@ If you need domain specific task automation and consider using Chomp as all-purp
 
 ## Features
 
-- **Multimodal Ingestion**: HTTP APIs, WebSockets, EVM chains, Solana, Sui, and more
+- **Multimodal Ingestion**: HTTP APIs, WebSockets, EVM chains (eg. Ethereum), SVM chains (eg. Solana), Sui, and more
 - **Low Code Configuration**: Simple YAML files define entire data pipelines
 - **Native Clustering**: Spawn multiple instances with automatic job distribution
 - **Real-time API**: FastAPI server with WebSocket streaming
@@ -118,8 +117,8 @@ http_api:
 | EVM Reads | ✔️ | ✔️ | ❌ |
 | EVM Call Traces | 🚧 | ✔️ | ✔️ |
 | EVM Blocks | ❌ | ❌ | ✔️ |
-| Solana Reads | ✔️ | ❌ | ✔️ |
-| Solana Logs | 🚧 | ❌ | ✔️ |
+| SVM Reads | ✔️ | ❌ | ✔️ |
+| SVM Logs | 🚧 | ❌ | ✔️ |
 | Sui Reads | ✔️| ❌ | ❌ |
 | Sui Logs | 🚧 | ❌ | ❌ |
 | Aptos Reads | 🚧 | ❌ | ❌ |

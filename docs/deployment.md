@@ -1,32 +1,54 @@
 # Chomp Deployment Guide
 
-This document provides comprehensive instructions for deploying the Chomp data ingestion framework in both local and containerized environments.
+Chomp is a lightweight, multimodal data ingester for Web2 and Web3 sources with support for multiple databases and optional dependencies.
 
-## Overview
+## Dependency Management
 
-Chomp is a lightweight, multimodal data ingester that retrieves, transforms, and archives data from Web2 and Web3 sources. This deployment guide covers the configuration and setup options available.
+Chomp uses a sophisticated lazy-loading system for optional dependencies to support lean deployments:
 
-### Default Configuration
+### Core Dependencies (Always Required)
+- FastAPI + Uvicorn (web server)
+- TDengine client (taospy)
+- Redis client
+- Polars + PyArrow (data processing)
+- Basic utilities (orjson, pyyaml, httpx, etc.)
 
-The default Chomp setup includes:
+### Optional Dependencies (Lazy-Loaded)
+- **Web Scraping** (`chomp[scraper]`): BeautifulSoup4, lxml, Playwright
+- **EVM Blockchains (eg. Ethereum)** (`chomp[evm]`): web3.py, multicall, eth-utils
+- **SVM Blockchains (eg. Solana)** (`chomp[svm]`): Solana SDK, Solders
+- **SUI** (`chomp[sui]`): SUI client
+- **Aptos** (`chomp[aptos]`): Aptos client
+- **TON** (`chomp[ton]`): TON client
+- **Database Adapters**: TDengine, TimescaleDB, ClickHouse, DuckDB, MongoDB, InfluxDB, SQLite, etc.
 
-**Python Packages (EXTRA=all by default):**
-- **Web Scraping**: Playwright for automated browser interactions, BeautifulSoup4 and lxml for HTML parsing
-- **Web3 Blockchain**: Web3.py for EVM chains, Solana SDK for Solana blockchain, multicall for efficient batch calls
-- **Database Adapters**: TDengine (primary), with optional support for TimescaleDB, ClickHouse, DuckDB, MongoDB, InfluxDB, SQLite, KX (KDB), QuestDB, OpenTSDB, and VictoriaMetrics
-- **Data Processing**: Polars (instead of Pandas), PyArrow for columnar data, NumPy for numerical computations
+### Installation Examples
+```bash
+# Minimal install (core only)
+pip install chomp
 
-**Storage Backend:**
-- **TDengine**: High-performance time series database with built-in compression and low configuration overhead
-- **Redis**: For caching, pub/sub messaging, and cluster synchronization
+# With web scraping
+pip install chomp[scraper]
+
+# With EVM support
+pip install chomp[evm]
+
+# Everything
+pip install chomp[all]
+
+# Custom combination
+pip install chomp[scraper,evm,tdengine]
+```
+
+**Important**: Missing optional dependencies will cause helpful error messages only when those specific features are used, allowing different deployments to install only what they need.
 
 ## Prerequisites
 
 ### System Requirements
 
 - **Operating System**: Linux (Ubuntu 20.04+), macOS, Windows (with WSL2)
-- **Memory**: 4GB RAM minimum, 8GB+ recommended for production
-- **Storage**: 10GB+ available disk space (varies based on ingestion volume)
+- **Memory**: 1GB RAM minimum, 4GB+ recommended for production (based on ingesters config and db choice)
+- **Storage**: 1GB+ available disk space (varies based on ingestion volume)
 - **Python**: 3.11.x (required version)
 - **Docker**: 21.0+ (for containerized deployment)
 
@@ -86,7 +108,7 @@ This creates:
 - TDengine server on port 40002 (default)
 - TDengine HTTP adapter on port 40003
 - Redis server on port 40001 (default)
-- Shared Docker network: `chomp_net`
+- Shared Docker network: `chomp-net`
 
 #### Core Application Setup
 
@@ -144,17 +166,20 @@ You can either:
 #### Local Runtime
 
 ```bash
-# Start ingester (single instance)
-make start-ingester CONFIG_FILE=examples/diverse.yml MAX_JOBS=8
+# Start development environment (local)
+make run dev local
 
-# Start API server
-make start-server
+# Start development environment (docker, default)
+make run
 
-# Start clustered ingesters
-make start-cluster CONFIG_FILE=examples/diverse.yml MAX_JOBS=8
+# Start production environment
+make run prod
 
-# Health check
-make ping
+# Start without API
+make run dev noapi
+
+# Check services
+make monitor
 ```
 
 ## Configuration
@@ -166,9 +191,9 @@ Create a `.env` file in the project root:
 ```env
 # Database Configuration
 TSDB_ADAPTER=tdengine
-TAOS_HOST=localhost
-TAOS_PORT=40002
-TAOS_HTTP_PORT=40003
+DB_HOST=localhost
+DB_PORT=40002
+DB_HTTP_PORT=40003
 DB_ROOT_USER=root
 DB_ROOT_PASS=pass
 DB_RW_USER=rw
@@ -181,7 +206,7 @@ REDIS_MASTER_HOST=localhost
 REDIS_MASTER_PORT=40001
 
 # Application Configuration
-MAX_JOBS=16
+MAX_JOBS=15
 VERBOSE=false
 THREADED=true
 MAX_RETRIES=5
@@ -194,7 +219,7 @@ WS_PING_INTERVAL=30
 WS_PING_TIMEOUT=20
 
 # Docker Configuration (for scripts)
-DOCKER_NET=chomp_net
+DOCKER_NET=chomp-net
 DB_IMAGE=chomp-db:latest
 CORE_IMAGE=chomp-core:latest
 DB_CONTAINER=chomp-db-1
@@ -202,6 +227,27 @@ CORE_CONTAINER=chomp-core
 ```
 
 ### Ingester Configuration
+
+#### Multiple Configuration Files
+
+Chomp supports comma-delimited lists of configuration files, allowing you to organize ingesters by category:
+
+```bash
+# Single config file
+INGESTER_CONFIGS=examples/diverse.yml
+
+# Multiple config files
+INGESTER_CONFIGS=ingesters/cexs.yml,ingesters/evm_dexs.yml,ingesters/processors.yml
+```
+
+**Important Configuration Behavior:**
+
+- **Namespace Isolation**: Each configuration file works as an isolated namespace
+- **Single Instance Limitation**: An ingester instance cannot pick up jobs from multiple configuration files
+- **File-Based Clustering**: Each config file should be considered a specific namespace (named after the YAML file)
+- **Job Distribution**: Jobs are distributed across instances, but each instance processes jobs from the same configuration namespace
+
+#### Configuration File Structure
 
 Create YAML files to define data sources (see `examples/` directory):
 
@@ -216,6 +262,23 @@ ingesters:
       - path: "data.rates.USD"
         name: "btc_usd_price"
         type: "float"
+```
+
+#### Configuration Examples
+
+```bash
+# Start with specific config files
+INGESTER_CONFIGS="config1.yml,config2.yml" make run
+
+# Start with BTR configs (CEX, DEX, processors)
+INGESTER_CONFIGS="ingesters/cexs.yml,ingesters/evm_dexs.yml,ingesters/processors.yml" make run
+
+# Start production with custom configs
+INGESTER_CONFIGS="prod-configs.yml" make run prod
+
+# Start with debug logging enabled
+make debug dev local     # Local with verbose debug logs
+make debug dev docker    # Docker with verbose debug logs
 ```
 
 ## Scaling and Clustering
@@ -235,8 +298,8 @@ done
 ### Container Clustering
 
 ```bash
-# Scale with Docker using the cluster setup
-make start-cluster CONFIG_FILE=examples/diverse.yml MAX_JOBS=8
+# Scale with Docker using the lean setup
+make run prod
 
 # Monitor cluster status
 make monitor
@@ -366,14 +429,30 @@ ws.onmessage = (event) => {
 
 ### Debug Mode
 
+Chomp supports conditional debug logging through the `VERBOSE` environment variable:
+
 ```bash
-# Enable verbose logging
+# Using debug commands (recommended)
+make debug dev local     # Overrides VERBOSE=true for local execution
+make debug dev docker    # Overrides VERBOSE=true for Docker execution
+
+# Manual verbose logging
+VERBOSE=true uv run python main.py -e .env -c examples/diverse.yml
+
+# Or using the -v flag
 uv run python main.py -v -e .env -c examples/diverse.yml
 
 # Check container logs
 docker logs chomp-db-1
 docker logs chomp-core-1
 ```
+
+The debug mode enables detailed logging for:
+- Database connection details and SQL query execution
+- Task claiming and scheduling operations
+- Data transformation steps
+- Network request details
+- Redis operations and job coordination
 
 ### Support
 

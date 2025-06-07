@@ -9,11 +9,27 @@ Chomp supports multiple ingester types for different data sources. Each ingester
 - **scrapper**: Static/dynamic web scraping with XPath/CSS selectors
 - **http_api**: REST API polling with JSON response parsing
 - **ws_api**: WebSocket streaming for real-time data feeds
-- **evm_caller**: Smart contract view calls on EVM chains
+- **evm_caller**: Smart contract view calls on EVM chains (eg. Ethereum)
 - **evm_logger**: Event log monitoring on EVM chains
+- **svm_caller**:  Smart contract view calls on SVM chains (eg. Solana)
+- **sui_caller**:  Smart contract view calls on Sui
 - **processor**: Post-processing of ingested data
 
 ## Configuration
+
+### Single vs Multiple Configuration Files
+
+Chomp supports both single and multiple configuration files:
+
+```bash
+# Single configuration file
+INGESTER_CONFIGS=examples/diverse.yml
+
+# Multiple configuration files (comma-delimited)
+INGESTER_CONFIGS=ingesters/cexs.yml,ingesters/evm_dexs.yml,ingesters/processors.yml
+```
+
+### Configuration File Structure
 
 Each ingester is configured through YAML files with type-specific attributes:
 
@@ -27,6 +43,17 @@ http_api:
         type: "float64"
         selector: ".data.value"
 ```
+
+### Important Configuration Behavior
+
+**Namespace Isolation**: Each configuration file operates as an isolated namespace:
+
+- **Single Instance Scope**: An ingester instance cannot pick up jobs from multiple configuration files
+- **File-Based Namespacing**: Each config file should be considered a specific namespace (identified by the YAML filename)
+- **Job Distribution**: While jobs are distributed across multiple ingester instances, each instance only processes jobs from its assigned configuration namespace
+- **Clustering**: Multiple instances can be started for the same configuration file to scale horizontally
+
+This design ensures clear separation of concerns and prevents configuration conflicts between different ingester categories (e.g., CEX vs DEX vs processors).
 
 For detailed configuration examples and parameters, see the `examples/` directory and [Deployment Guide](../deployment.md).
 
