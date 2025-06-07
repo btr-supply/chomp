@@ -73,7 +73,8 @@ class TestWebSocketIngester:
       mock_gather.assert_called_once()
 
   @pytest.mark.asyncio
-  async def test_schedule_missing_handler_error(self, mock_ingester, mock_field_no_handler):
+  async def test_schedule_missing_handler_error(self, mock_ingester,
+                                                mock_field_no_handler):
     """Test error when field has selector but no handler."""
     mock_ingester.fields = [mock_field_no_handler]
 
@@ -103,7 +104,8 @@ class TestWebSocketIngester:
       assert mock_safe_eval.call_count == 2
 
   @pytest.mark.asyncio
-  async def test_schedule_duplicate_subscription_prevention(self, mock_ingester):
+  async def test_schedule_duplicate_subscription_prevention(
+      self, mock_ingester):
     """Test that duplicate subscriptions are prevented."""
     # Create two fields with same target_id
     field1 = Mock(spec=ResourceField)
@@ -144,9 +146,8 @@ class TestWebSocketIngester:
     mock_ws = AsyncMock()
     mock_ws.state = websockets.protocol.State.OPEN
     mock_ws.recv.side_effect = [
-      '{"data": {"price": 100.5}}',
-      '{"data": {"price": 101.0}}',
-      websockets.exceptions.ConnectionClosedError(None, None)
+        '{"data": {"price": 100.5}}', '{"data": {"price": 101.0}}',
+        websockets.exceptions.ConnectionClosedError(None, None)
     ]
 
     with patch('src.ingesters.ws_api.websockets.connect', return_value=mock_ws) as mock_connect, \
@@ -189,9 +190,9 @@ class TestWebSocketIngester:
       mock_state.args.max_retries = 2
       mock_state.args.retry_cooldown = 0.1
       mock_connect.side_effect = [
-        websockets.exceptions.ConnectionClosedError(None, None),
-        websockets.exceptions.ConnectionClosedError(None, None),
-        websockets.exceptions.ConnectionClosedError(None, None),
+          websockets.exceptions.ConnectionClosedError(None, None),
+          websockets.exceptions.ConnectionClosedError(None, None),
+          websockets.exceptions.ConnectionClosedError(None, None),
       ]
 
       # Test the retry logic by extracting and running the subscription function
@@ -207,9 +208,7 @@ class TestWebSocketIngester:
   async def test_data_collection_and_reduction(self, mock_ingester):
     """Test data collection and field reduction logic."""
     # Mock the epochs_by_route structure
-    _ = {
-      "ws://example.com/stream": deque([{"price": 100.0}, {}])
-    }
+    _ = {"ws://example.com/stream": deque([{"price": 100.0}, {}])}
 
     mock_field = mock_ingester.fields[0]
     mock_field.reducer.return_value = 100.0
@@ -412,7 +411,8 @@ class TestWebSocketIngester:
     """Test handling of invalid reducer strings."""
     mock_ingester.fields[0].reducer = "invalid python code"
 
-    with patch('src.ingesters.ws_api.safe_eval', side_effect=Exception("Invalid code")):
+    with patch('src.ingesters.ws_api.safe_eval',
+               side_effect=Exception("Invalid code")):
       # Should handle invalid reducer strings gracefully
       await schedule(mock_ingester)
       # Should continue execution despite invalid reducer

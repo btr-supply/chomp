@@ -10,7 +10,9 @@ from ..model import Ingester
 from ..utils import log_debug, log_error, log_warn, safe_eval
 from .. import state
 
-async def load_handler(handler_path: Union[str, Callable[..., Any]]) -> Callable:
+
+async def load_handler(
+    handler_path: Union[str, Callable[..., Any]]) -> Callable:
   """Load handler function from an external module."""
   try:
     # If already a callable, return it directly
@@ -22,14 +24,17 @@ async def load_handler(handler_path: Union[str, Callable[..., Any]]) -> Callable
       abs_path = path.abspath(handler_path)
 
       # Load module from the file path
-      module_name = path.splitext(path.basename(abs_path))[0]  # e.g., "test" from "test.py"
+      module_name = path.splitext(
+          path.basename(abs_path))[0]  # e.g., "test" from "test.py"
       spec = importlib.util.spec_from_file_location(module_name, abs_path)
 
       if spec and spec.loader:
         module = importlib.util.module_from_spec(spec)
         module.__package__ = "chomp.src.processors"
         spec.loader.exec_module(module)
-        return getattr(module, "handler") # expects a "handler" function exists in the module
+        return getattr(
+            module,
+            "handler")  # expects a "handler" function exists in the module
       else:
         raise ImportError(f"Could not load spec from {abs_path}")
     else:
@@ -38,6 +43,7 @@ async def load_handler(handler_path: Union[str, Callable[..., Any]]) -> Callable
   except Exception as e:
     log_error(f"Failed to load handler {handler_path}: {e}")
     raise
+
 
 async def schedule(c: Ingester) -> list[Task]:
   """Schedule processor ingester"""
@@ -49,7 +55,8 @@ async def schedule(c: Ingester) -> list[Task]:
     wait_time = c.interval_sec // 2
     if wait_time > 0:
       # Check if state.args exists and is not None before checking verbose
-      if hasattr(state, 'args') and state.args is not None and hasattr(state.args, 'verbose') and state.args.verbose:
+      if hasattr(state, 'args') and state.args is not None and hasattr(
+          state.args, 'verbose') and state.args.verbose:
         log_debug(f"Waiting {wait_time}s for dependencies to be processed...")
       await sleep(wait_time)
 
@@ -95,7 +102,7 @@ async def schedule(c: Ingester) -> list[Task]:
           log_warn(f"Handler did not return value for field {field.name}")
 
       # Store results
-      await transform_and_store(c) # jsonify=True
+      await transform_and_store(c)  # jsonify=True
 
     except Exception as e:
       log_error(f"Failed to process {c.name}: {e}")

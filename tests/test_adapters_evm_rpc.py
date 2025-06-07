@@ -13,7 +13,8 @@ from src.deps import safe_import
 eth_utils = safe_import("eth_utils")
 hexbytes = safe_import("hexbytes")
 eth_account = safe_import("eth_account")
-EVM_AVAILABLE = all([eth_utils is not None, hexbytes is not None, eth_account is not None])
+EVM_AVAILABLE = all(
+    [eth_utils is not None, hexbytes is not None, eth_account is not None])
 
 # Only import if dependencies are available
 if EVM_AVAILABLE:
@@ -21,7 +22,9 @@ if EVM_AVAILABLE:
   from src.adapters.evm_rpc import EvmRpcClient
 
 
-@pytest.mark.skipif(not EVM_AVAILABLE, reason="EVM dependencies not available (eth_utils, hexbytes, eth_account)")
+@pytest.mark.skipif(
+    not EVM_AVAILABLE,
+    reason="EVM dependencies not available (eth_utils, hexbytes, eth_account)")
 class TestEvmRpcClient:
   """Test EVM RPC client functionality."""
 
@@ -158,7 +161,8 @@ class TestEvmRpcClient:
 
       result = await client.get_storage_at(address, slot)
 
-      mock_call.assert_called_once_with("eth_getStorageAt", [address, hex(slot), "latest"])
+      mock_call.assert_called_once_with("eth_getStorageAt",
+                                        [address, hex(slot), "latest"])
       assert result == "0xabcdef"
 
   @pytest.mark.asyncio
@@ -173,7 +177,8 @@ class TestEvmRpcClient:
 
       result = await client.get_block(block_number, full_transactions=True)
 
-      mock_call.assert_called_once_with("eth_getBlockByNumber", [hex(block_number), True])
+      mock_call.assert_called_once_with("eth_getBlockByNumber",
+                                        [hex(block_number), True])
       assert result == expected_block
 
   @pytest.mark.asyncio
@@ -188,7 +193,8 @@ class TestEvmRpcClient:
 
       result = await client.get_block(block_id, full_transactions=False)
 
-      mock_call.assert_called_once_with("eth_getBlockByNumber", [block_id, False])
+      mock_call.assert_called_once_with("eth_getBlockByNumber",
+                                        [block_id, False])
       assert result == expected_block
 
   @pytest.mark.asyncio
@@ -261,10 +267,7 @@ class TestEvmRpcClient:
 
       result = await client.get_logs()
 
-      expected_params = {
-        "fromBlock": "latest",
-        "toBlock": "latest"
-      }
+      expected_params = {"fromBlock": "latest", "toBlock": "latest"}
       mock_call.assert_called_once_with("eth_getLogs", [expected_params])
       assert result == expected_logs
 
@@ -273,23 +276,23 @@ class TestEvmRpcClient:
     """Test getting logs with all parameters."""
     client = EvmRpcClient("http://localhost:8545")
     address = "0x1234567890123456789012345678901234567890"
-    topics = ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]
+    topics = [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    ]
 
     with patch.object(client, 'call', new_callable=AsyncMock) as mock_call:
       mock_call.return_value = []
 
-      await client.get_logs(
-        from_block=1000,
-        to_block=2000,
-        address=address,
-        topics=topics
-      )
+      await client.get_logs(from_block=1000,
+                            to_block=2000,
+                            address=address,
+                            topics=topics)
 
       expected_params = {
-        "fromBlock": hex(1000),
-        "toBlock": hex(2000),
-        "address": address,
-        "topics": topics
+          "fromBlock": hex(1000),
+          "toBlock": hex(2000),
+          "address": address,
+          "topics": topics
       }
       mock_call.assert_called_once_with("eth_getLogs", [expected_params])
 
@@ -304,7 +307,8 @@ class TestEvmRpcClient:
 
       result = await client.get_transaction_count(address)
 
-      mock_call.assert_called_once_with("eth_getTransactionCount", [address, "latest"])
+      mock_call.assert_called_once_with("eth_getTransactionCount",
+                                        [address, "latest"])
       assert result == 10
 
   @pytest.mark.asyncio
@@ -361,7 +365,8 @@ class TestEvmRpcClient:
 
       result = await client.get_block_by_hash(block_hash, True)
 
-      mock_call.assert_called_once_with("eth_getBlockByHash", [block_hash, True])
+      mock_call.assert_called_once_with("eth_getBlockByHash",
+                                        [block_hash, True])
       assert result == expected_block
 
   @pytest.mark.asyncio
@@ -369,24 +374,24 @@ class TestEvmRpcClient:
     """Test creating event filter."""
     client = EvmRpcClient("http://localhost:8545")
     address = "0x1234567890123456789012345678901234567890"
-    topics = ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]
+    topics = [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    ]
 
     with patch.object(client, 'call', new_callable=AsyncMock) as mock_call:
       filter_id = "0x1"
       mock_call.return_value = filter_id
 
-      result = await client.create_filter(
-        from_block=1000,
-        to_block=2000,
-        address=address,
-        topics=topics
-      )
+      result = await client.create_filter(from_block=1000,
+                                          to_block=2000,
+                                          address=address,
+                                          topics=topics)
 
       expected_params = {
-        "fromBlock": hex(1000),
-        "toBlock": hex(2000),
-        "address": address,
-        "topics": topics
+          "fromBlock": hex(1000),
+          "toBlock": hex(2000),
+          "address": address,
+          "topics": topics
       }
       mock_call.assert_called_once_with("eth_newFilter", [expected_params])
       assert result == filter_id
@@ -448,7 +453,8 @@ class TestEvmRpcClient:
 
       mock_recover.return_value = expected_address
 
-      result = await client.verify_message(message, signature, expected_address)
+      result = await client.verify_message(message, signature,
+                                           expected_address)
 
       mock_encode.assert_called_once_with(text=message)
       mock_recover.assert_called_once()
@@ -459,7 +465,8 @@ class TestEvmRpcClient:
     """Test message verification failure."""
     client = EvmRpcClient("http://localhost:8545")
 
-    with patch('src.adapters.evm_rpc.Account.recover_message', side_effect=Exception("Invalid signature")):
+    with patch('src.adapters.evm_rpc.Account.recover_message',
+               side_effect=Exception("Invalid signature")):
 
       result = await client.verify_message("message", "signature", "address")
 
@@ -476,7 +483,8 @@ class TestEvmRpcClient:
 
       mock_recover.return_value = expected_address
 
-      result = client.verify_signature(message_hash, signature, expected_address)
+      result = client.verify_signature(message_hash, signature,
+                                       expected_address)
 
       mock_recover.assert_called_once()
       assert result is True
@@ -493,7 +501,8 @@ class TestEvmRpcClient:
     """Test signature verification failure."""
     client = EvmRpcClient("http://localhost:8545")
 
-    with patch('src.adapters.evm_rpc.Account.recover_message', side_effect=Exception("Invalid")):
+    with patch('src.adapters.evm_rpc.Account.recover_message',
+               side_effect=Exception("Invalid")):
 
       result = client.verify_signature("hash", "signature", "address")
 
@@ -523,7 +532,8 @@ class TestEvmRpcClient:
     """Test transaction verification when transaction not found."""
     client = EvmRpcClient("http://localhost:8545")
 
-    with patch.object(client, 'get_transaction', new_callable=AsyncMock) as mock_get_tx:
+    with patch.object(client, 'get_transaction',
+                      new_callable=AsyncMock) as mock_get_tx:
       mock_get_tx.return_value = None
 
       result = await client.verify_transaction("tx_hash", "address")
@@ -581,7 +591,10 @@ class TestEvmRpcClient:
     """Test transaction verification with exception."""
     client = EvmRpcClient("http://localhost:8545")
 
-    with patch.object(client, 'get_transaction', new_callable=AsyncMock, side_effect=Exception("Network error")):
+    with patch.object(client,
+                      'get_transaction',
+                      new_callable=AsyncMock,
+                      side_effect=Exception("Network error")):
 
       result = await client.verify_transaction("tx_hash", "address")
 

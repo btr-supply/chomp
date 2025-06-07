@@ -9,18 +9,20 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 try:
-  from src.actions.transform import (
-    BASE_TRANSFORMERS, SERIES_TRANSFORMERS, get_cached_field_value,
-    parse_cached_reference, process_cached_references, apply_transformer,
-    transform, transform_all, _cached_data_cache
-  )
+  from src.actions.transform import (BASE_TRANSFORMERS, SERIES_TRANSFORMERS,
+                                     get_cached_field_value,
+                                     parse_cached_reference,
+                                     process_cached_references,
+                                     apply_transformer, transform,
+                                     transform_all, _cached_data_cache)
   from src.model import Ingester, ResourceField
   DEPENDENCIES_AVAILABLE = True
 except ImportError:
   DEPENDENCIES_AVAILABLE = False
 
 
-@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE, reason="Dependencies not available")
+@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE,
+                    reason="Dependencies not available")
 class TestBaseTransformers:
   """Test BASE_TRANSFORMERS functionality."""
 
@@ -99,7 +101,8 @@ class TestBaseTransformers:
     assert result == "Hello World How are you"
 
 
-@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE, reason="Dependencies not available")
+@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE,
+                    reason="Dependencies not available")
 class TestSeriesTransformers:
   """Test SERIES_TRANSFORMERS functionality."""
 
@@ -135,7 +138,8 @@ class TestSeriesTransformers:
     assert np.array_equal(result, expected)
 
 
-@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE, reason="Dependencies not available")
+@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE,
+                    reason="Dependencies not available")
 class TestGetCachedFieldValue:
   """Test get_cached_field_value function."""
 
@@ -149,7 +153,9 @@ class TestGetCachedFieldValue:
     """Test getting idx field value."""
     mock_cache_data = {"idx": {"price": 100.0, "volume": 1000}}
 
-    with patch('src.actions.transform.get_cache', new_callable=AsyncMock, return_value=mock_cache_data):
+    with patch('src.actions.transform.get_cache',
+               new_callable=AsyncMock,
+               return_value=mock_cache_data):
       result = await get_cached_field_value("USDC", "idx")
 
       assert result == {"price": 100.0, "volume": 1000}
@@ -159,7 +165,9 @@ class TestGetCachedFieldValue:
     """Test getting regular field value."""
     mock_cache_data = {"price": 100.0, "volume": 1000}
 
-    with patch('src.actions.transform.get_cache', new_callable=AsyncMock, return_value=mock_cache_data):
+    with patch('src.actions.transform.get_cache',
+               new_callable=AsyncMock,
+               return_value=mock_cache_data):
       result = await get_cached_field_value("USDC", "price")
 
       assert result == 100.0
@@ -170,7 +178,8 @@ class TestGetCachedFieldValue:
     # Populate local cache
     _cached_data_cache["USDC"] = {"price": 100.0}
 
-    with patch('src.actions.transform.get_cache', new_callable=AsyncMock) as mock_get_cache:
+    with patch('src.actions.transform.get_cache',
+               new_callable=AsyncMock) as mock_get_cache:
       result = await get_cached_field_value("USDC", "price")
 
       assert result == 100.0
@@ -214,7 +223,8 @@ class TestGetCachedFieldValue:
       mock_log_debug.assert_called_once()
 
 
-@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE, reason="Dependencies not available")
+@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE,
+                    reason="Dependencies not available")
 class TestParseCachedReference:
   """Test parse_cached_reference function."""
 
@@ -237,7 +247,8 @@ class TestParseCachedReference:
     assert field == "price.24h"
 
 
-@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE, reason="Dependencies not available")
+@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE,
+                    reason="Dependencies not available")
 class TestProcessCachedReferences:
   """Test process_cached_references function."""
 
@@ -252,7 +263,9 @@ class TestProcessCachedReferences:
     """Test processing simple cached reference."""
     transformer = "price * {USDC.idx}"
 
-    with patch('src.actions.transform.get_cached_field_value', new_callable=AsyncMock, return_value=1.5):
+    with patch('src.actions.transform.get_cached_field_value',
+               new_callable=AsyncMock,
+               return_value=1.5):
       result = await process_cached_references(self.mock_ingester, transformer)
 
       assert result == "price * 1.5"
@@ -289,7 +302,9 @@ class TestProcessCachedReferences:
     """Test processing cross-ingester reference."""
     transformer = "price * {OTHER.value}"
 
-    with patch('src.actions.transform.get_cached_field_value', new_callable=AsyncMock, return_value=2.0):
+    with patch('src.actions.transform.get_cached_field_value',
+               new_callable=AsyncMock,
+               return_value=2.0):
       result = await process_cached_references(self.mock_ingester, transformer)
 
       assert result == "price * 2.0"
@@ -308,7 +323,8 @@ class TestProcessCachedReferences:
       mock_log_error.assert_called_once()
 
 
-@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE, reason="Dependencies not available")
+@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE,
+                    reason="Dependencies not available")
 class TestApplyTransformer:
   """Test apply_transformer function."""
 
@@ -333,28 +349,32 @@ class TestApplyTransformer:
   @pytest.mark.asyncio
   async def test_apply_transformer_numeric(self):
     """Test applying numeric transformer."""
-    result = await apply_transformer(self.mock_ingester, self.mock_field, "123.45")
+    result = await apply_transformer(self.mock_ingester, self.mock_field,
+                                     "123.45")
     assert result == 123.45
 
   @pytest.mark.asyncio
   async def test_apply_transformer_base_transformer(self):
     """Test applying base transformer."""
     self.mock_field.value = "hello world"
-    result = await apply_transformer(self.mock_ingester, self.mock_field, "upper")
+    result = await apply_transformer(self.mock_ingester, self.mock_field,
+                                     "upper")
     assert result == "HELLO WORLD"
 
   @pytest.mark.asyncio
   async def test_apply_transformer_expression(self):
     """Test applying mathematical expression."""
     with patch('src.actions.transform.safe_eval', return_value=150):
-      result = await apply_transformer(self.mock_ingester, self.mock_field, "{self} + 50")
+      result = await apply_transformer(self.mock_ingester, self.mock_field,
+                                       "{self} + 50")
       assert result == 150
 
   @pytest.mark.asyncio
   async def test_apply_transformer_field_reference(self):
     """Test applying transformer with field reference."""
     with patch('src.actions.transform.safe_eval', return_value=150):
-      result = await apply_transformer(self.mock_ingester, self.mock_field, "{self} + {other_field}")
+      result = await apply_transformer(self.mock_ingester, self.mock_field,
+                                       "{self} + {other_field}")
       assert result == 150
 
   @pytest.mark.asyncio
@@ -371,13 +391,14 @@ class TestApplyTransformer:
       mock_interval.return_value = timedelta(hours=-24)  # Mock timedelta
       mock_load.return_value = [90, 95, 100]  # Mock series data
 
-            # Create a mock field for the series target
+      # Create a mock field for the series target
       mock_target_field = Mock(spec=ResourceField)
       mock_target_field.name = "price"
       self.mock_ingester.fields = [mock_target_field]
 
       transformer = "{price::mean(h24)} + 10"
-      result = await apply_transformer(self.mock_ingester, self.mock_field, transformer)
+      result = await apply_transformer(self.mock_ingester, self.mock_field,
+                                       transformer)
 
       assert result == 110
 
@@ -408,7 +429,8 @@ class TestApplyTransformer:
     assert len(_cached_data_cache) == 0
 
 
-@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE, reason="Dependencies not available")
+@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE,
+                    reason="Dependencies not available")
 class TestTransform:
   """Test transform function."""
 
@@ -426,7 +448,8 @@ class TestTransform:
   @pytest.mark.asyncio
   async def test_transform_success(self):
     """Test successful transformation."""
-    with patch('src.actions.transform.apply_transformer', new_callable=AsyncMock) as mock_apply:
+    with patch('src.actions.transform.apply_transformer',
+               new_callable=AsyncMock) as mock_apply:
       mock_apply.side_effect = ["UPPER", "STRIP"]
 
       result = await transform(self.mock_ingester, self.mock_field)
@@ -456,7 +479,8 @@ class TestTransform:
     assert self.mock_ingester.data_by_field["test_field"] == 100
 
 
-@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE, reason="Dependencies not available")
+@pytest.mark.skipif(not DEPENDENCIES_AVAILABLE,
+                    reason="Dependencies not available")
 class TestTransformAll:
   """Test transform_all function."""
 
@@ -481,7 +505,8 @@ class TestTransformAll:
     """Test successful transformation of all fields."""
     import src.state as state
 
-    with patch('src.actions.transform.transform', new_callable=AsyncMock) as mock_transform:
+    with patch('src.actions.transform.transform',
+               new_callable=AsyncMock) as mock_transform:
       mock_transform.return_value = Mock()
 
       # Mock state.args

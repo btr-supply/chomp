@@ -19,7 +19,8 @@ if MONGODB_AVAILABLE:
   from src.adapters.mongodb import MongoDb, GRANULARITY_MAP, BUCKET_GRANULARITY
 
 
-@pytest.mark.skipif(not MONGODB_AVAILABLE, reason="MongoDB dependencies not available (motor)")
+@pytest.mark.skipif(not MONGODB_AVAILABLE,
+                    reason="MongoDB dependencies not available (motor)")
 class TestMongoDBAdapter:
   """Test the MongoDB adapter functionality."""
 
@@ -68,13 +69,11 @@ class TestMongoDBAdapter:
 
   def test_mongodb_initialization(self):
     """Test MongoDB adapter initialization."""
-    adapter = MongoDb(
-      host="localhost",
-      port=27017,
-      db="test_db",
-      user="test_user",
-      password="test_pass"
-    )
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     assert adapter.host == "localhost"
     assert adapter.port == 27017
@@ -94,13 +93,11 @@ class TestMongoDBAdapter:
       mock_client_instance.__getitem__.return_value = mock_database
       mock_client.return_value = mock_client_instance
 
-      adapter = await MongoDb.connect(
-        host="test_host",
-        port=27017,
-        db="test_db",
-        user="test_user",
-        password="test_pass"
-      )
+      adapter = await MongoDb.connect(host="test_host",
+                                      port=27017,
+                                      db="test_db",
+                                      user="test_user",
+                                      password="test_pass")
 
       assert isinstance(adapter, MongoDb)
       assert adapter.host == "test_host"
@@ -156,7 +153,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_ensure_connected_success_with_auth(self):
     """Test ensure_connected with authentication."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     with patch('src.adapters.mongodb.AsyncIOMotorClient') as mock_client, \
          patch('src.adapters.mongodb.log_info'):
@@ -175,7 +176,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_ensure_connected_success_without_auth(self):
     """Test ensure_connected without authentication."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user=None, password=None)
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user=None,
+                      password=None)
 
     with patch('src.adapters.mongodb.AsyncIOMotorClient') as mock_client, \
          patch('src.adapters.mongodb.log_info'):
@@ -192,13 +197,18 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_ensure_connected_already_connected(self):
     """Test ensure_connected when already connected."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     # Simulate already connected
     mock_client = Mock()
     adapter.client = mock_client
 
-    with patch('src.adapters.mongodb.AsyncIOMotorClient') as mock_client_constructor:
+    with patch(
+        'src.adapters.mongodb.AsyncIOMotorClient') as mock_client_constructor:
       await adapter.ensure_connected()
 
       # Should not create new client
@@ -207,7 +217,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_ensure_connected_error(self):
     """Test ensure_connected with connection error."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     with patch('src.adapters.mongodb.AsyncIOMotorClient', side_effect=Exception("Connection failed")), \
          patch('src.adapters.mongodb.log_error') as mock_log_error:
@@ -219,7 +233,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_ping_success(self):
     """Test ping with successful connection."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_client = Mock()
     mock_client.admin.command = AsyncMock(return_value={"ok": 1})
@@ -234,7 +252,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_ping_no_client(self):
     """Test ping when client is None."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
     adapter.client = None
 
     with patch.object(adapter, 'ensure_connected'):
@@ -245,7 +267,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_ping_failure(self):
     """Test ping with connection failure."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     with patch.object(adapter, 'ensure_connected', side_effect=Exception("Connection failed")), \
          patch('src.adapters.mongodb.log_error') as mock_log_error:
@@ -257,7 +283,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_close_connection(self):
     """Test closing connections."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_client = Mock()
     mock_client.close = Mock()
@@ -273,7 +303,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_close_no_client(self):
     """Test closing when no client exists."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
     adapter.client = None
 
     # Should not raise error
@@ -282,7 +316,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_create_db_success(self, mock_ingester):
     """Test creating database successfully."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_client = Mock()
     mock_database = Mock()
@@ -299,7 +337,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_create_db_force(self, mock_ingester):
     """Test creating database with force flag."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_client = Mock()
     mock_client.drop_database = AsyncMock()
@@ -317,7 +359,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_create_db_no_client(self):
     """Test creating database when client is None."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
     adapter.client = None
 
     with patch.object(adapter, 'ensure_connected'):
@@ -327,7 +373,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_use_db_success(self):
     """Test switching database successfully."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_client = Mock()
     mock_database = Mock()
@@ -344,7 +394,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_use_db_no_client(self):
     """Test switching database when client is None."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
     adapter.client = None
 
     with patch.object(adapter, 'ensure_connected'):
@@ -354,7 +408,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_create_table_success(self, mock_ingester):
     """Test creating time series collection successfully."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_database.list_collection_names = AsyncMock(return_value=[])
@@ -377,10 +435,15 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_create_table_already_exists(self, mock_ingester):
     """Test creating collection that already exists."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
-    mock_database.list_collection_names = AsyncMock(return_value=["test_ingester"])
+    mock_database.list_collection_names = AsyncMock(
+        return_value=["test_ingester"])
     adapter.database = mock_database
 
     with patch.object(adapter, 'ensure_connected'), \
@@ -393,7 +456,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_create_table_custom_name(self, mock_ingester):
     """Test creating collection with custom name."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_database.list_collection_names = AsyncMock(return_value=[])
@@ -413,7 +480,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_create_table_no_database(self, mock_ingester):
     """Test creating table when database is None."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
     adapter.database = None
 
     with patch.object(adapter, 'ensure_connected'):
@@ -423,11 +494,16 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_create_table_error(self, mock_ingester):
     """Test creating table with error."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_database.list_collection_names = AsyncMock(return_value=[])
-    mock_database.create_collection = AsyncMock(side_effect=Exception("Creation failed"))
+    mock_database.create_collection = AsyncMock(
+        side_effect=Exception("Creation failed"))
     adapter.database = mock_database
 
     with patch.object(adapter, 'ensure_connected'), \
@@ -440,7 +516,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_success(self, mock_ingester):
     """Test inserting document successfully."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_collection = Mock()
@@ -462,7 +542,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_custom_table(self, mock_ingester):
     """Test inserting into custom table."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_collection = Mock()
@@ -478,16 +562,18 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_collection_not_exists(self, mock_ingester):
     """Test inserting when collection doesn't exist."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_collection = Mock()
 
     # First call fails, second succeeds
-    mock_collection.insert_one = AsyncMock(side_effect=[
-      Exception("collection does not exist"),
-      None
-    ])
+    mock_collection.insert_one = AsyncMock(
+        side_effect=[Exception("collection does not exist"), None])
     mock_database.__getitem__.return_value = mock_collection
     adapter.database = mock_database
 
@@ -502,11 +588,16 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_other_error(self, mock_ingester):
     """Test inserting with other errors."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_collection = Mock()
-    mock_collection.insert_one = AsyncMock(side_effect=Exception("Other error"))
+    mock_collection.insert_one = AsyncMock(
+        side_effect=Exception("Other error"))
     mock_database.__getitem__.return_value = mock_collection
     adapter.database = mock_database
 
@@ -520,7 +611,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_no_database(self, mock_ingester):
     """Test inserting when database is None."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
     adapter.database = None
 
     with patch.object(adapter, 'ensure_connected'):
@@ -530,7 +625,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_many_success(self, mock_ingester):
     """Test inserting multiple documents successfully."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_collection = Mock()
@@ -538,10 +637,8 @@ class TestMongoDBAdapter:
     mock_database.__getitem__.return_value = mock_collection
     adapter.database = mock_database
 
-    test_values = [
-      (datetime.now(timezone.utc), 100, "value1"),
-      (datetime.now(timezone.utc), 200, "value2")
-    ]
+    test_values = [(datetime.now(timezone.utc), 100, "value1"),
+                   (datetime.now(timezone.utc), 200, "value2")]
 
     with patch.object(adapter, 'ensure_connected'):
       await adapter.insert_many(mock_ingester, test_values)
@@ -554,7 +651,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_many_timestamp_conversion(self, mock_ingester):
     """Test inserting many with timestamp conversion."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_collection = Mock()
@@ -563,9 +664,7 @@ class TestMongoDBAdapter:
     adapter.database = mock_database
 
     # Use timestamp as float
-    test_values = [
-      (1234567890.0, 100, "value1")
-    ]
+    test_values = [(1234567890.0, 100, "value1")]
 
     with patch.object(adapter, 'ensure_connected'):
       await adapter.insert_many(mock_ingester, test_values)
@@ -576,14 +675,16 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_many_collection_not_exists(self, mock_ingester):
     """Test insert_many when collection doesn't exist."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_collection = Mock()
-    mock_collection.insert_many = AsyncMock(side_effect=[
-      Exception("ns not found"),
-      None
-    ])
+    mock_collection.insert_many = AsyncMock(
+        side_effect=[Exception("ns not found"), None])
     mock_database.__getitem__.return_value = mock_collection
     adapter.database = mock_database
 
@@ -600,10 +701,15 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_list_tables_success(self):
     """Test listing collections successfully."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
-    mock_database.list_collection_names = AsyncMock(return_value=["table1", "table2"])
+    mock_database.list_collection_names = AsyncMock(
+        return_value=["table1", "table2"])
     adapter.database = mock_database
 
     with patch.object(adapter, 'ensure_connected'):
@@ -614,7 +720,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_list_tables_no_database(self):
     """Test listing tables when database is None."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
     adapter.database = None
 
     with patch.object(adapter, 'ensure_connected'):
@@ -625,10 +735,15 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_list_tables_error(self):
     """Test listing tables with error."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
-    mock_database.list_collection_names = AsyncMock(side_effect=Exception("List error"))
+    mock_database.list_collection_names = AsyncMock(
+        side_effect=Exception("List error"))
     adapter.database = mock_database
 
     with patch.object(adapter, 'ensure_connected'), \
@@ -641,7 +756,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_commit(self):
     """Test commit (no-op for MongoDB)."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     # Should not raise any errors
     await adapter.commit()
@@ -649,7 +768,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_fetchall_not_implemented(self):
     """Test fetchall raises NotImplementedError."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     with pytest.raises(NotImplementedError):
       await adapter.fetchall()
@@ -657,15 +780,25 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_fetch_success(self):
     """Test fetching data successfully."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_collection = Mock()
     mock_cursor = Mock()
-    mock_cursor.to_list = AsyncMock(return_value=[
-      {"ts": datetime.now(timezone.utc), "field1": 100, "field2": "value1"},
-      {"ts": datetime.now(timezone.utc), "field1": 200, "field2": "value2"}
-    ])
+    mock_cursor.to_list = AsyncMock(
+        return_value=[{
+            "ts": datetime.now(timezone.utc),
+            "field1": 100,
+            "field2": "value1"
+        }, {
+            "ts": datetime.now(timezone.utc),
+            "field1": 200,
+            "field2": "value2"
+        }])
     mock_collection.aggregate.return_value = mock_cursor
     mock_database.__getitem__.return_value = mock_collection
     adapter.database = mock_database
@@ -676,7 +809,8 @@ class TestMongoDBAdapter:
       mock_now.return_value = datetime.now(timezone.utc)
       mock_ago.return_value = datetime.now(timezone.utc)
 
-      columns, data = await adapter.fetch("test_table", columns=["field1", "field2"])
+      columns, data = await adapter.fetch("test_table",
+                                          columns=["field1", "field2"])
 
       assert "ts" in columns
       assert "field1" in columns
@@ -686,7 +820,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_fetch_no_results(self):
     """Test fetching when no results."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_collection = Mock()
@@ -710,7 +848,11 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_fetch_error(self):
     """Test fetch with error."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     mock_database = Mock()
     mock_collection = Mock()
@@ -733,14 +875,19 @@ class TestMongoDBAdapter:
   @pytest.mark.asyncio
   async def test_fetch_batch_success(self):
     """Test fetching from multiple tables."""
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
 
     with patch.object(adapter, 'fetch') as mock_fetch, \
          patch('asyncio.gather') as mock_gather:
-      mock_fetch.return_value = (["ts", "field1"], [(datetime.now(timezone.utc), 100)])
+      mock_fetch.return_value = (["ts", "field1"],
+                                 [(datetime.now(timezone.utc), 100)])
       mock_gather.return_value = [
-        (["ts", "field1"], [(datetime.now(timezone.utc), 100)]),
-        (["ts", "field1"], [(datetime.now(timezone.utc), 200)])
+          (["ts", "field1"], [(datetime.now(timezone.utc), 100)]),
+          (["ts", "field1"], [(datetime.now(timezone.utc), 200)])
       ]
 
       columns, data = await adapter.fetch_batch(["table1", "table2"])
@@ -752,5 +899,9 @@ class TestMongoDBAdapter:
     """Test that MongoDb inherits from Tsdb."""
     from src.model import Tsdb
 
-    adapter = MongoDb(host="localhost", port=27017, db="test_db", user="test_user", password="test_pass")
+    adapter = MongoDb(host="localhost",
+                      port=27017,
+                      db="test_db",
+                      user="test_user",
+                      password="test_pass")
     assert isinstance(adapter, Tsdb)

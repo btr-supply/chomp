@@ -7,16 +7,14 @@ import polars as pl
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.utils.estimators import (
-  sma, ema, smma, wma, ewma, linreg, polyreg, theil_sen,
-  volatility, rolling_volatility, std, wstd, ewstd, close_atr, mad,
-  garman_klass, parkinson, rogers_satchell,
-  roc, simple_mom, macd, cci, close_cci, stochastic, close_stochastic,
-  zscore, cumulative_returns, vol_adjusted_momentum,
-  rsi, bollinger_bands, adx, close_dmi,
-  correlation, percentile, linear_regression, predict_next,
-  normalize, standardize, moving_window,
-  _to_series, _to_list
-)
+    sma, ema, smma, wma, ewma, linreg, polyreg, theil_sen, volatility,
+    rolling_volatility, std, wstd, ewstd, close_atr, mad, garman_klass,
+    parkinson, rogers_satchell, roc, simple_mom, macd, cci, close_cci,
+    stochastic, close_stochastic, zscore, cumulative_returns,
+    vol_adjusted_momentum, rsi, bollinger_bands, adx, close_dmi, correlation,
+    percentile, linear_regression, predict_next, normalize, standardize,
+    moving_window, _to_series, _to_list)
+
 
 class TestMovingAverages:
   """Test moving average functions."""
@@ -77,6 +75,7 @@ class TestMovingAverages:
     result = ema(data, 3)
     assert isinstance(result, pl.Series)
 
+
 class TestAdvancedMovingAverages:
   """Test advanced moving average functions."""
 
@@ -121,6 +120,7 @@ class TestAdvancedMovingAverages:
     result = theil_sen(data, 3)
     assert isinstance(result, pl.Series)
     assert len(result) == len(data)
+
 
 class TestVolatilityEstimators:
   """Test volatility estimation functions."""
@@ -198,6 +198,7 @@ class TestVolatilityEstimators:
     assert isinstance(result, pl.Series)
     assert len(result) == len(data)
 
+
 class TestAdvancedVolatilityEstimators:
   """Test advanced volatility estimators."""
 
@@ -228,6 +229,7 @@ class TestAdvancedVolatilityEstimators:
     result = rogers_satchell(high, low, open_price, close, 3)
     assert isinstance(result, pl.Series)
     assert len(result) == len(high)
+
 
 class TestMomentumIndicators:
   """Test momentum indicator functions."""
@@ -309,13 +311,17 @@ class TestMomentumIndicators:
     assert isinstance(result, pl.Series)
     assert len(result) == len(data)
 
+
 class TestTechnicalIndicators:
   """Test technical indicator functions."""
 
   def test_rsi_basic(self):
     """Test RSI calculation."""
     # Create price data with clear trend
-    prices = [44, 44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.85, 46.08, 45.89, 46.03, 45.61, 46.28, 46.28, 46.00, 46.03, 46.41, 46.22, 45.64]
+    prices = [
+        44, 44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.85, 46.08, 45.89,
+        46.03, 45.61, 46.28, 46.28, 46.00, 46.03, 46.41, 46.22, 45.64
+    ]
     result = rsi(prices, 14)
     assert len(result) >= 0
     # RSI should be between 0 and 100
@@ -358,6 +364,7 @@ class TestTechnicalIndicators:
     assert isinstance(middle, pl.Series)
     assert isinstance(lower, pl.Series)
 
+
 class TestAdvancedIndicators:
   """Test advanced technical indicators."""
 
@@ -380,6 +387,7 @@ class TestAdvancedIndicators:
     assert isinstance(minus_di, pl.Series)
     assert isinstance(trend, pl.Series)
     assert len(plus_di) == len(close)
+
 
 class TestStatisticalFunctions:
   """Test statistical helper functions."""
@@ -417,8 +425,9 @@ class TestStatisticalFunctions:
     data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     p50 = percentile(data, 50)  # Median
     p90 = percentile(data, 90)
-    assert abs(p50 - 5.5) < 1.0  # Allow for different percentile implementations
-    assert p90 > p50   # 90th percentile should be higher
+    assert abs(p50 -
+               5.5) < 1.0  # Allow for different percentile implementations
+    assert p90 > p50  # 90th percentile should be higher
 
   def test_percentile_with_series(self):
     """Test percentile with Polars Series."""
@@ -431,6 +440,7 @@ class TestStatisticalFunctions:
     """Test percentile with empty data."""
     result = percentile([], 50)
     assert result == 0.0
+
 
 class TestPredictionModels:
   """Test prediction model functions."""
@@ -472,6 +482,7 @@ class TestPredictionModels:
     next_val = predict_next(data)
     assert isinstance(next_val, (int, float))
     assert next_val > 0
+
 
 class TestUtilityFunctions:
   """Test utility functions."""
@@ -546,6 +557,7 @@ class TestUtilityFunctions:
     windows = moving_window(data, 3)
     assert len(windows) == 3
     assert windows[0] == [1.0, 2.0, 3.0]
+
 
 class TestHelperFunctions:
   """Test internal helper functions."""

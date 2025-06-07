@@ -6,25 +6,42 @@ import numpy
 import polars
 from typing import Any
 
-SAFE_TYPES = (int, float, str, list, set, map, tuple, dict, type)  # Basic types
-SAFE_OPERATORS = [getattr(operator, op) for op in dir(operator) if not op.startswith('_') and op != 'not_']  # Math operators
+SAFE_TYPES = (int, float, str, list, set, map, tuple, dict, type
+              )  # Basic types
+SAFE_OPERATORS = [
+    getattr(operator, op) for op in dir(operator)
+    if not op.startswith('_') and op != 'not_'
+]  # Math operators
 SAFE_FUNCTIONS = {
-  'numpy': ['sin', 'cos', 'tan', 'log', 'exp', 'sqrt', 'mean', 'median', 'std', 'var', 'sum', 'cumsum', 'min', 'max', 'abs', 'round', 'floor', 'ceil', 'clip', 'where', 'concatenate', 'stack', 'hstack', 'vstack', 'split', 'array', 'zeros', 'ones', 'full', 'empty', 'arange', 'linspace', 'logspace', 'eye', 'diag', 'tril', 'triu', 'identity', 'dot', 'matmul', 'tensordot', 'einsum'],
-  'polars': [
-    'DataFrame', 'Series',
-    # 'info', 'head', 'tail', 'describe', 'shape', 'columns', 'index', 'values', 'dtypes', 'astype',
-    # 'copy', 'drop', 'dropna', 'fillna', 'interpolate', 'replace', 'apply', 'applymap', 'map', 'groupby',
-    # 'agg', 'transform', 'pivot', 'pivot_table', 'melt', 'merge', 'join', 'concat', 'append', 'sort_values', 'sort_index',
-    # 'set_index', 'reset_index', 'loc', 'iloc', 'at', 'iat', 'sum', 'mean', 'median', 'std', 'var',
-    # 'count', 'nunique', 'unique', 'value_counts', 'isna', 'isnull', 'notna', 'notnull', 'eq', 'ne', 'lt', 'le', 'gt', 'ge'
-  ]
+    'numpy': [
+        'sin', 'cos', 'tan', 'log', 'exp', 'sqrt', 'mean', 'median', 'std',
+        'var', 'sum', 'cumsum', 'min', 'max', 'abs', 'round', 'floor', 'ceil',
+        'clip', 'where', 'concatenate', 'stack', 'hstack', 'vstack', 'split',
+        'array', 'zeros', 'ones', 'full', 'empty', 'arange', 'linspace',
+        'logspace', 'eye', 'diag', 'tril', 'triu', 'identity', 'dot', 'matmul',
+        'tensordot', 'einsum'
+    ],
+    'polars': [
+        'DataFrame',
+        'Series',
+        # 'info', 'head', 'tail', 'describe', 'shape', 'columns', 'index', 'values', 'dtypes', 'astype',
+        # 'copy', 'drop', 'dropna', 'fillna', 'interpolate', 'replace', 'apply', 'applymap', 'map', 'groupby',
+        # 'agg', 'transform', 'pivot', 'pivot_table', 'melt', 'merge', 'join', 'concat', 'append', 'sort_values', 'sort_index',
+        # 'set_index', 'reset_index', 'loc', 'iloc', 'at', 'iat', 'sum', 'mean', 'median', 'std', 'var',
+        # 'count', 'nunique', 'unique', 'value_counts', 'isna', 'isnull', 'notna', 'notnull', 'eq', 'ne', 'lt', 'le', 'gt', 'ge'
+    ]
 }
 BASE_NAMESPACE = {op.__name__: op for op in SAFE_OPERATORS}
-BASE_NAMESPACE.update({name: getattr(module, func) for module in [numpy, polars] for name, func in [(f, f) for f in SAFE_FUNCTIONS[module.__name__]]})
+BASE_NAMESPACE.update({
+    name: getattr(module, func)
+    for module in [numpy, polars]
+    for name, func in [(f, f) for f in SAFE_FUNCTIONS[module.__name__]]
+})
 BASE_NAMESPACE.update({t.__name__: t for t in SAFE_TYPES})
 # BASE_NAMESPACE.update({'numpy': numpy, 'pd': polars}) # Add numpy and pd modules themselves
 SAFE_EXPR_CACHE = set()
 EVAL_CACHE: dict[str, Any] = {}
+
 
 def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
   """
@@ -40,7 +57,8 @@ def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
       return expr
     raise ValueError("Expression must be a string")
 
-  id = md5(f"{expr}{lambda_check}{callable_check}{kwargs}".encode()).hexdigest()
+  id = md5(
+      f"{expr}{lambda_check}{callable_check}{kwargs}".encode()).hexdigest()
   if id in EVAL_CACHE:
     return EVAL_CACHE[id]
   ns = BASE_NAMESPACE.copy()
@@ -52,8 +70,10 @@ def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
     should_be_lambda = match and match.group(1).startswith('lambda')
 
     tree = ast.parse(expr, mode='exec' if should_be_func else 'eval')
-    is_func = should_be_func and isinstance(tree, ast.Module) and len(tree.body) > 0 and isinstance(tree.body[0], ast.FunctionDef)
-    is_lambda = should_be_lambda and isinstance(tree, ast.Expression) and isinstance(tree.body, ast.Lambda)
+    is_func = should_be_func and isinstance(tree, ast.Module) and len(
+        tree.body) > 0 and isinstance(tree.body[0], ast.FunctionDef)
+    is_lambda = should_be_lambda and isinstance(
+        tree, ast.Expression) and isinstance(tree.body, ast.Lambda)
 
     if lambda_check and not is_lambda:
       raise ValueError("Expression must be a lambda")
@@ -67,9 +87,11 @@ def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
     # compile the AST and evaluate
     if is_func and isinstance(tree, ast.Module):
       code = compile(tree, filename='<ast>', mode='exec')
-      func_name = tree.body[0].name if isinstance(tree.body[0], ast.FunctionDef) else None
+      func_name = tree.body[0].name if isinstance(tree.body[0],
+                                                  ast.FunctionDef) else None
       exec(code, ns)
-      result = ns[func_name] if func_name else None # function reference to be used as lambda
+      result = ns[
+          func_name] if func_name else None  # function reference to be used as lambda
     elif isinstance(tree, ast.Expression):
       code = compile(tree, filename='<ast>', mode='eval')
       result = eval(code, ns)
@@ -83,6 +105,7 @@ def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
 
   except Exception as e:
     raise ValueError("Error evaluating expression: {}".format(e))
+
 
 def is_ast_safe(tree, allowed_functions=SAFE_FUNCTIONS):
   """
@@ -99,7 +122,10 @@ def is_ast_safe(tree, allowed_functions=SAFE_FUNCTIONS):
       if isinstance(node.func, ast.Name):
         func_name = node.func.id
         # Block dangerous built-in functions
-        if func_name in ['exec', 'eval', '__import__', 'open', 'compile', 'globals', 'locals', 'vars', 'dir', 'getattr', 'setattr', 'delattr', 'hasattr']:
+        if func_name in [
+            'exec', 'eval', '__import__', 'open', 'compile', 'globals',
+            'locals', 'vars', 'dir', 'getattr', 'setattr', 'delattr', 'hasattr'
+        ]:
           return False
       elif isinstance(node.func, ast.Attribute):
         # Block dangerous attribute access
@@ -111,7 +137,10 @@ def is_ast_safe(tree, allowed_functions=SAFE_FUNCTIONS):
     elif isinstance(node, ast.Name):
       name = node.id
       # Block access to dangerous names
-      if name in ['__import__', '__builtins__', '__globals__', '__locals__', 'exec', 'eval', 'open', 'compile']:
+      if name in [
+          '__import__', '__builtins__', '__globals__', '__locals__', 'exec',
+          'eval', 'open', 'compile'
+      ]:
         return False
 
     # Check for dangerous attribute access
@@ -125,6 +154,7 @@ def is_ast_safe(tree, allowed_functions=SAFE_FUNCTIONS):
 
   return True
 
+
 def safe_eval_to_lambda(expr, **kwargs):
   """
   Evaluate a string expression as a lambda function in a safe environment.
@@ -134,4 +164,3 @@ def safe_eval_to_lambda(expr, **kwargs):
   :return: lambda function
   """
   return lambda **kwargs: safe_eval(expr, **kwargs)
-

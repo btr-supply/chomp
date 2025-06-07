@@ -79,9 +79,9 @@ class TestSafeEval:
     """Test that function definitions work since the implementation doesn't restrict them."""
     # Test that function definitions work
     safe_code = [
-      "1 + 1",  # Simple expression
-      "len('hello')",  # Function call
-      "str(123)",  # Type conversion
+        "1 + 1",  # Simple expression
+        "len('hello')",  # Function call
+        "str(123)",  # Type conversion
     ]
 
     for code in safe_code:
@@ -94,8 +94,8 @@ class TestSafeEval:
 
     # These should work since the implementation is permissive
     dangerous_code = [
-      "1",  # Simple value
-      "len('test')",  # Safe builtin
+        "1",  # Simple value
+        "len('test')",  # Safe builtin
     ]
 
     for code in dangerous_code:
@@ -112,10 +112,7 @@ class TestSafeEval:
       pass
 
     # These should work with the permissive implementation
-    safe_attrs = [
-      "'test'.lower()",
-      "len('test')"
-    ]
+    safe_attrs = ["'test'.lower()", "len('test')"]
 
     for code in safe_attrs:
       result = safe_eval(code)
@@ -125,11 +122,7 @@ class TestSafeEval:
     """Test that most builtins work with the permissive implementation."""
     # These should work
     safe_builtins = [
-      "abs(-5)",
-      "len('hello')",
-      "str(123)",
-      "int('456')",
-      "float('78.9')"
+        "abs(-5)", "len('hello')", "str(123)", "int('456')", "float('78.9')"
     ]
 
     for code in safe_builtins:
@@ -138,9 +131,7 @@ class TestSafeEval:
 
     # These may work or raise NameError based on available builtins
     potentially_dangerous_builtins = [
-      "sum([1,2,3])",
-      "max([1,2,3])",
-      "min([1,2,3])"
+        "sum([1,2,3])", "max([1,2,3])", "min([1,2,3])"
     ]
 
     for code in potentially_dangerous_builtins:
@@ -155,14 +146,8 @@ class TestSafeEval:
     """Test that safe builtins are allowed."""
     # These should be allowed
     safe_operations = [
-      "abs(-5)",
-      "max([1, 2, 3])",
-      "min([1, 2, 3])",
-      "sum([1, 2, 3])",
-      "len('hello')",
-      "str(123)",
-      "int('456')",
-      "float('78.9')"
+        "abs(-5)", "max([1, 2, 3])", "min([1, 2, 3])", "sum([1, 2, 3])",
+        "len('hello')", "str(123)", "int('456')", "float('78.9')"
     ]
 
     for code in safe_operations:
@@ -223,10 +208,10 @@ class TestSafeEval:
   def test_safe_eval_syntax_errors(self):
     """Test that syntax errors are wrapped in ValueError."""
     invalid_syntax = [
-      "2 +",  # Incomplete expression
-      "if x:",  # Incomplete if statement
-      "def (",  # Invalid function syntax
-      "{{{}",  # Unmatched braces
+        "2 +",  # Incomplete expression
+        "if x:",  # Incomplete if statement
+        "def (",  # Invalid function syntax
+        "{{{}",  # Unmatched braces
     ]
 
     for code in invalid_syntax:
@@ -236,9 +221,9 @@ class TestSafeEval:
   def test_safe_eval_type_errors(self):
     """Test handling of type errors."""
     type_error_code = [
-      "'string' + 123",  # Type mismatch
-      "len(123)",  # Wrong type for len
-      "[1, 2, 3]['invalid']",  # Invalid index type
+        "'string' + 123",  # Type mismatch
+        "len(123)",  # Wrong type for len
+        "[1, 2, 3]['invalid']",  # Invalid index type
     ]
 
     for code in type_error_code:
@@ -248,9 +233,9 @@ class TestSafeEval:
   def test_safe_eval_name_errors(self):
     """Test that name errors are wrapped in ValueError."""
     undefined_vars = [
-      "undefined_variable",
-      "x + y",  # Without context
-      "some_function()",
+        "undefined_variable",
+        "x + y",  # Without context
+        "some_function()",
     ]
 
     for code in undefined_vars:
@@ -260,10 +245,10 @@ class TestSafeEval:
   def test_safe_eval_complex_expressions(self):
     """Test safe evaluation of complex but safe expressions."""
     complex_expressions = [
-      "sum([x**2 for x in range(10) if x % 2 == 0])",
-      "{'key': [1, 2, 3], 'value': {'nested': True}}",
-      "max([len(str(x)) for x in [123, 4567, 89]])",
-      "[x for x in range(20) if x % 3 == 0 and x > 5]"
+        "sum([x**2 for x in range(10) if x % 2 == 0])",
+        "{'key': [1, 2, 3], 'value': {'nested': True}}",
+        "max([len(str(x)) for x in [123, 4567, 89]])",
+        "[x for x in range(20) if x % 3 == 0 and x > 5]"
     ]
 
     for code in complex_expressions:
@@ -278,16 +263,24 @@ class TestSafeEval:
     """Test safe evaluation for data transformation tasks."""
     # Common data transformation patterns
     context = {
-      'data': {'price': 100, 'volume': 1000, 'change': 0.05},
-      'rates': {'USD': 1, 'EUR': 0.85, 'GBP': 0.75}
+        'data': {
+            'price': 100,
+            'volume': 1000,
+            'change': 0.05
+        },
+        'rates': {
+            'USD': 1,
+            'EUR': 0.85,
+            'GBP': 0.75
+        }
     }
 
     transformations = [
-      "data['price'] * (1 + data['change'])",  # Price calculation
-      "data['volume'] * data['price']",  # Market cap
-      "data['price'] * rates['EUR']",  # Currency conversion
-      "sum([data[k] for k in ['price', 'volume'] if k in data])",  # Aggregation
-      "[rates[k] for k in rates if rates[k] < 1]"  # Filtering
+        "data['price'] * (1 + data['change'])",  # Price calculation
+        "data['volume'] * data['price']",  # Market cap
+        "data['price'] * rates['EUR']",  # Currency conversion
+        "sum([data[k] for k in ['price', 'volume'] if k in data])",  # Aggregation
+        "[rates[k] for k in rates if rates[k] < 1]"  # Filtering
     ]
 
     for code in transformations:
@@ -301,17 +294,13 @@ class TestSafeEval:
   def test_safe_eval_mathematical_functions(self):
     """Test safe evaluation of mathematical functions."""
     # Math context with some constants
-    math_context = {
-      'pi': 3.14159,
-      'e': 2.71828,
-      'data': [1, 2, 3, 4, 5]
-    }
+    math_context = {'pi': 3.14159, 'e': 2.71828, 'data': [1, 2, 3, 4, 5]}
 
     math_expressions = [
-      "sum(data) / len(data)",  # Average
-      "max(data) - min(data)",  # Range
-      "pi * 2",  # Using constants
-      "[x**2 for x in data]",  # Squaring
+        "sum(data) / len(data)",  # Average
+        "max(data) - min(data)",  # Range
+        "pi * 2",  # Using constants
+        "[x**2 for x in data]",  # Squaring
     ]
 
     for code in math_expressions:
@@ -332,7 +321,9 @@ class TestSafeEval:
   def test_safe_eval_whitelist_approach(self):
     """Test that only whitelisted operations are allowed."""
     # These should work (basic operations)
-    safe_operations = ['len', 'str', 'int', 'float', 'abs', 'max', 'min', 'sum']
+    safe_operations = [
+        'len', 'str', 'int', 'float', 'abs', 'max', 'min', 'sum'
+    ]
 
     for name in safe_operations:
       try:
@@ -344,20 +335,21 @@ class TestSafeEval:
   def test_safe_eval_nested_data_access(self):
     """Test safe evaluation with nested data structures."""
     nested_data = {
-      'level1': {
-        'level2': {
-          'level3': [1, 2, 3, 4, 5],
-          'other': {'deep': 'value'}
-        }
-      },
-      'array': [[1, 2], [3, 4], [5, 6]]
+        'level1': {
+            'level2': {
+                'level3': [1, 2, 3, 4, 5],
+                'other': {
+                    'deep': 'value'
+                }
+            }
+        },
+        'array': [[1, 2], [3, 4], [5, 6]]
     }
 
     nested_expressions = [
-      "data['level1']['level2']['level3'][0]",
-      "len(data['array'])",
-      "sum([sum(row) for row in data['array']])",
-      "data['level1']['level2']['other']['deep']"
+        "data['level1']['level2']['level3'][0]", "len(data['array'])",
+        "sum([sum(row) for row in data['array']])",
+        "data['level1']['level2']['other']['deep']"
     ]
 
     for code in nested_expressions:

@@ -14,12 +14,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import src.utils.date as date_utils
-from src.utils.date import (
-  now, ago, interval_to_sql, interval_to_cron, interval_to_delta,
-  interval_to_seconds, floor_date, ceil_date, extract_time_unit,
-  floor_utc, ceil_utc, shift_date, fit_interval, round_interval,
-  fit_date_params, secs_to_ceil_date
-)
+from src.utils.date import (now, ago, interval_to_sql, interval_to_cron,
+                            interval_to_delta, interval_to_seconds, floor_date,
+                            ceil_date, extract_time_unit, floor_utc, ceil_utc,
+                            shift_date, fit_interval, round_interval,
+                            fit_date_params, secs_to_ceil_date)
 
 
 class TestDateUtilsActual:
@@ -194,7 +193,13 @@ class TestDateUtilsActual:
   def test_floor_date_default_date(self):
     """Test floor_date with default date (now)."""
     with patch('src.utils.date.now') as mock_now:
-      mock_now.return_value = datetime(2023, 1, 15, 10, 35, 45, tzinfo=timezone.utc)
+      mock_now.return_value = datetime(2023,
+                                       1,
+                                       15,
+                                       10,
+                                       35,
+                                       45,
+                                       tzinfo=timezone.utc)
       result = floor_date(interval="h1")
 
       # Should use mocked now() time
@@ -228,7 +233,13 @@ class TestDateUtilsActual:
   def test_floor_utc_default(self):
     """Test floor_utc with default interval."""
     with patch('src.utils.date.now') as mock_now:
-      mock_now.return_value = datetime(2023, 1, 15, 10, 35, 45, tzinfo=timezone.utc)
+      mock_now.return_value = datetime(2023,
+                                       1,
+                                       15,
+                                       10,
+                                       35,
+                                       45,
+                                       tzinfo=timezone.utc)
       result = floor_utc()
 
       # Should floor to the minute by default
@@ -238,7 +249,13 @@ class TestDateUtilsActual:
   def test_ceil_utc_default(self):
     """Test ceil_utc with default interval."""
     with patch('src.utils.date.now') as mock_now:
-      mock_now.return_value = datetime(2023, 1, 15, 10, 35, 45, tzinfo=timezone.utc)
+      mock_now.return_value = datetime(2023,
+                                       1,
+                                       15,
+                                       10,
+                                       35,
+                                       45,
+                                       tzinfo=timezone.utc)
       result = ceil_utc()
 
       # Should ceil to the next minute by default
@@ -264,7 +281,13 @@ class TestDateUtilsActual:
   def test_shift_date_default_date(self):
     """Test shift_date with default date."""
     with patch('src.utils.date.now') as mock_now:
-      mock_now.return_value = datetime(2023, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+      mock_now.return_value = datetime(2023,
+                                       1,
+                                       15,
+                                       10,
+                                       0,
+                                       0,
+                                       tzinfo=timezone.utc)
       result = shift_date(timeframe="m30")
 
       expected = datetime(2023, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
@@ -283,8 +306,15 @@ class TestDateUtilsActual:
   def test_fit_interval_default_to_date(self):
     """Test fit_interval with default to_date (now)."""
     with patch('src.utils.date.now') as mock_now:
-      mock_now.return_value = datetime(2023, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
-      from_date = datetime(2023, 1, 15, 8, 0, 0, tzinfo=timezone.utc)  # 2 hours ago
+      mock_now.return_value = datetime(2023,
+                                       1,
+                                       15,
+                                       10,
+                                       0,
+                                       0,
+                                       tzinfo=timezone.utc)
+      from_date = datetime(2023, 1, 15, 8, 0, 0,
+                           tzinfo=timezone.utc)  # 2 hours ago
 
       result = fit_interval(from_date)
 
@@ -311,7 +341,13 @@ class TestDateUtilsActual:
   def test_fit_date_params_all_defaults(self):
     """Test fit_date_params with all default parameters."""
     with patch('src.utils.date.now') as mock_now:
-      mock_now.return_value = datetime(2023, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+      mock_now.return_value = datetime(2023,
+                                       1,
+                                       15,
+                                       10,
+                                       0,
+                                       0,
+                                       tzinfo=timezone.utc)
 
       from_dt, to_dt, interval, epochs = fit_date_params()
 
@@ -326,16 +362,15 @@ class TestDateUtilsActual:
     from_date = datetime(2023, 1, 1, tzinfo=timezone.utc)
     to_date = datetime(2023, 1, 2, tzinfo=timezone.utc)
 
-    from_dt, to_dt, interval, epochs = fit_date_params(
-      from_date=from_date,
-      to_date=to_date,
-      target_epochs=50
-    )
+    from_dt, to_dt, interval, epochs = fit_date_params(from_date=from_date,
+                                                       to_date=to_date,
+                                                       target_epochs=50)
 
     assert from_dt == from_date
     assert to_dt == to_date
     assert epochs == 50
-    assert interval in ["m30", "h1", "h2"]  # Reasonable interval for 1 day / 50 epochs
+    assert interval in ["m30", "h1",
+                        "h2"]  # Reasonable interval for 1 day / 50 epochs
 
   def test_secs_to_ceil_date_basic(self):
     """Test secs_to_ceil_date basic functionality."""
@@ -352,7 +387,8 @@ class TestDateUtilsActual:
     """Test secs_to_ceil_date with offset."""
     test_date = datetime(2023, 1, 15, 10, 35, 45, tzinfo=timezone.utc)
 
-    result = secs_to_ceil_date(test_date, 3600, offset=300)  # 1 hour + 5 min offset
+    result = secs_to_ceil_date(test_date, 3600,
+                               offset=300)  # 1 hour + 5 min offset
 
     # Should include the offset in calculation
     assert result > 0
@@ -360,7 +396,13 @@ class TestDateUtilsActual:
   def test_secs_to_ceil_date_default_date(self):
     """Test secs_to_ceil_date with default date."""
     with patch('src.utils.date.now') as mock_now:
-      mock_now.return_value = datetime(2023, 1, 15, 10, 35, 45, tzinfo=timezone.utc)
+      mock_now.return_value = datetime(2023,
+                                       1,
+                                       15,
+                                       10,
+                                       35,
+                                       45,
+                                       tzinfo=timezone.utc)
 
       result = secs_to_ceil_date(secs=60)  # 1 minute interval
 
@@ -436,10 +478,8 @@ class TestDateUtilsParsing:
   def test_different_date_formats(self):
     """Test parsing different date formats."""
     formats = [
-      "2023-01-15",
-      "2023-01-15T10:30:45",
-      "2023-01-15T10:30:45Z",
-      "2023-01-15T10:30:45+00:00"
+        "2023-01-15", "2023-01-15T10:30:45", "2023-01-15T10:30:45Z",
+        "2023-01-15T10:30:45+00:00"
     ]
 
     for date_str in formats:

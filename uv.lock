@@ -366,6 +366,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "yapf" },
 ]
 
 [package.metadata]
@@ -467,6 +468,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.25.0" },
     { name = "pytest-cov", specifier = ">=4.1.0" },
     { name = "ruff", specifier = ">=0.11.12" },
+    { name = "yapf", specifier = ">=0.40.2" },
 ]
 
 [[package]]
@@ -2120,6 +2122,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a1/52/0faa32aa15f241a9f950ded276c942db69bce8dda5f19241f6b960080dca/yamale-5.2.1.tar.gz", hash = "sha256:19bbe713d588f07177bc519a46070c0793ed126ea37f425a76055b99703f835a", size = 40582 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/08/df/6339887f2fea6a4720d56e6c55f9730a663bc3946046fa6bb6ccf8e9892f/yamale-5.2.1-py3-none-any.whl", hash = "sha256:e44cd30cf3055ee4b34c1c71d6fe35490a127dcbd36f82f27859d105a9989922", size = 56856 },
+]
+
+[[package]]
+name = "yapf"
+version = "0.43.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "platformdirs" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/23/97/b6f296d1e9cc1ec25c7604178b48532fa5901f721bcf1b8d8148b13e5588/yapf-0.43.0.tar.gz", hash = "sha256:00d3aa24bfedff9420b2e0d5d9f5ab6d9d4268e72afbf59bb3fa542781d5218e", size = 254907 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/81/6acd6601f61e31cfb8729d3da6d5df966f80f374b78eff83760714487338/yapf-0.43.0-py3-none-any.whl", hash = "sha256:224faffbc39c428cb095818cf6ef5511fdab6f7430a10783fdfb292ccf2852ca", size = 256158 },
 ]
 
 [[package]]

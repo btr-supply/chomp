@@ -11,15 +11,20 @@ from ..adapters.sui_rpc import SuiRpcClient
 
 max_batch_size = 50  # Using a conservative batch size for Sui
 
+
 def parse_generic(data: Any) -> Any:
   return data
 
+
 async def schedule(c: Ingester) -> list[Task]:
+
   async def ingest(c: Ingester):
     await ensure_claim_task(c)
     data_by_object = {}
 
-    async def fetch_objects_batch(fields: list[ResourceField], max_retries: int = state.args.max_retries, max_batch_size=50) -> Dict[str, Any]:
+    async def fetch_objects_batch(fields: list[ResourceField],
+                                  max_retries: int = state.args.max_retries,
+                                  max_batch_size=50) -> Dict[str, Any]:
       retry_count = 0
       results: Dict[str, Any] = {}
 
@@ -38,7 +43,9 @@ async def schedule(c: Ingester) -> list[Task]:
               raise TypeError(f"Expected SuiRpcClient, got {type(client)}")
 
             if state.args.verbose:
-              log_debug(f"Fetching batch {i//max_batch_size + 1} of {(len(unique_objects) + max_batch_size - 1)//max_batch_size}")
+              log_debug(
+                  f"Fetching batch {i//max_batch_size + 1} of {(len(unique_objects) + max_batch_size - 1)//max_batch_size}"
+              )
 
             # Create a mapping of index to object ID for this batch
             batch_index_map = {i: obj_id for i, obj_id in enumerate(batch)}
@@ -57,7 +64,9 @@ async def schedule(c: Ingester) -> list[Task]:
             break  # Success, move to next batch
 
           except Exception as e:
-            log_error(f"Error fetching objects batch {i//max_batch_size + 1}, switching RPC... ({str(e)})")
+            log_error(
+                f"Error fetching objects batch {i//max_batch_size + 1}, switching RPC... ({str(e)})"
+            )
             # Type guard for endpoint access
             if isinstance(client, SuiRpcClient):
               prev_rpc = client.endpoint
@@ -73,7 +82,8 @@ async def schedule(c: Ingester) -> list[Task]:
             retry_count += 1
 
         if retry_count >= max_retries:
-          log_error(f"Failed to fetch objects batch after {max_retries} retries")
+          log_error(
+              f"Failed to fetch objects batch after {max_retries} retries")
           return results
 
       # Process results for all fields after all batches are fetched

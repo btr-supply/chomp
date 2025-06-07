@@ -14,8 +14,10 @@ from ..deps import safe_import
 lxml_html = safe_import('lxml.html')
 bs4 = safe_import('bs4')
 
+
 def is_xpath(selector: str) -> bool:
   return selector.startswith(("//", "./"))
+
 
 async def get_page(url: str) -> str:
   async with httpx.AsyncClient() as session:
@@ -24,15 +26,19 @@ async def get_page(url: str) -> str:
       if response.status_code == 200:
         return response.text
       else:
-        log_error(f"Failed to fetch page {url}, status code: {response.status_code}")
+        log_error(
+            f"Failed to fetch page {url}, status code: {response.status_code}")
     except httpx.RequestError as e:
       log_error(f"Error fetching page {url}: {e}")
   return ""
 
+
 async def schedule(c: Ingester) -> list[Task]:
   # Check for required dependencies
   if lxml_html is None or bs4 is None:
-    log_error("Missing optional dependencies for static scraper. Install with 'pip install chomp[scraper]'")
+    log_error(
+        "Missing optional dependencies for static scraper. Install with 'pip install chomp[scraper]'"
+    )
     return []
 
   # NB: not thread/async safe when multiple ingesters run with same target URL
@@ -74,13 +80,15 @@ async def schedule(c: Ingester) -> list[Task]:
     def select_field(field):
       h = hashes[field.target]
       if not field.selector:
-        return pages[h] # whole page
+        return pages[h]  # whole page
 
       # css selector
       if is_xpath(field.selector):
         els = trees[h].xpath(field.selector)
         if not els or len(els) == 0:
-          log_error(f"Failed to find element {field.selector} in page {field.target}, skipping...")
+          log_error(
+              f"Failed to find element {field.selector} in page {field.target}, skipping..."
+          )
           return ""
         # merge all text content from matching selectors
         return "\n".join([e.text_content().lstrip() for e in els])
@@ -88,13 +96,16 @@ async def schedule(c: Ingester) -> list[Task]:
         # css selector
         els = soups[h].select(field.selector)
         if not els or len(els) == 0:
-          log_error(f"Failed to find element {field.selector} in page {field.target}, skipping...")
+          log_error(
+              f"Failed to find element {field.selector} in page {field.target}, skipping..."
+          )
           return ""
         # merge all text content from matching selectors
         return "\n".join([e.get_text().lstrip() for e in els])
 
     tp = state.thread_pool
-    futures = [tp.submit(select_field, f) for f in c.fields if f.target] # lxlm and bs4 are sync -> parallelize
+    futures = [tp.submit(select_field, f) for f in c.fields
+               if f.target]  # lxlm and bs4 are sync -> parallelize
     for i in range(len(futures)):
       c.fields[i].value = futures[i].result()
 

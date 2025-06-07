@@ -27,8 +27,10 @@ class TestRedisProxy:
     mock_redis = Mock()
     mock_pool = Mock()
 
-    with patch('src.proxies.ConnectionPool', return_value=mock_pool) as mock_pool_class:
-      with patch('src.proxies.Redis', return_value=mock_redis) as mock_redis_class:
+    with patch('src.proxies.ConnectionPool',
+               return_value=mock_pool) as mock_pool_class:
+      with patch('src.proxies.Redis',
+                 return_value=mock_redis) as mock_redis_class:
         result = proxy.redis
 
         # Should create pool and redis connection
@@ -281,7 +283,10 @@ class TestRedisProxy:
     assert result == b"value1"
 
     # Test HGETALL
-    mock_redis.hgetall.return_value = {b"field1": b"value1", b"field2": b"value2"}
+    mock_redis.hgetall.return_value = {
+        b"field1": b"value1",
+        b"field2": b"value2"
+    }
     result = await proxy.hgetall("test_hash")
     mock_redis.hgetall.assert_called_once_with("test_hash")
     assert result == {b"field1": b"value1", b"field2": b"value2"}
@@ -310,9 +315,9 @@ class TestRedisProxy:
     with patch('src.proxies.ConnectionPool') as mock_pool_class:
       with patch('src.proxies.Redis'):
         with patch.dict(env, {
-          'REDIS_HOST': 'test_host',
-          'REDIS_PORT': '6380',
-          'REDIS_DB': '2'
+            'REDIS_HOST': 'test_host',
+            'REDIS_PORT': '6380',
+            'REDIS_DB': '2'
         }):
           _ = proxy.redis
 

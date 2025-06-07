@@ -96,13 +96,14 @@ class TestIngestersModule:
   def test_ingester_submodules_exist(self):
     """Test that expected ingester submodules exist."""
     expected_modules = [
-      'aptos_caller', 'aptos_logger', 'svm_logger',
-      'sui_logger', 'ton_caller', 'ton_logger'
+        'aptos_caller', 'aptos_logger', 'svm_logger', 'sui_logger',
+        'ton_caller', 'ton_logger'
     ]
 
     for module_name in expected_modules:
       try:
-        module = __import__(f'src.ingesters.{module_name}', fromlist=[module_name])
+        module = __import__(f'src.ingesters.{module_name}',
+                            fromlist=[module_name])
         assert module is not None
       except ImportError:
         # Some modules might not be implemented yet
@@ -125,11 +126,9 @@ class TestIngestersHTTPAPI:
     if not hasattr(self, 'ingester_class'):
       pytest.skip("HTTPAPIIngester not available")
 
-    ingester = self.ingester_class(
-      name="test_api",
-      url="https://api.example.com/data",
-      method="GET"
-    )
+    ingester = self.ingester_class(name="test_api",
+                                   url="https://api.example.com/data",
+                                   method="GET")
 
     assert ingester.name == "test_api"
     assert ingester.url == "https://api.example.com/data"
@@ -141,11 +140,9 @@ class TestIngestersHTTPAPI:
     if not hasattr(self, 'ingester_class'):
       pytest.skip("HTTPAPIIngester not available")
 
-    ingester = self.ingester_class(
-      name="test_api",
-      url="https://api.example.com/data",
-      method="GET"
-    )
+    ingester = self.ingester_class(name="test_api",
+                                   url="https://api.example.com/data",
+                                   method="GET")
 
     mock_response_data = [{"id": 1, "value": "test"}]
 
@@ -165,11 +162,10 @@ class TestIngestersHTTPAPI:
       pytest.skip("HTTPAPIIngester not available")
 
     ingester = self.ingester_class(
-      name="test_api",
-      url="https://api.example.com/data",
-      method="GET",
-      headers={"Authorization": "Bearer token123"}
-    )
+        name="test_api",
+        url="https://api.example.com/data",
+        method="GET",
+        headers={"Authorization": "Bearer token123"})
 
     with patch('src.ingesters.http_api.httpx.AsyncClient.get') as mock_get:
       mock_response = AsyncMock()
@@ -190,11 +186,9 @@ class TestIngestersHTTPAPI:
     if not hasattr(self, 'ingester_class'):
       pytest.skip("HTTPAPIIngester not available")
 
-    ingester = self.ingester_class(
-      name="test_api",
-      url="https://api.example.com/data",
-      method="GET"
-    )
+    ingester = self.ingester_class(name="test_api",
+                                   url="https://api.example.com/data",
+                                   method="GET")
 
     with patch('src.ingesters.http_api.httpx.AsyncClient.get') as mock_get:
       mock_response = AsyncMock()
@@ -235,7 +229,11 @@ class TestIngestersProcessor:
     input_data = [{"raw_field": "value1"}, {"raw_field": "value2"}]
 
     with patch.object(processor, 'transform_data') as mock_transform:
-      mock_transform.return_value = [{"processed_field": "VALUE1"}, {"processed_field": "VALUE2"}]
+      mock_transform.return_value = [{
+          "processed_field": "VALUE1"
+      }, {
+          "processed_field": "VALUE2"
+      }]
 
       result = await processor.process_data(input_data)
       assert len(result) == 2
@@ -266,7 +264,9 @@ class TestIngestersProcessor:
 
     processor = self.processor_class()
 
-    with patch.object(processor, 'transform_data', side_effect=Exception("Processing error")):
+    with patch.object(processor,
+                      'transform_data',
+                      side_effect=Exception("Processing error")):
       with pytest.raises(Exception, match="Processing error"):
         await processor.process_data([{"field": "value"}])
 
@@ -313,14 +313,15 @@ class TestIngestersImports:
   def test_import_all_ingesters(self):
     """Test importing all available ingester modules."""
     ingester_modules = [
-      'aptos_caller', 'aptos_logger', 'svm_logger',
-      'sui_logger', 'ton_caller', 'ton_logger'
+        'aptos_caller', 'aptos_logger', 'svm_logger', 'sui_logger',
+        'ton_caller', 'ton_logger'
     ]
 
     imported_count = 0
     for module_name in ingester_modules:
       try:
-        module = __import__(f'src.ingesters.{module_name}', fromlist=[module_name])
+        module = __import__(f'src.ingesters.{module_name}',
+                            fromlist=[module_name])
         assert module is not None
         imported_count += 1
       except ImportError:

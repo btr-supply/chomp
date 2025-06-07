@@ -2,8 +2,14 @@ import orjson
 import httpx
 from typing import Optional, Any
 
+
 class JsonRpcClient:
-  def __init__(self, endpoint: str, headers: Optional[dict[str, str]] = None, timeout: float = 10.0, jsonrpc_version: str = "2.0"):
+
+  def __init__(self,
+               endpoint: str,
+               headers: Optional[dict[str, str]] = None,
+               timeout: float = 10.0,
+               jsonrpc_version: str = "2.0"):
     self.endpoint = endpoint
     self.headers = headers or {"Content-Type": "application/json"}
     self.timeout = timeout
@@ -36,27 +42,35 @@ class JsonRpcClient:
       return False
     return await self.ping()
 
-  async def call(self, method: str, params: Optional[Any] = None, request_id: int = 1, ensure_connected=True) -> Any:
+  async def call(self,
+                 method: str,
+                 params: Optional[Any] = None,
+                 request_id: int = 1,
+                 ensure_connected=True) -> Any:
     if ensure_connected and not await self.is_connected():
       self.connect()
       if not await self.is_connected():
         raise Exception("Failed to establish connection")
 
     payload = {
-      "jsonrpc": self.jsonrpc_version,
-      "method": method,
-      "params": params or [],
-      "id": request_id,
+        "jsonrpc": self.jsonrpc_version,
+        "method": method,
+        "params": params or [],
+        "id": request_id,
     }
 
     # Serialize payload to JSON and calculate Content-Length
-    json_payload = orjson.dumps(payload, option=orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_SERIALIZE_DATACLASS)
+    json_payload = orjson.dumps(payload,
+                                option=orjson.OPT_SERIALIZE_NUMPY
+                                | orjson.OPT_SERIALIZE_DATACLASS)
     headers = self.headers.copy()
     headers["Content-Length"] = str(len(json_payload))
     try:
       if self._client is None:
         raise Exception("Client not connected")
-      response = await self._client.post(self.endpoint, content=json_payload, headers=headers)
+      response = await self._client.post(self.endpoint,
+                                         content=json_payload,
+                                         headers=headers)
       response.raise_for_status()  # Raise an error for HTTP-level issues
       data = response.json()
     except Exception as e:

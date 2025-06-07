@@ -8,23 +8,23 @@ from .sql import SqlAdapter
 
 # TimescaleDB data type mapping (PostgreSQL compatible)
 TYPES: dict[FieldType, str] = {
-  "int8": "smallint",      # 16 bits minimum in postgres
-  "uint8": "smallint",     # no unsigned in postgres
-  "int16": "smallint",     # 16 bits
-  "uint16": "integer",     # use 32-bit for unsigned 16-bit
-  "int32": "integer",      # 32 bits
-  "uint32": "bigint",      # use 64-bit for unsigned 32-bit
-  "int64": "bigint",       # 64 bits
-  "uint64": "bigint",      # no unsigned in postgres
-  "float32": "real",       # 32 bits
-  "ufloat32": "real",      # no unsigned in postgres
-  "float64": "double precision",  # 64 bits
-  "ufloat64": "double precision", # no unsigned in postgres
-  "bool": "boolean",
-  "timestamp": "timestamptz",  # timestamp with timezone
-  "string": "text",
-  "binary": "bytea",
-  "varbinary": "bytea",
+    "int8": "smallint",  # 16 bits minimum in postgres
+    "uint8": "smallint",  # no unsigned in postgres
+    "int16": "smallint",  # 16 bits
+    "uint16": "integer",  # use 32-bit for unsigned 16-bit
+    "int32": "integer",  # 32 bits
+    "uint32": "bigint",  # use 64-bit for unsigned 32-bit
+    "int64": "bigint",  # 64 bits
+    "uint64": "bigint",  # no unsigned in postgres
+    "float32": "real",  # 32 bits
+    "ufloat32": "real",  # no unsigned in postgres
+    "float64": "double precision",  # 64 bits
+    "ufloat64": "double precision",  # no unsigned in postgres
+    "bool": "boolean",
+    "timestamp": "timestamptz",  # timestamp with timezone
+    "string": "text",
+    "binary": "bytea",
+    "varbinary": "bytea",
 }
 
 # Define precision and timezone
@@ -32,25 +32,30 @@ PRECISION: TimeUnit = "ms"  # Supported values: ns, us, ms, s, m
 TIMEZONE = "UTC"
 
 partitioning_by_precision: dict[TimeUnit, str] = {
-  "ns": "1 day",
-  "us": "1 day",
-  "ms": "1 day",
-  "s": "7 days",
-  "m": "7 days",
-  "h": "1 month",
-  "D": "6 months",
-  "W": "5 years",
-  "M": "10 years",
-  "Y": "100 years"
+    "ns": "1 day",
+    "us": "1 day",
+    "ms": "1 day",
+    "s": "7 days",
+    "m": "7 days",
+    "h": "1 month",
+    "D": "6 months",
+    "W": "5 years",
+    "M": "10 years",
+    "Y": "100 years"
 }
+
 
 class TimescaleDb(SqlAdapter):
   """TimescaleDB adapter extending SqlAdapter."""
 
   TYPES = TYPES
 
-  def __init__(self, host: str = "localhost", port: int = 5432, db: str = "postgres",
-               user: str = "postgres", password: str = "password"):
+  def __init__(self,
+               host: str = "localhost",
+               port: int = 5432,
+               db: str = "postgres",
+               user: str = "postgres",
+               password: str = "password"):
     super().__init__(host, port, db, user, password)
     self._asyncpg_module = None
 
@@ -62,7 +67,9 @@ class TimescaleDb(SqlAdapter):
         import asyncpg
         self._asyncpg_module = asyncpg
       except ImportError as e:
-        raise ImportError("asyncpg is required for TimescaleDB adapter. Install with: pip install asyncpg") from e
+        raise ImportError(
+            "asyncpg is required for TimescaleDB adapter. Install with: pip install asyncpg"
+        ) from e
     return self._asyncpg_module
 
   @property
@@ -70,21 +77,17 @@ class TimescaleDb(SqlAdapter):
     return "timestamptz"
 
   @classmethod
-  async def connect(
-    cls,
-    host: str | None = None,
-    port: int | None = None,
-    db: str | None = None,
-    user: str | None = None,
-    password: str | None = None
-  ) -> "TimescaleDb":
-    self = cls(
-      host=host or env.get("TIMESCALE_HOST") or "localhost",
-      port=int(port or env.get("TIMESCALE_PORT") or 5432),
-      db=db or env.get("TIMESCALE_DB") or "postgres",
-      user=user or env.get("DB_RW_USER") or "postgres",
-      password=password or env.get("DB_RW_PASS") or "password"
-    )
+  async def connect(cls,
+                    host: str | None = None,
+                    port: int | None = None,
+                    db: str | None = None,
+                    user: str | None = None,
+                    password: str | None = None) -> "TimescaleDb":
+    self = cls(host=host or env.get("TIMESCALE_HOST") or "localhost",
+               port=int(port or env.get("TIMESCALE_PORT") or 5432),
+               db=db or env.get("TIMESCALE_DB") or "postgres",
+               user=user or env.get("DB_RW_USER") or "postgres",
+               password=password or env.get("DB_RW_PASS") or "password")
     await self.ensure_connected()
     return self
 
@@ -93,17 +96,19 @@ class TimescaleDb(SqlAdapter):
     try:
       asyncpg = self.asyncpg_module
 
-      self.conn = await asyncpg.connect(
-        host=self.host,
-        port=self.port,
-        database=self.db,
-        user=self.user,
-        password=self.password
+      self.conn = await asyncpg.connect(host=self.host,
+                                        port=self.port,
+                                        database=self.db,
+                                        user=self.user,
+                                        password=self.password)
+      log_info(
+          f"Connected to TimescaleDB on {self.host}:{self.port}/{self.db} as {self.user}"
       )
-      log_info(f"Connected to TimescaleDB on {self.host}:{self.port}/{self.db} as {self.user}")
 
     except Exception as e:
-      raise ValueError(f"Failed to connect to TimescaleDB on {self.user}@{self.host}:{self.port}/{self.db}: {e}")
+      raise ValueError(
+          f"Failed to connect to TimescaleDB on {self.user}@{self.host}:{self.port}/{self.db}: {e}"
+      )
 
   async def _close_pool(self):
     """TimescaleDB-specific pool closing."""
@@ -128,18 +133,19 @@ class TimescaleDb(SqlAdapter):
     """PostgreSQL uses $1, $2, ... for parameters."""
     return ", ".join([f"${i+1}" for i in range(count)])
 
-  async def create_db(self, name: str, options: dict = {}, force: bool = False):
+  async def create_db(self,
+                      name: str,
+                      options: dict = {},
+                      force: bool = False):
     """TimescaleDB-specific database creation."""
     try:
       # Connect to postgres database to create the target database
       asyncpg = self.asyncpg_module
-      admin_conn = await asyncpg.connect(
-        host=self.host,
-        port=self.port,
-        user=self.user,
-        password=self.password,
-        database="postgres"
-      )
+      admin_conn = await asyncpg.connect(host=self.host,
+                                         port=self.port,
+                                         user=self.user,
+                                         password=self.password,
+                                         database="postgres")
       if force:
         await admin_conn.execute(f'DROP DATABASE IF EXISTS "{name}"')
       await admin_conn.execute(f'CREATE DATABASE "{name}"')
@@ -157,18 +163,19 @@ class TimescaleDb(SqlAdapter):
 
     self.db = db
     asyncpg = self.asyncpg_module
-    self.conn = await asyncpg.connect(
-      host=self.host,
-      port=self.port,
-      database=db,
-      user=self.user,
-      password=self.password
-    )
+    self.conn = await asyncpg.connect(host=self.host,
+                                      port=self.port,
+                                      database=db,
+                                      user=self.user,
+                                      password=self.password)
 
   def _build_create_table_sql(self, c: Ingester, table_name: str) -> str:
     """TimescaleDB-specific CREATE TABLE with hypertable creation."""
     persistent_fields = [field for field in c.fields if not field.transient]
-    fields = ", ".join([f'"{field.name}" {self.TYPES[field.type]}' for field in persistent_fields])
+    fields = ", ".join([
+        f'"{field.name}" {self.TYPES[field.type]}'
+        for field in persistent_fields
+    ])
 
     return f'''
     CREATE TABLE IF NOT EXISTS "{table_name}" (
@@ -177,7 +184,10 @@ class TimescaleDb(SqlAdapter):
     );
     '''
 
-  async def create_table(self, c: Ingester, name: str = "", force: bool = False):
+  async def create_table(self,
+                         c: Ingester,
+                         name: str = "",
+                         force: bool = False):
     """TimescaleDB-specific table creation with hypertable."""
     await self.ensure_connected()
     table = name or c.name
@@ -201,32 +211,47 @@ class TimescaleDb(SqlAdapter):
       raise e
 
   def _build_aggregation_sql(
-    self,
-    table_name: str,
-    columns: list[str],
-    from_date: datetime,
-    to_date: datetime,
-    aggregation_interval: Interval
-  ) -> tuple[str, list[Any]]:
+      self, table_name: str, columns: list[str], from_date: datetime,
+      to_date: datetime,
+      aggregation_interval: Interval) -> tuple[str, list[Any]]:
     """TimescaleDB-specific aggregation using time_bucket."""
 
     # Convert interval format
     interval_map = {
-      "s1": "1 second", "s2": "2 seconds", "s5": "5 seconds", "s10": "10 seconds",
-      "s15": "15 seconds", "s20": "20 seconds", "s30": "30 seconds",
-      "m1": "1 minute", "m2": "2 minutes", "m5": "5 minutes", "m10": "10 minutes",
-      "m15": "15 minutes", "m30": "30 minutes",
-      "h1": "1 hour", "h2": "2 hours", "h4": "4 hours", "h6": "6 hours",
-      "h8": "8 hours", "h12": "12 hours",
-      "D1": "1 day", "D2": "2 days", "D3": "3 days",
-      "W1": "1 week", "M1": "1 month", "Y1": "1 year"
+        "s1": "1 second",
+        "s2": "2 seconds",
+        "s5": "5 seconds",
+        "s10": "10 seconds",
+        "s15": "15 seconds",
+        "s20": "20 seconds",
+        "s30": "30 seconds",
+        "m1": "1 minute",
+        "m2": "2 minutes",
+        "m5": "5 minutes",
+        "m10": "10 minutes",
+        "m15": "15 minutes",
+        "m30": "30 minutes",
+        "h1": "1 hour",
+        "h2": "2 hours",
+        "h4": "4 hours",
+        "h6": "6 hours",
+        "h8": "8 hours",
+        "h12": "12 hours",
+        "D1": "1 day",
+        "D2": "2 days",
+        "D3": "3 days",
+        "W1": "1 week",
+        "M1": "1 month",
+        "Y1": "1 year"
     }
 
     bucket_interval = interval_map.get(aggregation_interval, "5 minutes")
 
     # Build time bucket aggregation
     select_cols = [f"time_bucket('{bucket_interval}', ts) as ts"]
-    select_cols.extend([f"LAST({self._quote_identifier(col)}, ts) as {col}" for col in columns])
+    select_cols.extend([
+        f"LAST({self._quote_identifier(col)}, ts) as {col}" for col in columns
+    ])
     select_clause = ", ".join(select_cols)
 
     query = f"""

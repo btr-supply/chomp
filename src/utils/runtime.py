@@ -9,7 +9,9 @@ from functools import wraps
 
 from .format import log_error, log_warn
 
+
 class PackageMeta:
+
   def __init__(self, package="chomp"):
     try:
       dist = metadata.distribution(package)
@@ -22,7 +24,8 @@ class PackageMeta:
   def _set_metadata(self, meta):
     self.name = meta.get("Name", "Unknown")
     self.version = meta.get("Version", "0.0.0")
-    self.major_version, self.minor_version, self.patch_version = self.version.split(".")
+    self.major_version, self.minor_version, self.patch_version = self.version.split(
+        ".")
     self.description = meta.get("Summary", "No description available")
     self.authors = meta.get_all("Author", ["Unknown"])
 
@@ -36,14 +39,20 @@ class PackageMeta:
         project_data = tomli.load(f).get("project", {})
         self.name = project_data.get("name", "Unknown")
         self.version = project_data.get("version", "0.0.0")
-        self.major_version, self.minor_version, self.patch_version = self.version.split(".")
-        self.description = project_data.get("description", "No description available")
-        self.authors = [author.get("name", "Unknown") for author in project_data.get("authors", [])]
+        self.major_version, self.minor_version, self.patch_version = self.version.split(
+            ".")
+        self.description = project_data.get("description",
+                                            "No description available")
+        self.authors = [
+            author.get("name", "Unknown")
+            for author in project_data.get("authors", [])
+        ]
     else:
       print("pyproject.toml not found, using fallback values...")
       self._set_metadata({})
       # Still set the root to current directory as fallback
       self.root = Path(__file__).parent.parent.parent
+
 
 def run_async_in_thread(fn: Coroutine):
   loop = new_event_loop()
@@ -53,10 +62,12 @@ def run_async_in_thread(fn: Coroutine):
     log_error(f"Failed to run async function in thread: {e}")
     loop.close()
 
+
 def submit_to_threadpool(executor, fn, *args, **kwargs):
   if iscoroutinefunction(fn):
-      return executor.submit(run_async_in_thread, fn(*args, **kwargs))
+    return executor.submit(run_async_in_thread, fn(*args, **kwargs))
   return executor.submit(fn, *args, **kwargs)
+
 
 def select_nested(selector: Optional[str], data: dict) -> Any:
 
@@ -72,8 +83,10 @@ def select_nested(selector: Optional[str], data: dict) -> Any:
   if selector.startswith("."):
     selector = selector[1:]
 
-  current: Any = data # base access
-  segment_pattern = re.compile(r'([^.\[\]]+)(?:\[(\d+)\])?') # match selector segments eg. ".key" or ".key[index]"
+  current: Any = data  # base access
+  segment_pattern = re.compile(
+      r'([^.\[\]]+)(?:\[(\d+)\])?'
+  )  # match selector segments eg. ".key" or ".key[index]"
 
   # loop through segments
   for match in segment_pattern.finditer(selector):
@@ -95,6 +108,7 @@ def select_nested(selector: Optional[str], data: dict) -> Any:
       current = current[index_int]
   return current
 
+
 def merge_replace_empty(dest: dict, src: dict) -> dict:
   """Merge src into dest, replacing empty arrays/objects in dest with values from src."""
   for key, value in src.items():
@@ -110,7 +124,9 @@ def merge_replace_empty(dest: dict, src: dict) -> dict:
         dest[key] = value
   return dest
 
+
 def _cache_decorator(ttl=None, maxsize=128, is_async=False):
+
   def decorator(func):
     cache_data: dict[Any, tuple[Any, float]] = {}
     access_order: list[Any] = []
@@ -177,9 +193,11 @@ def _cache_decorator(ttl=None, maxsize=128, is_async=False):
 
   return decorator
 
+
 def cache(ttl=None, maxsize=128):
   """Sync cache decorator with TTL and LRU support"""
   return _cache_decorator(ttl=ttl, maxsize=maxsize, is_async=False)
+
 
 def async_cache(ttl=None, maxsize=128):
   """Async cache decorator with TTL and LRU support"""

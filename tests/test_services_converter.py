@@ -19,8 +19,12 @@ class TestConverterService:
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
       # Setup mock data
       mock_loader.return_value = ("", {
-        'btc': {'price': 50000.0},
-        'usd': {'value': 1.0}
+          'btc': {
+              'price': 50000.0
+          },
+          'usd': {
+              'value': 1.0
+          }
       })
 
       err, result = await convert('btc.price-usd.value', base_amount=2.0)
@@ -40,8 +44,12 @@ class TestConverterService:
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
       # Setup mock data
       mock_loader.return_value = ("", {
-        'btc': {'price': 50000.0},
-        'usd': {'value': 1.0}
+          'btc': {
+              'price': 50000.0
+          },
+          'usd': {
+              'value': 1.0
+          }
       })
 
       err, result = await convert('btc.price-usd.value', quote_amount=100000.0)
@@ -60,8 +68,12 @@ class TestConverterService:
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
       # Setup mock data
       mock_loader.return_value = ("", {
-        'eth': {'price': 3000.0},
-        'usd': {'value': 1.0}
+          'eth': {
+              'price': 3000.0
+          },
+          'usd': {
+              'value': 1.0
+          }
       })
 
       err, result = await convert('eth.price-usd.value')
@@ -78,11 +90,17 @@ class TestConverterService:
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
       # Setup mock data with high precision values
       mock_loader.return_value = ("", {
-        'btc': {'price': 50000.123456789},
-        'usd': {'value': 1.0}
+          'btc': {
+              'price': 50000.123456789
+          },
+          'usd': {
+              'value': 1.0
+          }
       })
 
-      err, result = await convert('btc.price-usd.value', base_amount=1.0, precision=3)
+      err, result = await convert('btc.price-usd.value',
+                                  base_amount=1.0,
+                                  precision=3)
 
       assert err == ""
       assert result['precision'] == 3
@@ -107,7 +125,9 @@ class TestConverterService:
   @pytest.mark.asyncio
   async def test_convert_both_amounts_specified(self):
     """Test convert with both base and quote amounts specified."""
-    err, result = await convert('btc.price-usd.value', base_amount=1.0, quote_amount=50000.0)
+    err, result = await convert('btc.price-usd.value',
+                                base_amount=1.0,
+                                quote_amount=50000.0)
 
     assert err == "Cannot specify both base and quote amounts"
     assert result == {}
@@ -143,10 +163,16 @@ class TestConverterService:
   async def test_convert_missing_base_field(self):
     """Test convert when base field is missing from resource."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
-      mock_loader.return_value = ("", {
-        'btc': {'other_field': 50000.0},  # missing 'price' field
-        'usd': {'value': 1.0}
-      })
+      mock_loader.return_value = (
+          "",
+          {
+              'btc': {
+                  'other_field': 50000.0
+              },  # missing 'price' field
+              'usd': {
+                  'value': 1.0
+              }
+          })
 
       err, result = await convert('btc.price-usd.value')
 
@@ -157,10 +183,16 @@ class TestConverterService:
   async def test_convert_missing_quote_field(self):
     """Test convert when quote field is missing from resource."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
-      mock_loader.return_value = ("", {
-        'btc': {'price': 50000.0},
-        'usd': {'other_field': 1.0}  # missing 'value' field
-      })
+      mock_loader.return_value = (
+          "",
+          {
+              'btc': {
+                  'price': 50000.0
+              },
+              'usd': {
+                  'other_field': 1.0
+              }  # missing 'value' field
+          })
 
       err, result = await convert('btc.price-usd.value')
 
@@ -171,10 +203,14 @@ class TestConverterService:
   async def test_convert_missing_resource(self):
     """Test convert when a resource is missing entirely."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
-      mock_loader.return_value = ("", {
-        'btc': {'price': 50000.0}
-        # missing 'usd' resource
-      })
+      mock_loader.return_value = (
+          "",
+          {
+              'btc': {
+                  'price': 50000.0
+              }
+              # missing 'usd' resource
+          })
 
       err, result = await convert('btc.price-usd.value')
 
@@ -186,8 +222,12 @@ class TestConverterService:
     """Test convert when field values are not numeric."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
       mock_loader.return_value = ("", {
-        'btc': {'price': "not_a_number"},
-        'usd': {'value': 1.0}
+          'btc': {
+              'price': "not_a_number"
+          },
+          'usd': {
+              'value': 1.0
+          }
       })
 
       err, result = await convert('btc.price-usd.value')
@@ -200,8 +240,12 @@ class TestConverterService:
     """Test pegcheck with values within acceptable range."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
       mock_loader.return_value = ("", {
-        'usdc': {'price': 1.001},
-        'usdt': {'price': 1.000}
+          'usdc': {
+              'price': 1.001
+          },
+          'usdt': {
+              'price': 1.000
+          }
       })
 
       err, result = await pegcheck('usdc.price-usdt.price')
@@ -221,10 +265,16 @@ class TestConverterService:
   async def test_pegcheck_valid_out_of_range(self):
     """Test pegcheck with values outside acceptable range."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
-      mock_loader.return_value = ("", {
-        'usdc': {'price': 1.005},  # 0.5% deviation
-        'usdt': {'price': 1.000}
-      })
+      mock_loader.return_value = (
+          "",
+          {
+              'usdc': {
+                  'price': 1.005
+              },  # 0.5% deviation
+              'usdt': {
+                  'price': 1.000
+              }
+          })
 
       err, result = await pegcheck('usdc.price-usdt.price')
 
@@ -237,11 +287,16 @@ class TestConverterService:
     """Test pegcheck with custom factor."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
       mock_loader.return_value = ("", {
-        'btc': {'price': 50000.0},
-        'eth': {'price': 3000.0}
+          'btc': {
+              'price': 50000.0
+          },
+          'eth': {
+              'price': 3000.0
+          }
       })
 
-      err, result = await pegcheck('btc.price-eth.price', factor=0.06)  # 1 BTC = 16.67 ETH
+      err, result = await pegcheck('btc.price-eth.price',
+                                   factor=0.06)  # 1 BTC = 16.67 ETH
 
       assert err == ""
       assert result['factor'] == 0.06
@@ -252,12 +307,19 @@ class TestConverterService:
   async def test_pegcheck_custom_deviation(self):
     """Test pegcheck with custom max deviation."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
-      mock_loader.return_value = ("", {
-        'usdc': {'price': 1.008},  # 0.8% deviation
-        'usdt': {'price': 1.000}
-      })
+      mock_loader.return_value = (
+          "",
+          {
+              'usdc': {
+                  'price': 1.008
+              },  # 0.8% deviation
+              'usdt': {
+                  'price': 1.000
+              }
+          })
 
-      err, result = await pegcheck('usdc.price-usdt.price', max_deviation=0.01)  # 1% tolerance
+      err, result = await pegcheck('usdc.price-usdt.price',
+                                   max_deviation=0.01)  # 1% tolerance
 
       assert err == ""
       assert result['max_deviation'] == 0.01
@@ -268,8 +330,12 @@ class TestConverterService:
     """Test pegcheck with custom precision."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
       mock_loader.return_value = ("", {
-        'usdc': {'price': 1.0012345},
-        'usdt': {'price': 1.0009876}
+          'usdc': {
+              'price': 1.0012345
+          },
+          'usdt': {
+              'price': 1.0009876
+          }
       })
 
       err, result = await pegcheck('usdc.price-usdt.price', precision=4)
@@ -309,10 +375,16 @@ class TestConverterService:
   async def test_pegcheck_missing_fields(self):
     """Test pegcheck when required fields are missing."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
-      mock_loader.return_value = ("", {
-        'usdc': {'other_field': 1.001},  # missing 'price' field
-        'usdt': {'price': 1.000}
-      })
+      mock_loader.return_value = (
+          "",
+          {
+              'usdc': {
+                  'other_field': 1.001
+              },  # missing 'price' field
+              'usdt': {
+                  'price': 1.000
+              }
+          })
 
       err, result = await pegcheck('usdc.price-usdt.price')
 
@@ -323,10 +395,14 @@ class TestConverterService:
   async def test_pegcheck_missing_resource(self):
     """Test pegcheck when a resource is missing."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
-      mock_loader.return_value = ("", {
-        'usdc': {'price': 1.001}
-        # missing 'usdt' resource
-      })
+      mock_loader.return_value = (
+          "",
+          {
+              'usdc': {
+                  'price': 1.001
+              }
+              # missing 'usdt' resource
+          })
 
       err, result = await pegcheck('usdc.price-usdt.price')
 
@@ -338,8 +414,12 @@ class TestConverterService:
     """Test pegcheck with non-numeric field values."""
     with patch('src.services.converter.loader.get_last_values') as mock_loader:
       mock_loader.return_value = ("", {
-        'usdc': {'price': "invalid"},
-        'usdt': {'price': 1.000}
+          'usdc': {
+              'price': "invalid"
+          },
+          'usdt': {
+              'price': 1.000
+          }
       })
 
       err, result = await pegcheck('usdc.price-usdt.price')

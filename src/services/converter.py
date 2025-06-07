@@ -3,7 +3,11 @@ from ..utils import round_sigfig, split
 from ..model import ServiceResponse
 from . import loader
 
-async def convert(pair: str, base_amount: Optional[float] = None, quote_amount: Optional[float] = None, precision: int = 6) -> ServiceResponse[dict]:
+
+async def convert(pair: str,
+                  base_amount: Optional[float] = None,
+                  quote_amount: Optional[float] = None,
+                  precision: int = 6) -> ServiceResponse[dict]:
   """Convert between two resources using their last values"""
   # Validate pair format
   if not ('-' in pair and '.' in pair):
@@ -49,16 +53,20 @@ async def convert(pair: str, base_amount: Optional[float] = None, quote_amount: 
     quote_amount = result
 
   return "", {
-    'base': base,
-    'quote': quote,
-    'base_amount': base_amount,
-    'quote_amount': quote_amount,
-    'rate': rate,
-    'result': result,
-    'precision': precision
+      'base': base,
+      'quote': quote,
+      'base_amount': base_amount,
+      'quote_amount': quote_amount,
+      'rate': rate,
+      'result': result,
+      'precision': precision
   }
 
-async def pegcheck(pair: str, factor: float = 1.0, max_deviation: float = .002, precision: int = 6) -> ServiceResponse[dict]:
+
+async def pegcheck(pair: str,
+                   factor: float = 1.0,
+                   max_deviation: float = .002,
+                   precision: int = 6) -> ServiceResponse[dict]:
   """Check if two resources are pegged within a specified deviation"""
   try:
     base, quote = pair.split('-')
@@ -68,7 +76,8 @@ async def pegcheck(pair: str, factor: float = 1.0, max_deviation: float = .002, 
     return "Both base and quote must contain a field specified with dot notation", {}
 
   # Get last values for both resources
-  err, lasts = await loader.get_last_values([base_resource, quote_resource], precision=precision)
+  err, lasts = await loader.get_last_values([base_resource, quote_resource],
+                                            precision=precision)
   if err:
     return err, {}
 
@@ -94,16 +103,16 @@ async def pegcheck(pair: str, factor: float = 1.0, max_deviation: float = .002, 
   deviation = round((adjusted_base - quote_price) / quote_price, 4)
 
   return "", {
-    'base': base,
-    'quote': quote,
-    'base_price': base_price,
-    'quote_price': quote_price,
-    'adjusted_base': adjusted_base,
-    'factor': factor,
-    'min_quote': min_quote,
-    'max_quote': max_quote,
-    'max_deviation': max_deviation,
-    'deviation': deviation,
-    'in_range': abs(deviation) <= max_deviation,
-    'precision': precision
+      'base': base,
+      'quote': quote,
+      'base_price': base_price,
+      'quote_price': quote_price,
+      'adjusted_base': adjusted_base,
+      'factor': factor,
+      'min_quote': min_quote,
+      'max_quote': max_quote,
+      'max_deviation': max_deviation,
+      'deviation': deviation,
+      'in_range': abs(deviation) <= max_deviation,
+      'precision': precision
   }

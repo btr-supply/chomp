@@ -29,13 +29,11 @@ class TestSQLiteAdapter:
 
   def test_initialization(self):
     """Test SQLite adapter initialization."""
-    adapter = SQLite(
-      host="localhost",
-      port=0,
-      db="test.db",
-      user="",
-      password=""
-    )
+    adapter = SQLite(host="localhost",
+                     port=0,
+                     db="test.db",
+                     user="",
+                     password="")
 
     assert adapter.host == "localhost"
     assert adapter.port == 0
@@ -78,11 +76,11 @@ class TestSQLiteAdapter:
   async def test_connect_with_env_vars(self):
     """Test connect with environment variables."""
     env_vars = {
-      'SQLITE_HOST': 'sqlite-host',
-      'SQLITE_PORT': '1234',
-      'SQLITE_DB': '/path/to/test.db',
-      'DB_RW_USER': 'test-user',
-      'DB_RW_PASS': 'test-pass'
+        'SQLITE_HOST': 'sqlite-host',
+        'SQLITE_PORT': '1234',
+        'SQLITE_DB': '/path/to/test.db',
+        'DB_RW_USER': 'test-user',
+        'DB_RW_PASS': 'test-pass'
     }
 
     with patch.dict(env, env_vars), \
@@ -100,15 +98,14 @@ class TestSQLiteAdapter:
   @pytest.mark.asyncio
   async def test_connect_with_parameters(self):
     """Test connect with explicit parameters."""
-    with patch.object(SQLite, 'ensure_connected', new_callable=AsyncMock) as mock_ensure:
+    with patch.object(SQLite, 'ensure_connected',
+                      new_callable=AsyncMock) as mock_ensure:
 
-      adapter = await SQLite.connect(
-        host="custom-host",
-        port=9999,
-        db="custom.db",
-        user="custom-user",
-        password="custom-pass"
-      )
+      adapter = await SQLite.connect(host="custom-host",
+                                     port=9999,
+                                     db="custom.db",
+                                     user="custom-user",
+                                     password="custom-pass")
 
       assert adapter.host == "custom-host"
       assert adapter.port == 9999
@@ -135,7 +132,8 @@ class TestSQLiteAdapter:
       mock_connect.assert_called_once_with(":memory:")
       assert adapter.conn == mock_conn
       assert adapter.cursor == mock_cursor
-      mock_log.assert_called_once_with("Connected to SQLite database: :memory:")
+      mock_log.assert_called_once_with(
+          "Connected to SQLite database: :memory:")
 
   @pytest.mark.asyncio
   async def test_close_connection(self):
@@ -162,9 +160,10 @@ class TestSQLiteAdapter:
     adapter.cursor = mock_cursor
     adapter.conn = mock_conn
 
-    await adapter._execute("INSERT INTO test VALUES (?)", ("value",))
+    await adapter._execute("INSERT INTO test VALUES (?)", ("value", ))
 
-    mock_cursor.execute.assert_called_once_with("INSERT INTO test VALUES (?)", ("value",))
+    mock_cursor.execute.assert_called_once_with("INSERT INTO test VALUES (?)",
+                                                ("value", ))
     mock_conn.commit.assert_called_once()
 
   @pytest.mark.asyncio
@@ -174,7 +173,8 @@ class TestSQLiteAdapter:
     adapter.cursor = None
     adapter.conn = None
 
-    with pytest.raises(RuntimeError, match="SQLite connection not established"):
+    with pytest.raises(RuntimeError,
+                       match="SQLite connection not established"):
       await adapter._execute("SELECT 1")
 
   @pytest.mark.asyncio
@@ -192,9 +192,10 @@ class TestSQLiteAdapter:
 
     mock_cursor.fetchall.return_value = [mock_row1, mock_row2]
 
-    result = await adapter._fetch("SELECT * FROM test", ("param",))
+    result = await adapter._fetch("SELECT * FROM test", ("param", ))
 
-    mock_cursor.execute.assert_called_once_with("SELECT * FROM test", ("param",))
+    mock_cursor.execute.assert_called_once_with("SELECT * FROM test",
+                                                ("param", ))
     assert result == [("value1", "value2"), ("value3", "value4")]
 
   @pytest.mark.asyncio
@@ -206,11 +207,12 @@ class TestSQLiteAdapter:
     adapter.cursor = mock_cursor
     adapter.conn = mock_conn
 
-    params_list = [("val1",), ("val2",)]
+    params_list = [("val1", ), ("val2", )]
 
     await adapter._executemany("INSERT INTO test VALUES (?)", params_list)
 
-    mock_cursor.executemany.assert_called_once_with("INSERT INTO test VALUES (?)", params_list)
+    mock_cursor.executemany.assert_called_once_with(
+        "INSERT INTO test VALUES (?)", params_list)
     mock_conn.commit.assert_called_once()
 
   def test_quote_identifier(self):
@@ -226,7 +228,8 @@ class TestSQLiteAdapter:
 
     with patch('src.adapters.sqlite.log_info') as mock_log:
       await adapter.create_db("test_db")
-      mock_log.assert_called_once_with("SQLite database 'test_db' ready (file-based)")
+      mock_log.assert_called_once_with(
+          "SQLite database 'test_db' ready (file-based)")
 
   @pytest.mark.asyncio
   async def test_use_db_same_db(self):
@@ -254,4 +257,3 @@ class TestSQLiteAdapter:
       assert adapter.db == "new.db"
       mock_close.assert_called_once()
       mock_ensure.assert_called_once()
-

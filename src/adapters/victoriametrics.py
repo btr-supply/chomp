@@ -4,6 +4,7 @@ import aiohttp
 from ..utils import log_info
 from .prometheus import PrometheusAdapter
 
+
 class VictoriaMetrics(PrometheusAdapter):
   """
   VictoriaMetrics adapter that extends the Prometheus adapter.
@@ -11,21 +12,17 @@ class VictoriaMetrics(PrometheusAdapter):
   """
 
   @classmethod
-  async def connect(
-    cls,
-    host: str | None = None,
-    port: int | None = None,
-    db: str | None = None,
-    user: str | None = None,
-    password: str | None = None
-  ) -> "VictoriaMetrics":
-    self = cls(
-      host=host or env.get("VICTORIAMETRICS_HOST") or "localhost",
-      port=int(port or env.get("VICTORIAMETRICS_PORT") or 8428),
-      db=db or env.get("VICTORIAMETRICS_DB") or "default",
-      user=user or env.get("DB_RW_USER") or "",
-      password=password or env.get("DB_RW_PASS") or ""
-    )
+  async def connect(cls,
+                    host: str | None = None,
+                    port: int | None = None,
+                    db: str | None = None,
+                    user: str | None = None,
+                    password: str | None = None) -> "VictoriaMetrics":
+    self = cls(host=host or env.get("VICTORIAMETRICS_HOST") or "localhost",
+               port=int(port or env.get("VICTORIAMETRICS_PORT") or 8428),
+               db=db or env.get("VICTORIAMETRICS_DB") or "default",
+               user=user or env.get("DB_RW_USER") or "",
+               password=password or env.get("DB_RW_PASS") or "")
     await self.ensure_connected()
     return self
 

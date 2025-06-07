@@ -22,7 +22,9 @@ topics_by_client: dict[WebSocket, set[str]] = {}
 forwarded_topics: set[str] = set()  # Track globally subscribed topics
 
 # Add near the top with other globals
-ALLOWED_TOPICS_PATTERN = os.getenv("WS_ALLOWED_TOPICS", "chomp:*") # Default to all ingesters topics
+ALLOWED_TOPICS_PATTERN = os.getenv(
+    "WS_ALLOWED_TOPICS", "chomp:*")  # Default to all ingesters topics
+
 
 @asynccontextmanager
 async def lifespan(router: APIRouter):
@@ -35,7 +37,9 @@ async def lifespan(router: APIRouter):
     # on shutdown
     await state.stop_redis_listener()
 
+
 router = APIRouter(lifespan=lifespan)
+
 
 async def handle_redis_messages():
   try:
@@ -44,11 +48,13 @@ async def handle_redis_messages():
 
     # Subscribe to the wildcard pattern
     await state.redis.pubsub.psubscribe(ALLOWED_TOPICS_PATTERN)
-    log_info(f"Subscribed to topics matching pattern: {ALLOWED_TOPICS_PATTERN}")
+    log_info(
+        f"Subscribed to topics matching pattern: {ALLOWED_TOPICS_PATTERN}")
 
     # Use pubsub.listen() instead of get_message() to avoid concurrent read issues
     async for message in state.redis.pubsub.listen():
-      if message['type'] in ['message', 'pmessage']:  # Handle both message and pmessage types
+      if message['type'] in ['message', 'pmessage'
+                             ]:  # Handle both message and pmessage types
         try:
           topic = message['channel'].decode('utf-8')
           data = pickle.loads(message['data'])
@@ -62,6 +68,7 @@ async def handle_redis_messages():
     log_error(f"Fatal error in Redis message handler: {e}")
     # Let the error propagate so the task can be properly cleaned up
     raise
+
 
 async def broadcast_message(topic, msg):
   for ws in clients_by_topic.get(topic, []):
@@ -77,6 +84,7 @@ async def broadcast_message(topic, msg):
         await ws.send_text(text_msg)
     except Exception as e:
       log_error(f"Error sending message to client: {e}")
+
 
 async def disconnect_client(ws: WebSocket):
   try:
@@ -99,6 +107,7 @@ async def disconnect_client(ws: WebSocket):
   del topics_by_client[ws]
   if state.args.verbose:
     log_debug(f"Disconnected client {ws}")
+
 
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -144,15 +153,21 @@ async def websocket_endpoint(ws: WebSocket):
 
           # Send subscription response
           if rejected_topics:
-            await ws.send_text(orjson.dumps({
-              "error": f"Some topics were rejected: {rejected_topics}",
-              "subscribed": accepted_topics
-            }, option=ORJSON_OPTIONS).decode())
+            await ws.send_text(
+                orjson.dumps(
+                    {
+                        "error":
+                        f"Some topics were rejected: {rejected_topics}",
+                        "subscribed": accepted_topics
+                    },
+                    option=ORJSON_OPTIONS).decode())
           else:
-            await ws.send_text(orjson.dumps({
-              "success": True,
-              "subscribed": accepted_topics
-            }, option=ORJSON_OPTIONS).decode())
+            await ws.send_text(
+                orjson.dumps({
+                    "success": True,
+                    "subscribed": accepted_topics
+                },
+                             option=ORJSON_OPTIONS).decode())
 
         case "unsubscribe":
           topics = msg["topics"]

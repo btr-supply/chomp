@@ -95,37 +95,31 @@ class TestArgParser:
     parser = ArgParser()
 
     # Test basic tuple
-    arg_tuple = (("--test",), str, "default", None, "Help text")
+    arg_tuple = (("--test", ), str, "default", None, "Help text")
     args, kwargs = parser.argument_tuple_to_kwargs(arg_tuple)
 
-    assert args == ("--test",)
-    assert kwargs == {
-      "default": "default",
-      "help": "Help text",
-      "type": str
-    }
+    assert args == ("--test", )
+    assert kwargs == {"default": "default", "help": "Help text", "type": str}
 
   def test_argument_tuple_to_kwargs_with_action(self):
     """Test argument tuple conversion with action."""
     parser = ArgParser()
 
-    arg_tuple = (("--flag",), bool, True, "store_true", "Flag help")
+    arg_tuple = (("--flag", ), bool, True, "store_true", "Flag help")
     args, kwargs = parser.argument_tuple_to_kwargs(arg_tuple)
 
-    assert args == ("--flag",)
+    assert args == ("--flag", )
     assert kwargs == {
-      "default": True,
-      "help": "Flag help",
-      "action": "store_true"
+        "default": True,
+        "help": "Flag help",
+        "action": "store_true"
     }
 
   def test_add_arguments(self):
     """Test adding multiple arguments."""
     parser = ArgParser()
-    arguments = [
-      (("--arg1",), str, "default1", None, "Help 1"),
-      (("--arg2",), int, 42, None, "Help 2")
-    ]
+    arguments = [(("--arg1", ), str, "default1", None, "Help 1"),
+                 (("--arg2", ), int, 42, None, "Help 2")]
 
     parser.add_arguments(arguments)
 
@@ -138,10 +132,8 @@ class TestArgParser:
     """Test adding arguments to a group."""
     parser = ArgParser()
     group = parser.add_argument_group("test_group")
-    arguments = [
-      (("--grouped1",), str, "value1", None, "Help 1"),
-      (("--grouped2",), str, "value2", None, "Help 2")
-    ]
+    arguments = [(("--grouped1", ), str, "value1", None, "Help 1"),
+                 (("--grouped2", ), str, "value2", None, "Help 2")]
 
     parser.add_arguments(arguments, group=group)
 
@@ -151,9 +143,7 @@ class TestArgParser:
   def test_add_group(self):
     """Test adding argument group."""
     parser = ArgParser()
-    arguments = [
-      (("--group-arg",), str, "default", None, "Group argument")
-    ]
+    arguments = [(("--group-arg", ), str, "default", None, "Group argument")]
 
     parser.add_group("test_group", arguments)
 
@@ -164,12 +154,8 @@ class TestArgParser:
     """Test adding multiple argument groups."""
     parser = ArgParser()
     groups = {
-      "group1": [
-        (("--g1-arg",), str, "g1_default", None, "Group 1 arg")
-      ],
-      "group2": [
-        (("--g2-arg",), int, 100, None, "Group 2 arg")
-      ]
+        "group1": [(("--g1-arg", ), str, "g1_default", None, "Group 1 arg")],
+        "group2": [(("--g2-arg", ), int, 100, None, "Group 2 arg")]
     }
 
     parser.add_groups(groups)

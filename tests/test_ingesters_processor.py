@@ -18,6 +18,7 @@ class TestProcessorIngester:
   @pytest.mark.asyncio
   async def test_load_handler_with_callable(self):
     """Test load_handler when passed a callable function."""
+
     def dummy_handler(c, inputs):
       return {"result": "success"}
 
@@ -29,7 +30,8 @@ class TestProcessorIngester:
   async def test_load_handler_with_python_file(self):
     """Test load_handler with a Python file path."""
     # Create a temporary Python file with a handler function
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py',
+                                     delete=False) as f:
       f.write('''
 def handler(c, inputs):
     return {"processed": True}
@@ -50,7 +52,8 @@ def handler(c, inputs):
   @pytest.mark.asyncio
   async def test_load_handler_with_invalid_python_file(self):
     """Test load_handler with invalid Python file."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py',
+                                     delete=False) as f:
       f.write('invalid python syntax !!!')
       f.flush()
       temp_file = f.name
@@ -64,7 +67,8 @@ def handler(c, inputs):
   @pytest.mark.asyncio
   async def test_load_handler_with_missing_handler_function(self):
     """Test load_handler with Python file missing handler function."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py',
+                                     delete=False) as f:
       f.write('def other_function(): pass')
       f.flush()
       temp_file = f.name
@@ -91,12 +95,14 @@ def handler(c, inputs):
       result = await load_handler("lambda c, inputs: {'test': True}")
 
       assert result == mock_handler
-      mock_safe_eval.assert_called_once_with("lambda c, inputs: {'test': True}", callable_check=True)
+      mock_safe_eval.assert_called_once_with(
+          "lambda c, inputs: {'test': True}", callable_check=True)
 
   @pytest.mark.asyncio
   async def test_load_handler_safe_eval_error(self):
     """Test load_handler when safe_eval raises an error."""
-    with patch('src.ingesters.processor.safe_eval', side_effect=Exception("Eval error")):
+    with patch('src.ingesters.processor.safe_eval',
+               side_effect=Exception("Eval error")):
       with pytest.raises(Exception, match="Eval error"):
         await load_handler("invalid code")
 
@@ -109,7 +115,7 @@ def handler(c, inputs):
     mock_ingester.interval_sec = 10
     mock_ingester.handler = lambda c, inputs: {"result": "processed"}
     mock_ingester.fields = [
-      Mock(name="result", selector=None),
+        Mock(name="result", selector=None),
     ]
     mock_ingester.dependencies.return_value = ["dep1", "dep2"]
 
@@ -174,7 +180,11 @@ def handler(c, inputs):
 
       # Setup mocks
       mock_claim.return_value = None
-      mock_get_cache.side_effect = [{"value": "dep1_val"}, {"other": "dep2_val"}]
+      mock_get_cache.side_effect = [{
+          "value": "dep1_val"
+      }, {
+          "other": "dep2_val"
+      }]
       mock_state.args.verbose = True
 
       # Mock scheduler to execute the ingest function
@@ -226,11 +236,13 @@ def handler(c, inputs):
       result = await schedule(mock_ingester)
 
       assert len(result) == 1
-      mock_log_warn.assert_called_with("No dependency data available for test_processor")
+      mock_log_warn.assert_called_with(
+          "No dependency data available for test_processor")
 
   @pytest.mark.asyncio
   async def test_schedule_handler_error(self):
     """Test schedule function when handler raises an error."""
+
     def error_handler(c, inputs):
       raise Exception("Handler error")
 
@@ -319,17 +331,16 @@ def handler(c, inputs):
       result = await schedule(mock_ingester)
 
       assert len(result) == 1
-      mock_log_debug.assert_called_with("Waiting 15s for dependencies to be processed...")
+      mock_log_debug.assert_called_with(
+          "Waiting 15s for dependencies to be processed...")
       mock_sleep.assert_called_with(15)
 
   @pytest.mark.asyncio
   async def test_schedule_field_value_update(self):
     """Test that field values are updated correctly from handler results."""
+
     def test_handler(c, inputs):
-      return {
-        "field1": "handler_value1",
-        "field2": "handler_value2"
-      }
+      return {"field1": "handler_value1", "field2": "handler_value2"}
 
     mock_field1 = Mock()
     mock_field1.name = "field1"
@@ -378,12 +389,14 @@ def handler(c, inputs):
       assert mock_field2.value == "handler_value2"
 
       # Verify warning for missing computed field
-      mock_log_warn.assert_called_with("Handler did not return value for field field3")
+      mock_log_warn.assert_called_with(
+          "Handler did not return value for field field3")
 
   @pytest.mark.asyncio
   async def test_load_handler_spec_creation_failure(self):
     """Test load_handler when spec creation fails."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py',
+                                     delete=False) as f:
       f.write('def handler(): pass')
       f.flush()
       temp_file = f.name

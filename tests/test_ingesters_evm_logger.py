@@ -15,16 +15,13 @@ EVM_AVAILABLE = web3 is not None
 
 # Only import if dependencies are available
 if EVM_AVAILABLE:
-  from src.ingesters.evm_logger import (
-    parse_event_signature,
-    decode_log_data,
-    reorder_decoded_params,
-    schedule
-  )
+  from src.ingesters.evm_logger import (parse_event_signature, decode_log_data,
+                                        reorder_decoded_params, schedule)
   from src.model import Ingester, ResourceField
 
 
-@pytest.mark.skipif(not EVM_AVAILABLE, reason="EVM dependencies not available (web3)")
+@pytest.mark.skipif(not EVM_AVAILABLE,
+                    reason="EVM dependencies not available (web3)")
 class TestEVMLogger:
   """Test the EVM logger ingester functionality."""
 
@@ -97,18 +94,20 @@ class TestEVMLogger:
 
     # Mock log entry
     mock_log = {
-      'topics': [
-        b'\x01\x02\x03\x04',  # This would be the event signature hash
-        b'\x05\x06\x07\x08',  # First indexed parameter
-        b'\x09\x0a\x0b\x0c'   # Second indexed parameter
-      ],
-      'data': b'\x0d\x0e\x0f\x10'  # Non-indexed data
+        'topics': [
+            b'\x01\x02\x03\x04',  # This would be the event signature hash
+            b'\x05\x06\x07\x08',  # First indexed parameter
+            b'\x09\x0a\x0b\x0c'  # Second indexed parameter
+        ],
+        'data':
+        b'\x0d\x0e\x0f\x10'  # Non-indexed data
     }
 
     topics_first = ["address", "address", "uint256"]
     indexed = [True, True, False]
 
-    with patch('src.ingesters.evm_logger.reorder_decoded_params', return_value=[0x123, 0x456, 1000]):
+    with patch('src.ingesters.evm_logger.reorder_decoded_params',
+               return_value=[0x123, 0x456, 1000]):
       result = decode_log_data(mock_client, mock_log, topics_first, indexed)
 
     assert result == (0x123, 0x456, 1000)
@@ -176,7 +175,10 @@ class TestEVMLogger:
       mock_state.args.verbose = False
       mock_state.args.max_retries = 3
       mock_state.thread_pool = Mock()
-      mock_split.side_effect = [(1, "0x1234567890123456789012345678901234567890"), (1, "0xdac17f958d2ee523a2206206994597c13d831ec7")]
+      mock_split.side_effect = [
+          (1, "0x1234567890123456789012345678901234567890"),
+          (1, "0xdac17f958d2ee523a2206206994597c13d831ec7")
+      ]
 
       mock_task = Mock()
       mock_scheduler.add_ingester = AsyncMock(return_value=mock_task)

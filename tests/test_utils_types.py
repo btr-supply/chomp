@@ -72,8 +72,8 @@ class TestIsFloat:
     assert not is_float("")
     assert not is_float("1.2.3")
     assert not is_float(" 1.5 ")  # Has whitespace
-    assert not is_float("1.5 ")   # Trailing whitespace
-    assert not is_float(" 1.5")   # Leading whitespace
+    assert not is_float("1.5 ")  # Trailing whitespace
+    assert not is_float(" 1.5")  # Leading whitespace
 
 
 class TestIsPrimitive:
@@ -102,21 +102,21 @@ class TestIsEpoch:
   def test_valid_epochs(self):
     """Test valid epoch timestamps."""
     assert is_epoch(1609459200)  # Jan 1, 2021
-    assert is_epoch(0)           # Unix epoch start
+    assert is_epoch(0)  # Unix epoch start
     assert is_epoch(1234567890)  # Feb 13, 2009
 
   def test_invalid_epochs(self):
     """Test invalid epoch values."""
-    assert not is_epoch(-1)         # Negative timestamp
+    assert not is_epoch(-1)  # Negative timestamp
     assert not is_epoch(99999999999999)  # Too large
-    assert not is_epoch("abc")      # String
+    assert not is_epoch("abc")  # String
     assert not is_epoch([1, 2, 3])  # List
     assert not is_epoch({"key": "value"})  # Dict
 
   def test_edge_cases(self):
     """Test edge cases for epoch validation."""
     assert is_epoch("1609459200")  # String number
-    assert not is_epoch(None)      # None value
+    assert not is_epoch(None)  # None value
 
 
 class TestIsIterable:
@@ -133,7 +133,8 @@ class TestIsIterable:
     """Test non-iterable types."""
     assert not is_iterable(1)
     assert not is_iterable("string")  # String is iterable but not in our list
-    assert not is_iterable({"key": "value"})  # Dict is iterable but not in our list
+    assert not is_iterable({"key": "value"
+                            })  # Dict is iterable but not in our list
     assert not is_iterable(None)
 
 

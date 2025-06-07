@@ -61,26 +61,25 @@ class TestRedisProxy:
     """Test Redis connection pool configuration from environment."""
     proxy = RedisProxy()
 
-    with patch.dict(env, {
-      'REDIS_HOST': 'test-host',
-      'REDIS_PORT': '6380',
-      'DB_RW_USER': 'test-user',
-      'DB_RW_PASS': 'test-pass',
-      'REDIS_DB': '5',
-      'REDIS_MAX_CONNECTIONS': '1000'
-    }):
+    with patch.dict(
+        env, {
+            'REDIS_HOST': 'test-host',
+            'REDIS_PORT': '6380',
+            'DB_RW_USER': 'test-user',
+            'DB_RW_PASS': 'test-pass',
+            'REDIS_DB': '5',
+            'REDIS_MAX_CONNECTIONS': '1000'
+        }):
       with patch('src.proxies.ConnectionPool') as mock_pool_class:
         with patch('src.proxies.Redis'):
           proxy.redis
 
-          mock_pool_class.assert_called_once_with(
-            host='test-host',
-            port=6380,
-            username='test-user',
-            password='test-pass',
-            db=5,
-            max_connections=1000
-          )
+          mock_pool_class.assert_called_once_with(host='test-host',
+                                                  port=6380,
+                                                  username='test-user',
+                                                  password='test-pass',
+                                                  db=5,
+                                                  max_connections=1000)
 
   def test_redis_connection_pool_defaults(self):
     """Test Redis connection pool uses defaults when env vars not set."""
@@ -92,12 +91,12 @@ class TestRedisProxy:
           proxy.redis
 
           mock_pool_class.assert_called_once_with(
-            host='localhost',
-            port=6379,
-            username='rw',
-            password='pass',
-            db=0,
-            max_connections=65536  # 2 ** 16
+              host='localhost',
+              port=6379,
+              username='rw',
+              password='pass',
+              db=0,
+              max_connections=65536  # 2 ** 16
           )
 
   def test_pubsub_property_lazy_loading(self):
@@ -230,8 +229,10 @@ class TestRedisProxy:
     mock_redis1 = Mock()
     mock_redis2 = Mock()
 
-    with patch('src.proxies.ConnectionPool', return_value=mock_pool) as mock_pool_class:
-      with patch('src.proxies.Redis', side_effect=[mock_redis1, mock_redis2]) as mock_redis_class:
+    with patch('src.proxies.ConnectionPool',
+               return_value=mock_pool) as mock_pool_class:
+      with patch('src.proxies.Redis',
+                 side_effect=[mock_redis1, mock_redis2]) as mock_redis_class:
         # First access
 
         # Reset redis but keep pool
@@ -249,9 +250,9 @@ class TestRedisProxy:
     proxy = RedisProxy()
 
     with patch.dict(env, {
-      'REDIS_PORT': '9999',
-      'REDIS_DB': '10',
-      'REDIS_MAX_CONNECTIONS': '500'
+        'REDIS_PORT': '9999',
+        'REDIS_DB': '10',
+        'REDIS_MAX_CONNECTIONS': '500'
     }):
       with patch('src.proxies.ConnectionPool') as mock_pool_class:
         with patch('src.proxies.Redis'):
@@ -267,7 +268,8 @@ class TestRedisProxy:
     """Test error handling during connection pool creation."""
     proxy = RedisProxy()
 
-    with patch('src.proxies.ConnectionPool', side_effect=Exception("Connection failed")):
+    with patch('src.proxies.ConnectionPool',
+               side_effect=Exception("Connection failed")):
       with pytest.raises(Exception) as exc_info:
         proxy.redis
 
@@ -279,7 +281,8 @@ class TestRedisProxy:
     mock_pool = Mock()
 
     with patch('src.proxies.ConnectionPool', return_value=mock_pool):
-      with patch('src.proxies.Redis', side_effect=Exception("Redis creation failed")):
+      with patch('src.proxies.Redis',
+                 side_effect=Exception("Redis creation failed")):
         with pytest.raises(Exception) as exc_info:
           proxy.redis
 
@@ -296,7 +299,8 @@ class TestRedisProxy:
     # Make close operations fail
     mock_pubsub.close = AsyncMock(side_effect=Exception("Pubsub close failed"))
     mock_redis.close = AsyncMock(side_effect=Exception("Redis close failed"))
-    mock_pool.disconnect = AsyncMock(side_effect=Exception("Pool disconnect failed"))
+    mock_pool.disconnect = AsyncMock(
+        side_effect=Exception("Pool disconnect failed"))
 
     proxy._pubsub = mock_pubsub
     proxy._redis = mock_redis
@@ -332,7 +336,6 @@ class TestRedisProxy:
         # After accessing pubsub
         mock_pubsub = Mock()
         mock_redis.pubsub.return_value = mock_pubsub
-
 
         assert proxy._pool == mock_pool
         assert proxy._redis == mock_redis

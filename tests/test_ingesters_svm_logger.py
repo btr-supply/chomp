@@ -7,7 +7,6 @@ import importlib.util
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-
 # Solana doesn't have external dependencies beyond standard library for the RPC client
 SOLANA_AVAILABLE = True
 

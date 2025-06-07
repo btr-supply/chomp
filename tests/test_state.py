@@ -29,7 +29,7 @@ class TestStateModule:
     assert 'thread_pool' in state_module.__annotations__
 
     # These are actually initialized
-    assert hasattr(state, 'meta')    # Initialized with default value
+    assert hasattr(state, 'meta')  # Initialized with default value
     assert hasattr(state, 'redis_task')  # Initialized with None
 
   def test_init_function(self):
@@ -88,6 +88,7 @@ class TestStateModule:
   @pytest.mark.asyncio
   async def test_stop_redis_listener_with_task(self):
     """Test stopping an existing Redis listener task."""
+
     # Create a real asyncio task that can be properly awaited
     async def dummy_coroutine():
       pass
@@ -116,6 +117,7 @@ class TestStateModule:
   @pytest.mark.asyncio
   async def test_stop_redis_listener_cancelled_error(self):
     """Test stopping Redis listener handles CancelledError gracefully."""
+
     # Create a real asyncio task that raises CancelledError when awaited
     async def failing_coroutine():
       raise asyncio.CancelledError()
@@ -168,7 +170,10 @@ class TestStateModule:
 
     # Test internal imports
     from src.utils import PackageMeta
-    assert all([PackageMeta, ThreadPoolProxy, Web3Proxy, TsdbProxy, RedisProxy, ConfigProxy])
+    assert all([
+        PackageMeta, ThreadPoolProxy, Web3Proxy, TsdbProxy, RedisProxy,
+        ConfigProxy
+    ])
 
   def test_meta_object(self):
     """Test that meta object exists and has correct properties."""

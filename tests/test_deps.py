@@ -33,7 +33,9 @@ class TestDepsModule:
   def test_lazy_import_failure_with_alias(self):
     """Test lazy import failure with alias specified."""
     with pytest.raises(ImportError) as exc_info:
-      lazy_import('nonexistent_module', package='fake-package', alias='fake-extra')
+      lazy_import('nonexistent_module',
+                  package='fake-package',
+                  alias='fake-extra')
 
     error_msg = str(exc_info.value)
     assert "Missing optional dependency 'nonexistent_module'" in error_msg
@@ -61,9 +63,12 @@ class TestDepsModule:
 
   def test_lazy_import_importerror_handling(self):
     """Test lazy import handles ImportError properly."""
-    with patch('src.deps.importlib.import_module', side_effect=ImportError("Module not found")):
+    with patch('src.deps.importlib.import_module',
+               side_effect=ImportError("Module not found")):
       with pytest.raises(ImportError) as exc_info:
-        lazy_import('failing_module', package='failing-package', alias='failing')
+        lazy_import('failing_module',
+                    package='failing-package',
+                    alias='failing')
 
       error_msg = str(exc_info.value)
       assert "Missing optional dependency 'failing_module'" in error_msg
@@ -94,7 +99,8 @@ class TestDepsModule:
 
   def test_safe_import_with_importlib_mock_failure(self):
     """Test safe import using mocked importlib failure case."""
-    with patch('src.deps.importlib.import_module', side_effect=ImportError("Module not found")):
+    with patch('src.deps.importlib.import_module',
+               side_effect=ImportError("Module not found")):
       result = safe_import('failing_module')
       assert result is None
 
@@ -103,7 +109,9 @@ class TestDepsModule:
     mock_module = Mock()
 
     with patch('src.deps.importlib.import_module', return_value=mock_module):
-      result = lazy_import('test_module', package='test-package', alias='test-extra')
+      result = lazy_import('test_module',
+                           package='test-package',
+                           alias='test-extra')
       assert result == mock_module
 
   def test_lazy_import_only_module_name(self):
@@ -182,12 +190,9 @@ class TestDepsModule:
   def test_real_world_usage_scenarios(self):
     """Test realistic usage scenarios."""
     # Simulate trying to import optional dependencies
-    common_optional_deps = [
-      ('numpy', 'numpy'),
-      ('pandas', 'pandas'),
-      ('requests', 'requests'),
-      ('sqlalchemy', 'SQLAlchemy')
-    ]
+    common_optional_deps = [('numpy', 'numpy'), ('pandas', 'pandas'),
+                            ('requests', 'requests'),
+                            ('sqlalchemy', 'SQLAlchemy')]
 
     for module_name, package_name in common_optional_deps:
       # Try safe import first

@@ -9,59 +9,60 @@ from .sql import SqlAdapter
 
 # QuestDB data type mapping
 TYPES: dict[FieldType, str] = {
-  "int8": "byte",
-  "uint8": "short",  # No unsigned byte
-  "int16": "short",
-  "uint16": "int",  # No unsigned short
-  "int32": "int",
-  "uint32": "long",  # No unsigned int
-  "int64": "long",
-  "uint64": "long",  # No unsigned long in QuestDB
-  "float32": "float",
-  "ufloat32": "float",  # No unsigned float
-  "float64": "double",
-  "ufloat64": "double",  # No unsigned double
-  "bool": "boolean",
-  "timestamp": "timestamp",
-  "string": "string",
-  "binary": "string",  # QuestDB doesn't have binary type
-  "varbinary": "string",
+    "int8": "byte",
+    "uint8": "short",  # No unsigned byte
+    "int16": "short",
+    "uint16": "int",  # No unsigned short
+    "int32": "int",
+    "uint32": "long",  # No unsigned int
+    "int64": "long",
+    "uint64": "long",  # No unsigned long in QuestDB
+    "float32": "float",
+    "ufloat32": "float",  # No unsigned float
+    "float64": "double",
+    "ufloat64": "double",  # No unsigned double
+    "bool": "boolean",
+    "timestamp": "timestamp",
+    "string": "string",
+    "binary": "string",  # QuestDB doesn't have binary type
+    "varbinary": "string",
 }
 
 # QuestDB interval mapping for SAMPLE BY
 INTERVALS: dict[Interval, str] = {
-  "s1": "1s",
-  "s2": "2s",
-  "s5": "5s",
-  "s10": "10s",
-  "s15": "15s",
-  "s20": "20s",
-  "s30": "30s",
-  "m1": "1m",
-  "m2": "2m",
-  "m5": "5m",
-  "m10": "10m",
-  "m15": "15m",
-  "m30": "30m",
-  "h1": "1h",
-  "h2": "2h",
-  "h4": "4h",
-  "h6": "6h",
-  "h8": "8h",
-  "h12": "12h",
-  "D1": "1d",
-  "D2": "2d",
-  "D3": "3d",
-  "W1": "1w",
-  "W2": "2w",
-  "M1": "1M",
-  "M2": "2M",
-  "M3": "3M",
-  "M6": "6M",
-  "Y1": "1y",
-  "Y2": "2y",
-  "Y3": "3y",
+    "s1": "1s",
+    "s2": "2s",
+    "s5": "5s",
+    "s10": "10s",
+    "s15": "15s",
+    "s20": "20s",
+    "s30": "30s",
+    "m1": "1m",
+    "m2": "2m",
+    "m5": "5m",
+    "m10": "10m",
+    "m15": "15m",
+    "m30": "30m",
+    "h1": "1h",
+    "h2": "2h",
+    "h4": "4h",
+    "h6": "6h",
+    "h8": "8h",
+    "h12": "12h",
+    "D1": "1d",
+    "D2": "2d",
+    "D3": "3d",
+    "W1": "1w",
+    "W2": "2w",
+    "M1": "1M",
+    "M2": "2M",
+    "M3": "3M",
+    "M6": "6M",
+    "Y1": "1y",
+    "Y2": "2y",
+    "Y3": "3y",
 }
+
 
 class QuestDb(SqlAdapter):
   """QuestDB adapter that extends SqlAdapter but uses HTTP API."""
@@ -75,21 +76,17 @@ class QuestDb(SqlAdapter):
     return "timestamp"
 
   @classmethod
-  async def connect(
-    cls,
-    host: str | None = None,
-    port: int | None = None,
-    db: str | None = None,
-    user: str | None = None,
-    password: str | None = None
-  ) -> "QuestDb":
-    self = cls(
-      host=host or env.get("QUESTDB_HOST") or "localhost",
-      port=int(port or env.get("QUESTDB_PORT") or 9000),
-      db=db or env.get("QUESTDB_DB") or "default",
-      user=user or env.get("DB_RW_USER") or "admin",
-      password=password or env.get("DB_RW_PASS") or "quest"
-    )
+  async def connect(cls,
+                    host: str | None = None,
+                    port: int | None = None,
+                    db: str | None = None,
+                    user: str | None = None,
+                    password: str | None = None) -> "QuestDb":
+    self = cls(host=host or env.get("QUESTDB_HOST") or "localhost",
+               port=int(port or env.get("QUESTDB_PORT") or 9000),
+               db=db or env.get("QUESTDB_DB") or "default",
+               user=user or env.get("DB_RW_USER") or "admin",
+               password=password or env.get("DB_RW_PASS") or "quest")
     await self.ensure_connected()
     return self
 
@@ -125,7 +122,8 @@ class QuestDb(SqlAdapter):
           formatted_query = formatted_query.replace("?", f"'{param}'", 1)
         elif isinstance(param, datetime):
           timestamp_micros = int(param.timestamp() * 1_000_000)
-          formatted_query = formatted_query.replace("?", str(timestamp_micros), 1)
+          formatted_query = formatted_query.replace("?", str(timestamp_micros),
+                                                    1)
         else:
           formatted_query = formatted_query.replace("?", str(param), 1)
     else:
@@ -133,13 +131,12 @@ class QuestDb(SqlAdapter):
 
     if self.session is None:
       raise Exception("QuestDB session not connected")
-    response = await self.session.get(
-      f"{self.base_url}/exec",
-      params={"query": formatted_query}
-    )
+    response = await self.session.get(f"{self.base_url}/exec",
+                                      params={"query": formatted_query})
     if response.status_code != 200:
       error_text = response.text
-      raise Exception(f"QuestDB query failed: {response.status_code} - {error_text}")
+      raise Exception(
+          f"QuestDB query failed: {response.status_code} - {error_text}")
     return response.json()
 
   async def _fetch(self, query: str, params: tuple = ()) -> list[tuple]:
@@ -159,7 +156,9 @@ class QuestDb(SqlAdapter):
   def _build_create_table_sql(self, c: Ingester, table_name: str) -> str:
     """QuestDB-specific CREATE TABLE syntax with designated timestamp."""
     persistent_fields = [field for field in c.fields if not field.transient]
-    fields = ", ".join([f"{field.name} {self.TYPES[field.type]}" for field in persistent_fields])
+    fields = ", ".join([
+        f"{field.name} {self.TYPES[field.type]}" for field in persistent_fields
+    ])
 
     # QuestDB requires a designated timestamp column for time-series tables
     return f"""
@@ -170,13 +169,9 @@ class QuestDb(SqlAdapter):
     """
 
   def _build_aggregation_sql(
-    self,
-    table_name: str,
-    columns: list[str],
-    from_date: datetime,
-    to_date: datetime,
-    aggregation_interval: Interval
-  ) -> tuple[str, list[Any]]:
+      self, table_name: str, columns: list[str], from_date: datetime,
+      to_date: datetime,
+      aggregation_interval: Interval) -> tuple[str, list[Any]]:
     """QuestDB-specific aggregation using SAMPLE BY syntax."""
 
     # Convert timestamps to QuestDB format (microseconds)
@@ -209,13 +204,17 @@ class QuestDb(SqlAdapter):
     except Exception:
       return []
 
-  async def create_db(self, name: str, options: dict = {}, force: bool = False):
+  async def create_db(self,
+                      name: str,
+                      options: dict = {},
+                      force: bool = False):
     """QuestDB doesn't have separate databases, everything is in one namespace."""
     log_info(f"QuestDB database '{name}' ready (single namespace)")
 
   async def use_db(self, db: str):
     """QuestDB doesn't have separate databases."""
-    log_info(f"QuestDB uses single namespace, ignoring database switch to '{db}'")
+    log_info(
+        f"QuestDB uses single namespace, ignoring database switch to '{db}'")
 
   async def list_tables(self) -> list[str]:
     """QuestDB-specific table listing."""
@@ -240,7 +239,10 @@ class QuestDb(SqlAdapter):
     for field in persistent_fields:
       if field.type in ["string", "binary", "varbinary"]:
         field_values.append(f'{field.name}="{field.value}"')
-      elif field.type in ["int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"]:
+      elif field.type in [
+          "int8", "uint8", "int16", "uint16", "int32", "uint32", "int64",
+          "uint64"
+      ]:
         field_values.append(f'{field.name}={field.value}i')
       elif field.type in ["float32", "ufloat32", "float64", "ufloat64"]:
         field_values.append(f'{field.name}={field.value}')
@@ -260,14 +262,13 @@ class QuestDb(SqlAdapter):
     try:
       if self.session is None:
         raise Exception("QuestDB session not connected")
-      resp = await self.session.post(
-        f"{self.base_url}/write",
-        content=ilp_line,
-        headers={"Content-Type": "text/plain"}
-      )
+      resp = await self.session.post(f"{self.base_url}/write",
+                                     content=ilp_line,
+                                     headers={"Content-Type": "text/plain"})
       if resp.status_code not in [200, 204]:
         error_text = resp.text
-        raise Exception(f"QuestDB ILP insert failed: {resp.status_code} - {error_text}")
+        raise Exception(
+            f"QuestDB ILP insert failed: {resp.status_code} - {error_text}")
     except Exception as e:
       error_message = str(e).lower()
       if "does not exist" in error_message:
@@ -276,14 +277,13 @@ class QuestDb(SqlAdapter):
         # Retry the insert
         if self.session is None:
           raise Exception("QuestDB session not connected")
-        resp = await self.session.post(
-          f"{self.base_url}/write",
-          content=ilp_line,
-          headers={"Content-Type": "text/plain"}
-        )
+        resp = await self.session.post(f"{self.base_url}/write",
+                                       content=ilp_line,
+                                       headers={"Content-Type": "text/plain"})
         if resp.status_code not in [200, 204]:
           error_text = resp.text
-          raise Exception(f"QuestDB ILP insert failed: {resp.status_code} - {error_text}")
+          raise Exception(
+              f"QuestDB ILP insert failed: {resp.status_code} - {error_text}")
       else:
         log_error(f"Failed to insert data into {table}", e)
         raise e

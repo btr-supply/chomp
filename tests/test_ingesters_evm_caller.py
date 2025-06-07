@@ -20,7 +20,8 @@ if EVM_AVAILABLE:
   from src.model import Ingester, ResourceField
 
 
-@pytest.mark.skipif(not EVM_AVAILABLE, reason="EVM dependencies not available (web3, multicall)")
+@pytest.mark.skipif(not EVM_AVAILABLE,
+                    reason="EVM dependencies not available (web3, multicall)")
 class TestEVMCaller:
   """Test the EVM caller ingester functionality."""
 
@@ -55,7 +56,8 @@ class TestEVMCaller:
     mock_field.selector_outputs = ["uint256"]
     mock_field.name = "total_supply"
     mock_field.id = "test_field_id"
-    mock_field.chain_addr = Mock(return_value=("ETH", "0x1234567890123456789012345678901234567890"))
+    mock_field.chain_addr = Mock(
+        return_value=("ETH", "0x1234567890123456789012345678901234567890"))
 
     mock_ingester.fields = [mock_field]
 
@@ -101,7 +103,8 @@ class TestEVMCaller:
     mock_field1.selector_outputs = ["uint256"]
     mock_field1.name = "eth_total_supply"
     mock_field1.id = "eth_field_id"
-    mock_field1.chain_addr = Mock(return_value=("ETH", "0x1234567890123456789012345678901234567890"))
+    mock_field1.chain_addr = Mock(
+        return_value=("ETH", "0x1234567890123456789012345678901234567890"))
 
     mock_field2 = Mock(spec=ResourceField)
     mock_field2.target = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd:BSC"
@@ -110,7 +113,8 @@ class TestEVMCaller:
     mock_field2.selector_outputs = ["uint256"]
     mock_field2.name = "bsc_balance"
     mock_field2.id = "bsc_field_id"
-    mock_field2.chain_addr = Mock(return_value=("BSC", "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"))
+    mock_field2.chain_addr = Mock(
+        return_value=("BSC", "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"))
 
     mock_ingester.fields = [mock_field1, mock_field2]
 
@@ -140,8 +144,12 @@ class TestEVMCaller:
 
       # Mock multicall results
       mock_results = [
-        {"eth_total_supply:0": 1000000},  # ETH result
-        {"bsc_balance:0": 500000}         # BSC result
+          {
+              "eth_total_supply:0": 1000000
+          },  # ETH result
+          {
+              "bsc_balance:0": 500000
+          }  # BSC result
       ]
       mock_state.thread_pool.submit.return_value.result.side_effect = mock_results
 
@@ -168,7 +176,8 @@ class TestEVMCaller:
     mock_field.selector_outputs = ["uint256"]
     mock_field.name = "total_supply"
     mock_field.id = "test_field_id"
-    mock_field.chain_addr = Mock(return_value=("ETH", "0x1234567890123456789012345678901234567890"))
+    mock_field.chain_addr = Mock(
+        return_value=("ETH", "0x1234567890123456789012345678901234567890"))
 
     mock_ingester.fields = [mock_field]
 
@@ -187,7 +196,9 @@ class TestEVMCaller:
       mock_state.web3.client = AsyncMock(return_value=mock_client)
 
       # Mock multicall failure
-      mock_state.thread_pool.submit.return_value.result.side_effect = [Exception("Multicall failed")]
+      mock_state.thread_pool.submit.return_value.result.side_effect = [
+          Exception("Multicall failed")
+      ]
 
       mock_task = Mock()
       mock_scheduler.add_ingester = AsyncMock(return_value=mock_task)
@@ -239,7 +250,8 @@ class TestEVMCaller:
     mock_field1.selector_outputs = ["uint256"]
     mock_field1.name = "total_supply_1"
     mock_field1.id = "duplicate_id"  # Same ID to trigger duplicate detection
-    mock_field1.chain_addr = Mock(return_value=("ETH", "0x1234567890123456789012345678901234567890"))
+    mock_field1.chain_addr = Mock(
+        return_value=("ETH", "0x1234567890123456789012345678901234567890"))
 
     mock_field2 = Mock(spec=ResourceField)
     mock_field2.target = "0x1234567890123456789012345678901234567890:ETH"
@@ -248,7 +260,8 @@ class TestEVMCaller:
     mock_field2.selector_outputs = ["uint256"]
     mock_field2.name = "total_supply_2"
     mock_field2.id = "duplicate_id"  # Same ID to trigger duplicate detection
-    mock_field2.chain_addr = Mock(return_value=("ETH", "0x1234567890123456789012345678901234567890"))
+    mock_field2.chain_addr = Mock(
+        return_value=("ETH", "0x1234567890123456789012345678901234567890"))
 
     mock_ingester.fields = [mock_field1, mock_field2]
 

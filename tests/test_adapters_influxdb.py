@@ -20,7 +20,9 @@ if INFLUXDB_AVAILABLE:
   from src.adapters.influxdb import InfluxDb, TYPES, INTERVALS
 
 
-@pytest.mark.skipif(not INFLUXDB_AVAILABLE, reason="InfluxDB dependencies not available (influxdb-client)")
+@pytest.mark.skipif(
+    not INFLUXDB_AVAILABLE,
+    reason="InfluxDB dependencies not available (influxdb-client)")
 class TestInfluxDbAdapter:
   """Test InfluxDB adapter functionality."""
 
@@ -47,13 +49,11 @@ class TestInfluxDbAdapter:
 
   def test_initialization(self):
     """Test InfluxDB adapter initialization."""
-    adapter = InfluxDb(
-      host="localhost",
-      port=8086,
-      db="test_bucket",
-      user="admin",
-      password="secret"
-    )
+    adapter = InfluxDb(host="localhost",
+                       port=8086,
+                       db="test_bucket",
+                       user="admin",
+                       password="secret")
 
     assert adapter.host == "localhost"
     assert adapter.port == 8086
@@ -75,10 +75,7 @@ class TestInfluxDbAdapter:
 
   def test_initialization_with_env_vars(self):
     """Test initialization with environment variables."""
-    env_vars = {
-      'INFLUXDB_ORG': 'test-org',
-      'INFLUXDB_TOKEN': 'test-token'
-    }
+    env_vars = {'INFLUXDB_ORG': 'test-org', 'INFLUXDB_TOKEN': 'test-token'}
 
     with patch.dict(env, env_vars):
       adapter = InfluxDb()
@@ -98,7 +95,8 @@ class TestInfluxDbAdapter:
 
       assert client == mock_client_module
       assert adapter._influxdb_client == mock_client_module
-      mock_lazy_import.assert_called_once_with("influxdb_client", "influxdb-client", "influxdb")
+      mock_lazy_import.assert_called_once_with("influxdb_client",
+                                               "influxdb-client", "influxdb")
 
   @pytest.mark.asyncio
   async def test_connect_with_defaults(self):
@@ -119,11 +117,11 @@ class TestInfluxDbAdapter:
   async def test_connect_with_env_vars(self):
     """Test connect with environment variables."""
     env_vars = {
-      'INFLUXDB_HOST': 'influx-host',
-      'INFLUXDB_PORT': '8087',
-      'INFLUXDB_BUCKET': 'test-bucket',
-      'DB_RW_USER': 'test-user',
-      'DB_RW_PASS': 'test-pass'
+        'INFLUXDB_HOST': 'influx-host',
+        'INFLUXDB_PORT': '8087',
+        'INFLUXDB_BUCKET': 'test-bucket',
+        'DB_RW_USER': 'test-user',
+        'DB_RW_PASS': 'test-pass'
     }
 
     with patch.dict(env, env_vars), \
@@ -141,15 +139,14 @@ class TestInfluxDbAdapter:
   @pytest.mark.asyncio
   async def test_connect_with_parameters(self):
     """Test connect with explicit parameters."""
-    with patch.object(InfluxDb, 'ensure_connected', new_callable=AsyncMock) as mock_ensure:
+    with patch.object(InfluxDb, 'ensure_connected',
+                      new_callable=AsyncMock) as mock_ensure:
 
-      adapter = await InfluxDb.connect(
-        host="custom-host",
-        port=9999,
-        db="custom-bucket",
-        user="custom-user",
-        password="custom-pass"
-      )
+      adapter = await InfluxDb.connect(host="custom-host",
+                                       port=9999,
+                                       db="custom-bucket",
+                                       user="custom-user",
+                                       password="custom-pass")
 
       assert adapter.host == "custom-host"
       assert adapter.port == 9999
@@ -215,11 +212,10 @@ class TestInfluxDbAdapter:
       await adapter.ensure_connected()
 
       mock_influx_client.InfluxDBClient.assert_called_once_with(
-        url="http://localhost:8086",
-        token="test-token",
-        org="test-org",
-        timeout=30000
-      )
+          url="http://localhost:8086",
+          token="test-token",
+          org="test-org",
+          timeout=30000)
       assert adapter.client == mock_client_instance
       mock_log_info.assert_called_once()
 
@@ -234,15 +230,15 @@ class TestInfluxDbAdapter:
     mock_client_instance = Mock()
     mock_influx_client.InfluxDBClient.return_value = mock_client_instance
 
-    with patch('src.adapters.influxdb.lazy_import', return_value=mock_influx_client):
+    with patch('src.adapters.influxdb.lazy_import',
+               return_value=mock_influx_client):
       await adapter.ensure_connected()
 
       mock_influx_client.InfluxDBClient.assert_called_once_with(
-        url="https://remote-host",
-        token="test-token",
-        org="test-org",
-        timeout=30000
-      )
+          url="https://remote-host",
+          token="test-token",
+          org="test-org",
+          timeout=30000)
 
   @pytest.mark.asyncio
   async def test_ensure_connected_failure(self):
@@ -252,7 +248,8 @@ class TestInfluxDbAdapter:
     adapter._org = "test-org"
 
     mock_influx_client = Mock()
-    mock_influx_client.InfluxDBClient.side_effect = Exception("Connection failed")
+    mock_influx_client.InfluxDBClient.side_effect = Exception(
+        "Connection failed")
 
     with patch('src.adapters.influxdb.lazy_import', return_value=mock_influx_client), \
          patch('src.adapters.influxdb.log_error') as mock_log_error:
@@ -275,10 +272,7 @@ class TestInfluxDbAdapter:
       await adapter.create_db("new-bucket")
 
       mock_buckets_api.create_bucket.assert_called_once_with(
-        bucket_name="new-bucket",
-        org=adapter._org,
-        retention_rules=[]
-      )
+          bucket_name="new-bucket", org=adapter._org, retention_rules=[])
       assert adapter.db == "new-bucket"
 
   @pytest.mark.asyncio
@@ -297,10 +291,9 @@ class TestInfluxDbAdapter:
 
       expected_retention_rules = [{"type": "expire", "everySeconds": 86400}]
       mock_buckets_api.create_bucket.assert_called_once_with(
-        bucket_name="test-bucket",
-        org=adapter._org,
-        retention_rules=expected_retention_rules
-      )
+          bucket_name="test-bucket",
+          org=adapter._org,
+          retention_rules=expected_retention_rules)
 
   @pytest.mark.asyncio
   async def test_create_db_force_recreate(self):
@@ -321,7 +314,8 @@ class TestInfluxDbAdapter:
       await adapter.create_db("existing-bucket", force=True)
 
       # Should delete existing bucket first
-      mock_buckets_api.delete_bucket.assert_called_once_with(mock_existing_bucket)
+      mock_buckets_api.delete_bucket.assert_called_once_with(
+          mock_existing_bucket)
       # Then create new one
       mock_buckets_api.create_bucket.assert_called_once()
       mock_log_info.assert_called()
@@ -406,7 +400,13 @@ class TestInfluxDbAdapter:
     with patch.object(adapter, 'ensure_connected', new_callable=AsyncMock), \
          patch('src.adapters.influxdb.now') as mock_now:
 
-      mock_now.return_value = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+      mock_now.return_value = datetime(2023,
+                                       1,
+                                       1,
+                                       12,
+                                       0,
+                                       0,
+                                       tzinfo=timezone.utc)
 
       await adapter.insert(mock_ingester)
 
@@ -444,7 +444,13 @@ class TestInfluxDbAdapter:
     with patch.object(adapter, 'ensure_connected', new_callable=AsyncMock), \
          patch('src.adapters.influxdb.now') as mock_now:
 
-      mock_now.return_value = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+      mock_now.return_value = datetime(2023,
+                                       1,
+                                       1,
+                                       12,
+                                       0,
+                                       0,
+                                       tzinfo=timezone.utc)
 
       await adapter.insert(mock_ingester)
 
@@ -500,8 +506,8 @@ class TestInfluxDbAdapter:
     mock_ingester.fields = [mock_field1, mock_field2]
 
     values = [
-      (datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 100, 45.6),
-      (datetime(2023, 1, 1, 12, 1, 0, tzinfo=timezone.utc), 200, 67.8),
+        (datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 100, 45.6),
+        (datetime(2023, 1, 1, 12, 1, 0, tzinfo=timezone.utc), 200, 67.8),
     ]
 
     with patch.object(adapter, 'ensure_connected', new_callable=AsyncMock):
@@ -529,19 +535,22 @@ class TestInfluxDbAdapter:
     # Mock query result
     mock_table = Mock()
     mock_table.records = [
-      Mock(_time=datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc), _value=100, _field="field1"),
-      Mock(_time=datetime(2023, 1, 1, 12, 1, 0, tzinfo=timezone.utc), _value=200, _field="field1"),
+        Mock(_time=datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+             _value=100,
+             _field="field1"),
+        Mock(_time=datetime(2023, 1, 1, 12, 1, 0, tzinfo=timezone.utc),
+             _value=200,
+             _field="field1"),
     ]
     mock_query_api.query.return_value = [mock_table]
 
     with patch.object(adapter, 'ensure_connected', new_callable=AsyncMock):
       columns, rows = await adapter.fetch(
-        "test_measurement",
-        from_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
-        to_date=datetime(2023, 1, 2, tzinfo=timezone.utc),
-        aggregation_interval="m5",
-        columns=["field1"]
-      )
+          "test_measurement",
+          from_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+          to_date=datetime(2023, 1, 2, tzinfo=timezone.utc),
+          aggregation_interval="m5",
+          columns=["field1"])
 
       assert "ts" in columns
       assert "field1" in columns
@@ -599,10 +608,9 @@ class TestInfluxDbAdapter:
 
     with patch.object(adapter, 'ensure_connected', new_callable=AsyncMock):
       columns, rows = await adapter.fetch_batch(
-        ["measurement1", "measurement2"],
-        from_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
-        to_date=datetime(2023, 1, 2, tzinfo=timezone.utc)
-      )
+          ["measurement1", "measurement2"],
+          from_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+          to_date=datetime(2023, 1, 2, tzinfo=timezone.utc))
 
       # Should execute query
       mock_query_api.query.assert_called_once()

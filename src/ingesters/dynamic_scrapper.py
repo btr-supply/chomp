@@ -8,15 +8,12 @@ from ..model import Ingester, ResourceField
 from ..cache import ensure_claim_task
 from ..actions import transform_and_store, scheduler
 
-SelectorType = Literal[
-  "auto", "css", "xpath",
-  "id", "name", "class",
-  "role", "strict_role",
-  "value", "text", "strict_text",
-  "alt_text", "strict_alt_text",
-  "title", "strict_title",
-  "label", "strict_label",
-  "placeholder", "strict_placeholder"]
+SelectorType = Literal["auto", "css", "xpath", "id", "name", "class", "role",
+                       "strict_role", "value", "text", "strict_text",
+                       "alt_text", "strict_alt_text", "title", "strict_title",
+                       "label", "strict_label", "placeholder",
+                       "strict_placeholder"]
+
 
 class Puppet:
   by_id: dict[str, "Puppet"] = {}
@@ -29,14 +26,16 @@ class Puppet:
   selector: Locator
   elements: list[ElementHandle] = []
 
-  def __init__(self, field: ResourceField, ingester: Ingester, play: Playwright):
+  def __init__(self, field: ResourceField, ingester: Ingester,
+               play: Playwright):
     Puppet.by_id[field.id] = self
     self.field = field
     self.ingester = ingester
     self.play = play
 
   @staticmethod
-  async def from_field(field: ResourceField, ingester: Ingester, play: Playwright) -> "Puppet":
+  async def from_field(field: ResourceField, ingester: Ingester,
+                       play: Playwright) -> "Puppet":
     p = Puppet(field, ingester, play)
     for a in field.actions:
       await p.act(a)
@@ -78,7 +77,9 @@ class Puppet:
     return await gather(*[e.text_content() for e in self.elements])
 
   # TODO: add support for regex
-  async def select(self, selector: str="html", by: SelectorType|Any="auto") -> Locator:
+  async def select(self,
+                   selector: str = "html",
+                   by: SelectorType | Any = "auto") -> Locator:
     page = await self.ensure_page()
     locator: Locator
     match by:
@@ -120,7 +121,8 @@ class Puppet:
       case "strict_placeholder":
         locator = page.locator(f"placeholder={selector}")
       case _:
-        locator = page.locator(f"[{by}={selector}]" if "data-" in by else f"[data-{by}={selector}]")
+        locator = page.locator(f"[{by}={selector}]" if "data-" in
+                               by else f"[data-{by}={selector}]")
     self.selector = locator
     return locator
 
@@ -132,8 +134,10 @@ class Puppet:
       match part:
         case "browser":
           match command:
-            case "use": # supports chromium, firefox, webkit, msedge (chromium based)
-              self.browser = await self.play[args[0] if args else "chromium"].launch(*args[1:]) # --mute-audio --no-sandbox by default
+            case "use":  # supports chromium, firefox, webkit, msedge (chromium based)
+              self.browser = await self.play[
+                  args[0] if args else "chromium"].launch(
+                      *args[1:])  # --mute-audio --no-sandbox by default
             case "close":
               await self.browser.close() if self.browser else None
             case _:
@@ -147,7 +151,8 @@ class Puppet:
               await self.pages.pop().close() if self.pages else None
             case "set_viewport_size":
               page = await self.ensure_page()
-              await page.set_viewport_size(ViewportSize(width=int(args[0]), height=int(args[1])))
+              await page.set_viewport_size(
+                  ViewportSize(width=int(args[0]), height=int(args[1])))
             case "goto":
               page = await self.ensure_page()
               await page.goto(args[0])
@@ -198,7 +203,7 @@ class Puppet:
               await elements[0].press(args[0])
             case "select_option":
               elements = await self.ensure_elements()
-              await elements[0].select_option(args[0]) # by value or label
+              await elements[0].select_option(args[0])  # by value or label
             case "drag_and_drop":
               elements = await self.ensure_elements()
               # ElementHandle doesn't have drag_and_drop, use locator instead
@@ -240,12 +245,13 @@ class Puppet:
               await page.keyboard.up(args[0])
             case "type":
               page = await self.ensure_page()
-              await page.keyboard.type(args[0]) # can add delay
+              await page.keyboard.type(args[0])  # can add delay
             case _:
               log_error(f"Unknown keyboard action: {action}")
 
     except Exception as e:
       log_error(f"Error acting {action}: {e}")
+
 
 async def update_page(page: Page, action: str, selector: str, *args) -> Page:
   """Executes a state-changing action on the page and returns the modified page."""
@@ -281,7 +287,7 @@ async def update_page(page: Page, action: str, selector: str, *args) -> Page:
         await page.evaluate(f'window.scrollTo({selector}, {args[0]})')
       case "check":  # Added check action
         await page.check(selector)
-      case "uncheck": # Added uncheck action
+      case "uncheck":  # Added uncheck action
         await page.uncheck(selector)
       case "mouse":
         if args[0] == "move":
@@ -292,15 +298,18 @@ async def update_page(page: Page, action: str, selector: str, *args) -> Page:
           await page.mouse.up()
 
       case "set_viewport_size":
-        await page.set_viewport_size(ViewportSize(width=int(selector), height=int(args[0])))
+        await page.set_viewport_size(
+            ViewportSize(width=int(selector), height=int(args[0])))
       case "emulate_media":
-        await page.emulate_media(media=args[0])  # Fixed: use emulate_media instead of emulate
+        await page.emulate_media(
+            media=args[0])  # Fixed: use emulate_media instead of emulate
       case _:
         log_error(f"Unknown state action: {action}")
   except Exception as e:
     log_error(f"Error executing state action {action}: {e}")
 
   return page  # Return the modified page
+
 
 async def schedule(c: Ingester) -> list:
   hashes = {}
@@ -315,7 +324,7 @@ async def schedule(c: Ingester) -> list:
       # futures = action_chains.append(Puppet(hashes[f.name], c, playwright))
       futures = [Puppet.from_field(f, c, playwright) for f in c.fields\
         if Puppet.by_id.get(hashes[f.name]) is None]
-      puppets = await gather(*futures) # run all puppets concurrently
+      puppets = await gather(*futures)  # run all puppets concurrently
       for i, result in enumerate(puppets):
         contents = await puppets[i].ensure_contents()
         c.fields[i].value = contents[0] if contents else None

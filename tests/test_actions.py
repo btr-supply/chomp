@@ -45,7 +45,8 @@ class TestActionsLoad:
 
     from_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
-    with patch('src.actions.load.load_one', return_value="cached_value") as mock_load_one:
+    with patch('src.actions.load.load_one',
+               return_value="cached_value") as mock_load_one:
       result = await load(mock_ingester, from_date, None)
       assert result == "cached_value"
       mock_load_one.assert_called_once_with(mock_ingester)
@@ -57,7 +58,8 @@ class TestActionsLoad:
     mock_ingester.id = "test_id"
     mock_ingester.load_values.return_value = "loaded_values"
 
-    with patch('src.actions.load.get_cache', return_value="cached_data") as mock_cache:
+    with patch('src.actions.load.get_cache',
+               return_value="cached_data") as mock_cache:
       result = await load_one(mock_ingester)
       assert result == "loaded_values"
       mock_cache.assert_called_once_with("test_id")
@@ -107,7 +109,8 @@ class TestActionsLoad:
 
     await load(mock_ingester, from_date, to_date, aggregation_interval="1h")
 
-    mock_tsdb.fetch.assert_called_once_with("test_ingester", from_date, to_date, "1h")
+    mock_tsdb.fetch.assert_called_once_with("test_ingester", from_date,
+                                            to_date, "1h")
 
 
 class TestActionsImports:

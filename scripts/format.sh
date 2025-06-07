@@ -35,12 +35,11 @@ format_files() {
     fi
 
     if [ -f "$f" ] && [[ "$f" =~ \.py$ ]]; then
-      printf "Processing %-30s" "$f"
       if uv run yapf -i "$f" >/dev/null 2>&1; then
-        printf "\r✔️ %s\n" "$f"
+        echo "✅ $f"
         total=$((total+1))
       else
-        printf "\r❌ %s\n" "$f"
+        echo "❌ $f"
       fi
     fi
   done
@@ -66,12 +65,11 @@ case "$SCOPE" in
       echo "Formatting staged Python files in chomp..."
       git diff --name-only --cached --diff-filter=ACMR | while read -r f; do
         if [[ $f == *.py && -f "$f" ]]; then
-          printf "Processing %-30s" "$f"
           if uv run yapf -i "$f" >/dev/null 2>&1; then
-            printf "\r✔️ %s\n" "$f"
+            echo "✅ $f"
             git add "$f"
           else
-            printf "\r❌ %s\n" "$f"
+            echo "❌ $f"
           fi
         fi
       done

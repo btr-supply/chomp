@@ -1,26 +1,29 @@
 from .jsonrpc import JsonRpcClient
 from typing import Optional, Union
 
+
 class SuiRpcClient(JsonRpcClient):
 
   # default query parameters
   default_filters = {
-    "showType": True,
-    "showOwner": False,
-    "showPreviousTransaction": False,
-    "showDisplay": False,
-    "showContent": True,
-    "showBcs": False,
-    "showStorageRebate": False
+      "showType": True,
+      "showOwner": False,
+      "showPreviousTransaction": False,
+      "showDisplay": False,
+      "showContent": True,
+      "showBcs": False,
+      "showStorageRebate": False
   }
 
   def construct_query_params(
-    self,
-    **kwargs: bool
-  ) -> list[Union[str, list[str], dict[str, bool]]]:
-    return [
-      {key: value for key, value in {**self.default_filters, **kwargs}.items()}
-    ]
+      self, **kwargs: bool) -> list[Union[str, list[str], dict[str, bool]]]:
+    return [{
+        key: value
+        for key, value in {
+            **self.default_filters,
+            **kwargs
+        }.items()
+    }]
 
   async def get_protocol_config(self) -> str:
     return await self.call("sui_getProtocolConfig", ensure_connected=False)
@@ -36,16 +39,12 @@ class SuiRpcClient(JsonRpcClient):
 
   async def is_connected(self) -> bool:
     try:
-      chain_id = await self.get_chain_id() # hex string
+      chain_id = await self.get_chain_id()  # hex string
       return chain_id is not None
     except Exception:
       return False
 
-  async def get_object(
-    self,
-    object_id: str,
-    **kwargs: bool
-  ) -> Optional[dict]:
+  async def get_object(self, object_id: str, **kwargs: bool) -> Optional[dict]:
     params = self.construct_query_params(**kwargs)
     params.insert(0, object_id)
     result = await self.call("sui_getObject", params)
@@ -53,11 +52,8 @@ class SuiRpcClient(JsonRpcClient):
       return result.get("data")
     return None
 
-  async def get_multi_objects(
-    self,
-    object_ids: list[str],
-    **kwargs: bool
-  ) -> list[Optional[dict]]:
+  async def get_multi_objects(self, object_ids: list[str],
+                              **kwargs: bool) -> list[Optional[dict]]:
     params = self.construct_query_params(**kwargs)
     params.insert(0, object_ids)
     results = await self.call("sui_multiGetObjects", params)
@@ -71,4 +67,7 @@ class SuiRpcClient(JsonRpcClient):
 
   async def get_multi_object_fields(self, object_ids: list[str]) -> list[dict]:
     objects = await self.get_multi_objects(object_ids)
-    return [obj.get("content", {}).get("fields", {}) if obj else {} for obj in objects]
+    return [
+        obj.get("content", {}).get("fields", {}) if obj else {}
+        for obj in objects
+    ]

@@ -12,52 +12,53 @@ UTC = timezone.utc
 
 # KX kdb+ data type mapping
 TYPES: dict[FieldType, str] = {
-  "int8": "short",      # kdb+ doesn't have 8-bit types, use 16-bit
-  "uint8": "short",     # kdb+ doesn't have unsigned types
-  "int16": "short",     # 16-bit integer (h)
-  "uint16": "int",      # use 32-bit for unsigned 16-bit
-  "int32": "int",       # 32-bit integer (i)
-  "uint32": "long",     # use 64-bit for unsigned 32-bit
-  "int64": "long",      # 64-bit integer (j)
-  "uint64": "long",     # kdb+ doesn't have unsigned types
-  "float32": "real",    # 32-bit float (e)
-  "ufloat32": "real",   # kdb+ doesn't have unsigned types
-  "float64": "float",   # 64-bit float (f)
-  "ufloat64": "float",  # kdb+ doesn't have unsigned types
-  "bool": "boolean",    # boolean (b)
-  "timestamp": "timestamp", # timestamp (p)
-  "string": "symbol",   # symbol (s)
-  "binary": "byte",     # byte array (x)
-  "varbinary": "byte",  # byte array (x)
+    "int8": "short",  # kdb+ doesn't have 8-bit types, use 16-bit
+    "uint8": "short",  # kdb+ doesn't have unsigned types
+    "int16": "short",  # 16-bit integer (h)
+    "uint16": "int",  # use 32-bit for unsigned 16-bit
+    "int32": "int",  # 32-bit integer (i)
+    "uint32": "long",  # use 64-bit for unsigned 32-bit
+    "int64": "long",  # 64-bit integer (j)
+    "uint64": "long",  # kdb+ doesn't have unsigned types
+    "float32": "real",  # 32-bit float (e)
+    "ufloat32": "real",  # kdb+ doesn't have unsigned types
+    "float64": "float",  # 64-bit float (f)
+    "ufloat64": "float",  # kdb+ doesn't have unsigned types
+    "bool": "boolean",  # boolean (b)
+    "timestamp": "timestamp",  # timestamp (p)
+    "string": "symbol",  # symbol (s)
+    "binary": "byte",  # byte array (x)
+    "varbinary": "byte",  # byte array (x)
 }
 
 # KX kdb+ interval mapping for time-based aggregations
 INTERVALS: dict[Interval, str] = {
-  "s1": "0D00:00:01",
-  "s2": "0D00:00:02",
-  "s5": "0D00:00:05",
-  "s10": "0D00:00:10",
-  "s15": "0D00:00:15",
-  "s30": "0D00:00:30",
-  "m1": "0D00:01:00",
-  "m2": "0D00:02:00",
-  "m5": "0D00:05:00",
-  "m10": "0D00:10:00",
-  "m15": "0D00:15:00",
-  "m30": "0D00:30:00",
-  "h1": "0D01:00:00",
-  "h2": "0D02:00:00",
-  "h4": "0D04:00:00",
-  "h6": "0D06:00:00",
-  "h8": "0D08:00:00",
-  "h12": "0D12:00:00",
-  "D1": "1D00:00:00",
-  "D2": "2D00:00:00",
-  "D3": "3D00:00:00",
-  "W1": "7D00:00:00",
-  "M1": "1m",  # kdb+ monthly aggregation
-  "Y1": "1y",  # kdb+ yearly aggregation
+    "s1": "0D00:00:01",
+    "s2": "0D00:00:02",
+    "s5": "0D00:00:05",
+    "s10": "0D00:00:10",
+    "s15": "0D00:00:15",
+    "s30": "0D00:00:30",
+    "m1": "0D00:01:00",
+    "m2": "0D00:02:00",
+    "m5": "0D00:05:00",
+    "m10": "0D00:10:00",
+    "m15": "0D00:15:00",
+    "m30": "0D00:30:00",
+    "h1": "0D01:00:00",
+    "h2": "0D02:00:00",
+    "h4": "0D04:00:00",
+    "h6": "0D06:00:00",
+    "h8": "0D08:00:00",
+    "h12": "0D12:00:00",
+    "D1": "1D00:00:00",
+    "D2": "2D00:00:00",
+    "D3": "3D00:00:00",
+    "W1": "7D00:00:00",
+    "M1": "1m",  # kdb+ monthly aggregation
+    "Y1": "1y",  # kdb+ yearly aggregation
 }
+
 
 class Kx(Tsdb):
   """
@@ -69,8 +70,12 @@ class Kx(Tsdb):
 
   conn: Any = None
 
-  def __init__(self, host: str = "localhost", port: int = 5000, db: str = "default",
-               user: str = "admin", password: str = "pass"):
+  def __init__(self,
+               host: str = "localhost",
+               port: int = 5000,
+               db: str = "default",
+               user: str = "admin",
+               password: str = "pass"):
     super().__init__(host, port, db, user, password)
     self._pykx = None
 
@@ -82,22 +87,18 @@ class Kx(Tsdb):
     return self._pykx
 
   @classmethod
-  async def connect(
-    cls,
-    host: str | None = None,
-    port: int | None = None,
-    db: str | None = None,
-    user: str | None = None,
-    password: str | None = None
-  ) -> "Kx":
+  async def connect(cls,
+                    host: str | None = None,
+                    port: int | None = None,
+                    db: str | None = None,
+                    user: str | None = None,
+                    password: str | None = None) -> "Kx":
     """Factory method to create and connect to kdb+ database."""
-    self = cls(
-      host=host or env.get("KX_HOST") or "localhost",
-      port=int(port or env.get("KX_PORT") or 5000),
-      db=db or env.get("KX_DB") or "default",
-      user=user or env.get("DB_RW_USER") or "admin",
-      password=password or env.get("DB_RW_PASS") or "pass"
-    )
+    self = cls(host=host or env.get("KX_HOST") or "localhost",
+               port=int(port or env.get("KX_PORT") or 5000),
+               db=db or env.get("KX_DB") or "default",
+               user=user or env.get("DB_RW_USER") or "admin",
+               password=password or env.get("DB_RW_PASS") or "pass")
     await self.ensure_connected()
     return self
 
@@ -123,17 +124,22 @@ class Kx(Tsdb):
       kx = self.pykx
 
       # Create connection with authentication if provided
-      self.conn = kx.QConnection(host=self.host, port=self.port,
-                                username=self.user if self.user != "admin" else None,
-                                password=self.password if self.password != "pass" else None)
+      self.conn = kx.QConnection(
+          host=self.host,
+          port=self.port,
+          username=self.user if self.user != "admin" else None,
+          password=self.password if self.password != "pass" else None)
 
-      log_info(f"Connected to KX kdb+ on {self.host}:{self.port} as {self.user}")
+      log_info(
+          f"Connected to KX kdb+ on {self.host}:{self.port} as {self.user}")
 
       # Test connection
       await self._execute("1+1")
 
     except Exception as e:
-      raise ValueError(f"Failed to connect to KX kdb+ on {self.user}@{self.host}:{self.port}: {e}")
+      raise ValueError(
+          f"Failed to connect to KX kdb+ on {self.user}@{self.host}:{self.port}: {e}"
+      )
 
   async def close(self):
     """Close database connection."""
@@ -160,12 +166,17 @@ class Kx(Tsdb):
       log_error(f"Failed to execute KX query: {query}", e)
       raise
 
-  async def create_db(self, name: str, options: dict = {}, force: bool = False):
+  async def create_db(self,
+                      name: str,
+                      options: dict = {},
+                      force: bool = False):
     """
     kdb+ doesn't have explicit database creation like SQL databases.
     This is a no-op but logs a warning for consistency.
     """
-    log_info(f"KX kdb+ uses namespaces/contexts instead of databases. Context '{name}' will be used as needed.")
+    log_info(
+        f"KX kdb+ uses namespaces/contexts instead of databases. Context '{name}' will be used as needed."
+    )
 
   async def use_db(self, db: str):
     """Switch to a different namespace/context in kdb+."""
@@ -225,7 +236,10 @@ class Kx(Tsdb):
       log_error(f"Failed to insert data into KX table {table_name}", e)
       raise
 
-  async def insert_many(self, c: Ingester, values: list[tuple], table: str = ""):
+  async def insert_many(self,
+                        c: Ingester,
+                        values: list[tuple],
+                        table: str = ""):
     """Insert multiple rows of data into kdb+ table."""
     table_name = table or c.name
 
@@ -246,14 +260,12 @@ class Kx(Tsdb):
       log_error(f"Failed to insert batch data into KX table {table_name}", e)
       raise
 
-  async def fetch(
-    self,
-    table: str,
-    from_date: datetime | None = None,
-    to_date: datetime | None = None,
-    aggregation_interval: Interval = "m5",
-    columns: list[str] = []
-  ) -> tuple[list[str], list[tuple]]:
+  async def fetch(self,
+                  table: str,
+                  from_date: datetime | None = None,
+                  to_date: datetime | None = None,
+                  aggregation_interval: Interval = "m5",
+                  columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     """Fetch data from kdb+ table with optional aggregation."""
     to_date = to_date or now()
     from_date = from_date or ago(years=1)
@@ -299,13 +311,12 @@ class Kx(Tsdb):
       raise
 
   async def fetch_batch(
-    self,
-    tables: list[str],
-    from_date: datetime | None = None,
-    to_date: datetime | None = None,
-    aggregation_interval: Interval = "m5",
-    columns: list[str] = []
-  ) -> tuple[list[str], list[tuple]]:
+      self,
+      tables: list[str],
+      from_date: datetime | None = None,
+      to_date: datetime | None = None,
+      aggregation_interval: Interval = "m5",
+      columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     """Fetch data from multiple kdb+ tables."""
     all_columns: list[str] = []
     all_data: list[tuple] = []
@@ -313,7 +324,8 @@ class Kx(Tsdb):
     try:
       # Fetch from each table and combine results
       for table in tables:
-        cols, data = await self.fetch(table, from_date, to_date, aggregation_interval, columns)
+        cols, data = await self.fetch(table, from_date, to_date,
+                                      aggregation_interval, columns)
         if not all_columns:
           all_columns = cols
         all_data.extend(data)
@@ -326,7 +338,8 @@ class Kx(Tsdb):
 
   async def fetchall(self):
     """Fetch all data from current context. Not recommended for large tables."""
-    log_warn("fetchall() not recommended for kdb+ due to potential large datasets")
+    log_warn(
+        "fetchall() not recommended for kdb+ due to potential large datasets")
     return [], []
 
   async def commit(self):
@@ -339,7 +352,8 @@ class Kx(Tsdb):
       result = await self._execute("tables[]")
       if hasattr(result, 'py'):
         tables = result.py()
-        return [str(table) for table in tables] if isinstance(tables, list) else []
+        return [str(table)
+                for table in tables] if isinstance(tables, list) else []
       return []
     except Exception as e:
       log_error("Failed to list KX tables", e)

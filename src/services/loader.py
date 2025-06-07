@@ -15,51 +15,57 @@ from ..model import SCOPE_ATTRS, UNALIASED_FORMATS, FillMode, Scope, ServiceResp
 
 # level 1: In-memory module cache for resources that expires after 5 minutes (lvl 2: redis)
 _resources_by_scope: dict[Scope, dict[str, Any] | None] = {
-  Scope.ALL: None,
-  Scope.DEFAULT: None,
-  Scope.DETAILED: None
+    Scope.ALL: None,
+    Scope.DEFAULT: None,
+    Scope.DETAILED: None
 }
 _resources_cached_at = None
+
 
 def trim_resource(resource: dict, scope: Scope = Scope.DEFAULT) -> dict:
   """Trim resource dictionary based on scope mask."""
   if not resource:
-      return resource
+    return resource
 
   return {
-    "name": resource.get("name"),
-    "type": resource.get("type"),
-    "fields": {
-      name: {
-        "type": field.get("type"),
-        **{attr: field.get(attr) for flag, attr in SCOPE_ATTRS.items() if scope & flag == flag},
-        "tags": field.get("tags", []),
-        "transient": field.get("transient", False)
+      "name": resource.get("name"),
+      "type": resource.get("type"),
+      "fields": {
+          name: {
+              "type": field.get("type"),
+              **{
+                  attr: field.get(attr)
+                  for flag, attr in SCOPE_ATTRS.items() if scope & flag == flag
+              }, "tags": field.get("tags", []),
+              "transient": field.get("transient", False)
+          }
+          for name, field in resource.get("fields", {}).items()
+          if not (field.get("transient") and not (scope & Scope.TRANSIENT))
       }
-      for name, field in resource.get("fields", {}).items()
-      if not (field.get("transient") and not (scope & Scope.TRANSIENT))
-    }
   }
+
 
 async def get_resources(scope: Scope = Scope.DEFAULT) -> ServiceResponse[dict]:
   """Get and cache resources with 5-minute expiry"""
   global _resources_by_scope, _resources_cached_at
 
-  if not _resources_cached_at or (now() - _resources_cached_at).total_seconds() > 300:
+  if not _resources_cached_at or (now() -
+                                  _resources_cached_at).total_seconds() > 300:
     resources = await get_resource_status()
-    tp = cast(Executor, state.thread_pool)  # Cast to Executor for type compatibility
+    tp = cast(Executor,
+              state.thread_pool)  # Cast to Executor for type compatibility
     loop = get_running_loop()
 
     async def trim_all(scope: Scope):
-      return dict(zip(
-        resources.keys(),
-        await gather(*(loop.run_in_executor(tp, trim_resource, v, scope) for v in resources.values()))
-      ))
+      return dict(
+          zip(
+              resources.keys(), await
+              gather(*(loop.run_in_executor(tp, trim_resource, v, scope)
+                       for v in resources.values()))))
 
     # Run trimming tasks concurrently in tp
-    trimmed_default, trimmed_detailed = await gather(
-      trim_all(Scope.DEFAULT), trim_all(Scope.DETAILED)
-    )
+    trimmed_default, trimmed_detailed = await gather(trim_all(Scope.DEFAULT),
+                                                     trim_all(Scope.DETAILED))
 
     _resources_by_scope[Scope.ALL] = resources
     _resources_by_scope[Scope.DEFAULT] = trimmed_default
@@ -72,7 +78,10 @@ async def get_resources(scope: Scope = Scope.DEFAULT) -> ServiceResponse[dict]:
 
   return "", cached_resource
 
-async def parse_resources(resources: str, scope: Scope = Scope.DEFAULT) -> ServiceResponse[list[str]]:
+
+async def parse_resources(
+    resources: str,
+    scope: Scope = Scope.DEFAULT) -> ServiceResponse[list[str]]:
   """Parse and validate resource strings"""
   try:
     resource_list = split(resources) or ['*']
@@ -85,21 +94,28 @@ async def parse_resources(resources: str, scope: Scope = Scope.DEFAULT) -> Servi
       # Ensure resources are initialized and valid for scope
       if _resources_by_scope.get(scope) is None:
         log_info(f"Initializing resources for scope: {scope}")
-        err, _ = await get_resources(scope)  # Initialize cache if not already done
+        err, _ = await get_resources(scope
+                                     )  # Initialize cache if not already done
         if err:
           return "Problem initializing resources", []
       cached_resources = _resources_by_scope.get(scope)
       if cached_resources is None:
         return "No resources found", []
-      resource_list = [resource for resource in resource_list if resource in cached_resources]
+      resource_list = [
+          resource for resource in resource_list
+          if resource in cached_resources
+      ]
     if not resource_list:
       return "No resources found", []
     return "", resource_list
   except Exception as e:
     return f"Error parsing resources: {e}", []
 
+
 # TODO: merge with get_schema
-async def parse_fields(resource: str, fields: str, scope: Scope = Scope.ALL) -> ServiceResponse[list[str]]:
+async def parse_fields(resource: str,
+                       fields: str,
+                       scope: Scope = Scope.ALL) -> ServiceResponse[list[str]]:
   """Parse and validate fields for a resource"""
   try:
     field_list = split(fields) or ['*']
@@ -110,17 +126,19 @@ async def parse_fields(resource: str, fields: str, scope: Scope = Scope.ALL) -> 
       found = resources[resource].get('fields', {})
       if not found:
         return f"Fields not found: {resource}.{fields}", []
-      filtered = [field for field in field_list if field in found] if field_list[0] not in ["all", "*"] else found
-      return "", (list(filtered.keys()) if isinstance(filtered, dict) else filtered)
+      filtered = [field for field in field_list if field in found
+                  ] if field_list[0] not in ["all", "*"] else found
+      return "", (list(filtered.keys())
+                  if isinstance(filtered, dict) else filtered)
     return f"Resource not found: {resource}", []
   except Exception as e:
     return f"Error parsing fields: {resource}.{fields} - {e}", []
 
+
 async def parse_resources_fields(
-  resources: str,
-  fields: str,
-  scope: Scope = Scope.ALL
-) -> ServiceResponse[tuple[list[str], list[str]]]:
+    resources: str,
+    fields: str,
+    scope: Scope = Scope.ALL) -> ServiceResponse[tuple[list[str], list[str]]]:
 
   err, parsed_resources = await parse_resources(resources, scope)
   if err:
@@ -130,11 +148,10 @@ async def parse_resources_fields(
     return err, ([], [])
   return "", (parsed_resources, parsed_fields)
 
-async def get_schema(
-    resources: Optional[list[str]] = None,
-    fields: Optional[list[str]] = None,
-    scope: Scope = Scope.ALL
-) -> ServiceResponse[dict]:
+
+async def get_schema(resources: Optional[list[str]] = None,
+                     fields: Optional[list[str]] = None,
+                     scope: Scope = Scope.ALL) -> ServiceResponse[dict]:
 
   err, resources_data = await get_resources(scope)
   if err:
@@ -143,24 +160,29 @@ async def get_schema(
   partial = resources_data.copy()
   if resources:
     if len(resources) > 1:
-      partial = {resource: partial[resource] for resource in resources if resource in partial}
+      partial = {
+          resource: partial[resource]
+          for resource in resources if resource in partial
+      }
     else:
       partial = partial.get(resources[0], {})
 
   if fields:
     filtered = {}
     for resource, resource_data in partial.items():
-      filtered[resource] = {field: resource_data[field] for field in fields if field in resource_data}
+      filtered[resource] = {
+          field: resource_data[field]
+          for field in fields if field in resource_data
+      }
     partial = filtered
 
   return "", partial
 
-def format_table(
-  data,
-  from_format: DataFormat = "py:row",
-  to_format: DataFormat = "py:column",
-  columns: Optional[list[str]] = None
-) -> ServiceResponse[Any]:
+
+def format_table(data,
+                 from_format: DataFormat = "py:row",
+                 to_format: DataFormat = "py:column",
+                 columns: Optional[list[str]] = None) -> ServiceResponse[Any]:
 
   try:
     # Check if data is empty
@@ -180,7 +202,8 @@ def format_table(
   from_fmt = UNALIASED_FORMATS.get(from_format, from_format)
   to_fmt = UNALIASED_FORMATS.get(to_format, to_format)
   # Validate inputs - only return early if no conversion is needed
-  needs_conversion = (isinstance(data, pl.Series) and to_fmt == "polars") or columns
+  needs_conversion = (isinstance(data, pl.Series)
+                      and to_fmt == "polars") or columns
   if from_fmt == to_fmt and not needs_conversion:
     return "", data
 
@@ -239,7 +262,8 @@ def format_table(
     if to_fmt and not to_fmt.startswith(("py:", "polars", "np:", "pd:")):
       if 'ts' in df.columns:
         df = df.with_columns([
-          (pl.col('ts').cast(pl.Datetime).dt.timestamp(time_unit="ms")).cast(pl.Int64).alias('ts')
+            (pl.col('ts').cast(pl.Datetime).dt.timestamp(time_unit="ms")).cast(
+                pl.Int64).alias('ts')
         ])
 
     # Export from Polars DataFrame
@@ -257,16 +281,37 @@ def format_table(
       # case "json:row:labelled": data = orjson.dumps(df.to_dicts(), option=ORJSON_OPTIONS)
       # case "json:column:labelled": data = orjson.dumps({col: df[col].to_list() for col in df.columns}, option=ORJSON_OPTIONS)
       case "json:row":
-        data = orjson.dumps({'columns': df.columns,'types': [str(t).lower() for t in df.dtypes],'data': df.to_numpy().tolist()}, option=ORJSON_OPTIONS)
+        data = orjson.dumps(
+            {
+                'columns': df.columns,
+                'types': [str(t).lower() for t in df.dtypes],
+                'data': df.to_numpy().tolist()
+            },
+            option=ORJSON_OPTIONS)
       case "json:column":
-        data = orjson.dumps({'columns': df.columns,'types': [str(t).lower() for t in df.dtypes],'data': df.to_numpy().T.tolist()}, option=ORJSON_OPTIONS)
+        data = orjson.dumps(
+            {
+                'columns': df.columns,
+                'types': [str(t).lower() for t in df.dtypes],
+                'data': df.to_numpy().T.tolist()
+            },
+            option=ORJSON_OPTIONS)
       # TODO: determine float precision based on content?
       case "csv":
-        data = df.write_csv(separator=',', include_header=True, line_terminator='\n', float_precision=9)
+        data = df.write_csv(separator=',',
+                            include_header=True,
+                            line_terminator='\n',
+                            float_precision=9)
       case "tsv":
-        data = df.write_csv(separator='\t', include_header=True, line_terminator='\n', float_precision=9)
+        data = df.write_csv(separator='\t',
+                            include_header=True,
+                            line_terminator='\n',
+                            float_precision=9)
       case "psv":
-        data = df.write_csv(separator='|', include_header=True, line_terminator='\n', float_precision=9)
+        data = df.write_csv(separator='|',
+                            include_header=True,
+                            line_terminator='\n',
+                            float_precision=9)
       case "parquet":
         buf = BytesIO()
         df.write_parquet(buf, compression="zstd")
@@ -293,12 +338,17 @@ def format_table(
     return f"Error formatting table: {e}", None
   return "", data
 
-async def get_last_values(resources: list[str], quote: Optional[str] = None, precision: int = 6) -> ServiceResponse[dict]:
+
+async def get_last_values(resources: list[str],
+                          quote: Optional[str] = None,
+                          precision: int = 6) -> ServiceResponse[dict]:
   """Get latest values for resources with optional quote conversion"""
   res = await get_cache_batch(resources, pickled=True) if len(resources) > 1 else \
         {resources[0]: await get_cache(resources[0], pickled=True)}
 
-  missing_resources = [resource for resource, value in res.items() if value is None]
+  missing_resources = [
+      resource for resource, value in res.items() if value is None
+  ]
   if missing_resources:
     return f"Resources not found: {', '.join(missing_resources)}", {}
 
@@ -313,9 +363,12 @@ async def get_last_values(resources: list[str], quote: Optional[str] = None, pre
         return f"Quote field not found or NaN: {quote}", {}
 
       for resource in res:
-        res[resource] = {k: round_sigfig(v * quote_value, precision)
-                          if isinstance(v, float) else v
-                          for k, v in res[resource].items()}
+        res[resource] = {
+            k:
+            round_sigfig(v *
+                         quote_value, precision) if isinstance(v, float) else v
+            for k, v in res[resource].items()
+        }
     except ValueError:
       return "Quote must be in format resource.field", {}
 
@@ -325,29 +378,28 @@ async def get_last_values(resources: list[str], quote: Optional[str] = None, pre
     res[resource]["precision"] = precision
   return "", res
 
+
 async def get_history(
-  resources: list[str],
-  fields: list[str],
-  from_date: datetime,
-  to_date: datetime,
-  interval: Interval,
-  quote: Optional[str] = None,
-  precision: int = 6,
-  format: DataFormat = "json:row",
-  fill_mode: FillMode = "forward_fill",
-  truncate_leading_zeros: bool = True
-) -> ServiceResponse[Any]:
+    resources: list[str],
+    fields: list[str],
+    from_date: datetime,
+    to_date: datetime,
+    interval: Interval,
+    quote: Optional[str] = None,
+    precision: int = 6,
+    format: DataFormat = "json:row",
+    fill_mode: FillMode = "forward_fill",
+    truncate_leading_zeros: bool = True) -> ServiceResponse[Any]:
   """Get historical data with optional quote conversion and fill mode"""
 
   # try:
   # Fetch base data
   base_columns, base_data = await state.tsdb.fetch_batch(
-    tables=resources,
-    from_date=from_date,
-    to_date=to_date,
-    aggregation_interval=interval,
-    columns=fields or []
-  )
+      tables=resources,
+      from_date=from_date,
+      to_date=to_date,
+      aggregation_interval=interval,
+      columns=fields or [])
   if not base_data:
     return "No data found", None
 
@@ -381,17 +433,13 @@ async def get_history(
         else:
           # Single value case - could be just a timestamp
           if row is not None:
-            filtered_base_data.append((row,))
+            filtered_base_data.append((row, ))
       except Exception:
         # If all else fails, skip this row
         continue
 
   # Explicitly specify orientation and ensure datetime conversion
-  df = pl.DataFrame(
-    filtered_base_data,
-    schema=base_columns,
-    orient="row"
-  )
+  df = pl.DataFrame(filtered_base_data, schema=base_columns, orient="row")
 
   # Get numeric columns for interpolation
   numeric_cols = numeric_columns(df)
@@ -400,20 +448,20 @@ async def get_history(
   if numeric_cols:
     if fill_mode and fill_mode != "none":
       df = df.with_columns([
-        getattr(pl.col(col).cast(pl.Float64), fill_mode)().alias(col) # fails if fill_mode is not a valid Polars method
-        for col in numeric_cols
+          getattr(pl.col(col).cast(pl.Float64), fill_mode)().alias(
+              col)  # fails if fill_mode is not a valid Polars method
+          for col in numeric_cols
       ])
 
   # Handle quote conversion if needed
   if quote and quote != "USDC.idx":
     quote_resource, quote_field = quote.split('.', 1)
     quote_columns, quote_data = await state.tsdb.fetch(
-      table=quote_resource,
-      from_date=from_date,
-      to_date=to_date,
-      aggregation_interval=interval,
-    columns=['ts', quote_field]
-    )
+        table=quote_resource,
+        from_date=from_date,
+        to_date=to_date,
+        aggregation_interval=interval,
+        columns=['ts', quote_field])
     if not quote_data:
       return "No quote data found", None
 
@@ -436,7 +484,7 @@ async def get_history(
           else:
             # Single value case - could be just a timestamp
             if row is not None:
-              filtered_quote_data.append((row,))
+              filtered_quote_data.append((row, ))
         except Exception:
           # If all else fails, skip this row
           continue
@@ -444,24 +492,20 @@ async def get_history(
     quote_col_id = f'{quote_resource}.{quote_field}'
     # Create quote DataFrame with prefixed column names
     quote_df = pl.DataFrame(
-      filtered_quote_data,
-      schema=['ts', quote_col_id], # Prefix the quote field column
-      orient="row"
-    )
+        filtered_quote_data,
+        schema=['ts', quote_col_id],  # Prefix the quote field column
+        orient="row")
 
     # Interpolate quote values with prefixed name
     quote_df = quote_df.with_columns([
-      pl.col(quote_col_id).cast(pl.Float64).interpolate().alias(quote_col_id)
+        pl.col(quote_col_id).cast(pl.Float64).interpolate().alias(quote_col_id)
     ])
 
     # Join the dataframes on timestamp and perform multiplication using prefixed quote column
-    df = df.join(
-      quote_df,
-      on="ts",
-      how="left"
-    ).with_columns([
-      (pl.col(col) / pl.col(quote_col_id)).round(precision).alias(col) # double inversion to denominate in quote
-      for col in numeric_cols
+    df = df.join(quote_df, on="ts", how="left").with_columns([
+        (pl.col(col) / pl.col(quote_col_id)).round(precision).alias(
+            col)  # double inversion to denominate in quote
+        for col in numeric_cols
     ]).drop(quote_col_id)
 
   # Filter out rows where all non-timestamp numeric columns are null/zero
@@ -469,15 +513,18 @@ async def get_history(
     non_ts_numeric_cols = [col for col in numeric_cols if col != 'ts']
     if non_ts_numeric_cols:
       non_empty_mask = df.select([
-        pl.any_horizontal([
-          (pl.col(col).is_not_null() & (pl.col(col) != 0))
-          for col in non_ts_numeric_cols
-        ]).alias("mask")
+          pl.any_horizontal([(pl.col(col).is_not_null() & (pl.col(col) != 0))
+                             for col in non_ts_numeric_cols]).alias("mask")
       ])
-      first_valid_idx = df.filter(non_empty_mask["mask"]).with_row_index().select("index").row(0)[0] if df.filter(non_empty_mask["mask"]).height > 0 else 0
+      first_valid_idx = df.filter(
+          non_empty_mask["mask"]).with_row_index().select("index").row(
+              0)[0] if df.filter(non_empty_mask["mask"]).height > 0 else 0
       df = df.slice(first_valid_idx)
 
-  return format_table(df, from_format="polars", to_format=format, columns=base_columns)
+  return format_table(df,
+                      from_format="polars",
+                      to_format=format,
+                      columns=base_columns)
 
   # except Exception as e:
   #   return f"Error processing data: {e}", None

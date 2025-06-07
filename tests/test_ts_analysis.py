@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.services import ts_analysis
 
+
 class TestTSAnalysisService:
   """Test TS analysis service functionality."""
 
@@ -25,12 +26,17 @@ class TestTSAnalysisService:
     assert len(module_attrs) > 0
 
     # Look for functions or classes
-    callables = [attr for attr in module_attrs if callable(getattr(ts_analysis, attr)) and not attr.startswith('_')]
+    callables = [
+        attr for attr in module_attrs
+        if callable(getattr(ts_analysis, attr)) and not attr.startswith('_')
+    ]
     assert len(callables) >= 0
 
   def test_basic_analysis_functions(self):
     """Test basic analysis function availability."""
-    expected_functions = ['analyze', 'trend_analysis', 'calculate_metrics', 'statistical_summary']
+    expected_functions = [
+        'analyze', 'trend_analysis', 'calculate_metrics', 'statistical_summary'
+    ]
 
     for func_name in expected_functions:
       if hasattr(ts_analysis, func_name):
@@ -39,7 +45,9 @@ class TestTSAnalysisService:
 
   def test_data_processing_functions(self):
     """Test data processing function availability."""
-    processing_functions = ['process_series', 'aggregate_data', 'filter_outliers', 'smooth_data']
+    processing_functions = [
+        'process_series', 'aggregate_data', 'filter_outliers', 'smooth_data'
+    ]
 
     for func_name in processing_functions:
       if hasattr(ts_analysis, func_name):
@@ -49,10 +57,14 @@ class TestTSAnalysisService:
   def test_module_constants(self):
     """Test module constants and configurations."""
     # Check for any module-level constants
-    module_vars = [attr for attr in dir(ts_analysis) if not attr.startswith('_') and not callable(getattr(ts_analysis, attr))]
+    module_vars = [
+        attr for attr in dir(ts_analysis) if not attr.startswith('_')
+        and not callable(getattr(ts_analysis, attr))
+    ]
 
     # Should have some module-level variables or constants
     assert isinstance(module_vars, list)
+
 
 class TestTSAnalysisBasics:
   """Test basic TS analysis functionality."""
@@ -106,6 +118,7 @@ class TestTSAnalysisBasics:
     except Exception:
       pytest.skip("Statistical measures not available")
 
+
 class TestTSAnalysisUtilities:
   """Test TS analysis utility functions."""
 
@@ -158,6 +171,7 @@ class TestTSAnalysisUtilities:
     except Exception:
       pytest.skip("Aggregation functions not available")
 
+
 class TestTSAnalysisIntegration:
   """Test TS analysis integration scenarios."""
 
@@ -184,11 +198,7 @@ class TestTSAnalysisIntegration:
   def test_batch_processing(self):
     """Test batch processing capabilities."""
     try:
-      batch_data = [
-        [1, 2, 3, 4, 5],
-        [2, 4, 6, 8, 10],
-        [1, 3, 5, 7, 9]
-      ]
+      batch_data = [[1, 2, 3, 4, 5], [2, 4, 6, 8, 10], [1, 3, 5, 7, 9]]
 
       if hasattr(ts_analysis, 'process_batch'):
         results = ts_analysis.process_batch(batch_data)
@@ -208,6 +218,7 @@ class TestTSAnalysisIntegration:
 
     except Exception:
       pytest.skip("Error handling not available")
+
 
 class TestTSAnalysisPerformance:
   """Test TS analysis performance considerations."""

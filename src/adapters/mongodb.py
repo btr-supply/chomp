@@ -10,32 +10,184 @@ UTC = timezone.utc
 
 # MongoDB time series granularity mapping
 GRANULARITY_MAP: Dict[Interval, str] = {
-  "s1": "seconds", "s2": "seconds", "s5": "seconds", "s10": "seconds",
-  "s15": "seconds", "s20": "seconds", "s30": "seconds",
-  "m1": "minutes", "m2": "minutes", "m5": "minutes", "m10": "minutes",
-  "m15": "minutes", "m30": "minutes",
-  "h1": "hours", "h2": "hours", "h4": "hours", "h6": "hours",
-  "h8": "hours", "h12": "hours",
-  "D1": "hours", "D2": "hours", "D3": "hours",
-  "W1": "hours", "M1": "hours", "Y1": "hours"
+    "s1": "seconds",
+    "s2": "seconds",
+    "s5": "seconds",
+    "s10": "seconds",
+    "s15": "seconds",
+    "s20": "seconds",
+    "s30": "seconds",
+    "m1": "minutes",
+    "m2": "minutes",
+    "m5": "minutes",
+    "m10": "minutes",
+    "m15": "minutes",
+    "m30": "minutes",
+    "h1": "hours",
+    "h2": "hours",
+    "h4": "hours",
+    "h6": "hours",
+    "h8": "hours",
+    "h12": "hours",
+    "D1": "hours",
+    "D2": "hours",
+    "D3": "hours",
+    "W1": "hours",
+    "M1": "hours",
+    "Y1": "hours"
 }
 
 # MongoDB aggregation pipeline interval mapping
 BUCKET_GRANULARITY: Dict[Interval, Any] = {
-  "s1": {"$dateToString": {"format": "%Y-%m-%d %H:%M:%S", "date": "$ts"}},
-  "s5": {"$dateToString": {"format": "%Y-%m-%d %H:%M:%S", "date": {"$dateTrunc": {"date": "$ts", "unit": "second", "binSize": 5}}}},
-  "s10": {"$dateToString": {"format": "%Y-%m-%d %H:%M:%S", "date": {"$dateTrunc": {"date": "$ts", "unit": "second", "binSize": 10}}}},
-  "s15": {"$dateToString": {"format": "%Y-%m-%d %H:%M:%S", "date": {"$dateTrunc": {"date": "$ts", "unit": "second", "binSize": 15}}}},
-  "s30": {"$dateToString": {"format": "%Y-%m-%d %H:%M:%S", "date": {"$dateTrunc": {"date": "$ts", "unit": "second", "binSize": 30}}}},
-  "m1": {"$dateToString": {"format": "%Y-%m-%d %H:%M", "date": {"$dateTrunc": {"date": "$ts", "unit": "minute"}}}},
-  "m5": {"$dateToString": {"format": "%Y-%m-%d %H:%M", "date": {"$dateTrunc": {"date": "$ts", "unit": "minute", "binSize": 5}}}},
-  "m15": {"$dateToString": {"format": "%Y-%m-%d %H:%M", "date": {"$dateTrunc": {"date": "$ts", "unit": "minute", "binSize": 15}}}},
-  "m30": {"$dateToString": {"format": "%Y-%m-%d %H:%M", "date": {"$dateTrunc": {"date": "$ts", "unit": "minute", "binSize": 30}}}},
-  "h1": {"$dateToString": {"format": "%Y-%m-%d %H", "date": {"$dateTrunc": {"date": "$ts", "unit": "hour"}}}},
-  "h4": {"$dateToString": {"format": "%Y-%m-%d %H", "date": {"$dateTrunc": {"date": "$ts", "unit": "hour", "binSize": 4}}}},
-  "h12": {"$dateToString": {"format": "%Y-%m-%d %H", "date": {"$dateTrunc": {"date": "$ts", "unit": "hour", "binSize": 12}}}},
-  "D1": {"$dateToString": {"format": "%Y-%m-%d", "date": {"$dateTrunc": {"date": "$ts", "unit": "day"}}}},
+    "s1": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H:%M:%S",
+            "date": "$ts"
+        }
+    },
+    "s5": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H:%M:%S",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "second",
+                    "binSize": 5
+                }
+            }
+        }
+    },
+    "s10": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H:%M:%S",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "second",
+                    "binSize": 10
+                }
+            }
+        }
+    },
+    "s15": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H:%M:%S",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "second",
+                    "binSize": 15
+                }
+            }
+        }
+    },
+    "s30": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H:%M:%S",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "second",
+                    "binSize": 30
+                }
+            }
+        }
+    },
+    "m1": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H:%M",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "minute"
+                }
+            }
+        }
+    },
+    "m5": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H:%M",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "minute",
+                    "binSize": 5
+                }
+            }
+        }
+    },
+    "m15": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H:%M",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "minute",
+                    "binSize": 15
+                }
+            }
+        }
+    },
+    "m30": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H:%M",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "minute",
+                    "binSize": 30
+                }
+            }
+        }
+    },
+    "h1": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "hour"
+                }
+            }
+        }
+    },
+    "h4": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "hour",
+                    "binSize": 4
+                }
+            }
+        }
+    },
+    "h12": {
+        "$dateToString": {
+            "format": "%Y-%m-%d %H",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "hour",
+                    "binSize": 12
+                }
+            }
+        }
+    },
+    "D1": {
+        "$dateToString": {
+            "format": "%Y-%m-%d",
+            "date": {
+                "$dateTrunc": {
+                    "date": "$ts",
+                    "unit": "day"
+                }
+            }
+        }
+    },
 }
+
 
 class MongoDb(Tsdb):
   """MongoDB adapter using time series collections for optimal time series performance."""
@@ -44,21 +196,17 @@ class MongoDb(Tsdb):
   database: Optional[AsyncIOMotorDatabase] = None
 
   @classmethod
-  async def connect(
-    cls,
-    host: str | None = None,
-    port: int | None = None,
-    db: str | None = None,
-    user: str | None = None,
-    password: str | None = None
-  ) -> "MongoDb":
-    self = cls(
-      host=host or env.get("MONGO_HOST") or "localhost",
-      port=int(port or env.get("MONGO_PORT") or 27017),
-      db=db or env.get("MONGO_DB") or "default",
-      user=user or env.get("DB_RW_USER") or "admin",
-      password=password or env.get("DB_RW_PASS") or "pass"
-    )
+  async def connect(cls,
+                    host: str | None = None,
+                    port: int | None = None,
+                    db: str | None = None,
+                    user: str | None = None,
+                    password: str | None = None) -> "MongoDb":
+    self = cls(host=host or env.get("MONGO_HOST") or "localhost",
+               port=int(port or env.get("MONGO_PORT") or 27017),
+               db=db or env.get("MONGO_DB") or "default",
+               user=user or env.get("DB_RW_USER") or "admin",
+               password=password or env.get("DB_RW_PASS") or "pass")
     await self.ensure_connected()
     return self
 
@@ -95,10 +243,15 @@ class MongoDb(Tsdb):
         self.database = self.client[self.db]
         log_info(f"Connected to MongoDB on {self.host}:{self.port}/{self.db}")
       except Exception as e:
-        log_error(f"Failed to connect to MongoDB on {self.host}:{self.port}/{self.db}", e)
+        log_error(
+            f"Failed to connect to MongoDB on {self.host}:{self.port}/{self.db}",
+            e)
         raise e
 
-  async def create_db(self, name: str, options: dict = {}, force: bool = False):
+  async def create_db(self,
+                      name: str,
+                      options: dict = {},
+                      force: bool = False):
     """Create MongoDB database."""
     await self.ensure_connected()
 
@@ -144,13 +297,12 @@ class MongoDb(Tsdb):
       if self.database is None:
         raise Exception("MongoDB database not connected")
       await self.database.create_collection(
-        table,
-        timeseries={
-          "timeField": "ts",  # timestamp field
-          "metaField": "meta",  # metadata field for tags/labels
-          "granularity": granularity
-        }
-      )
+          table,
+          timeseries={
+              "timeField": "ts",  # timestamp field
+              "metaField": "meta",  # metadata field for tags/labels
+              "granularity": granularity
+          })
 
       # Create index on timestamp for better query performance
       if self.database is None:
@@ -158,9 +310,12 @@ class MongoDb(Tsdb):
       collection = self.database[table]
       await collection.create_index("ts")
 
-      log_info(f"Created time series collection {self.db}.{table} with granularity '{granularity}'")
+      log_info(
+          f"Created time series collection {self.db}.{table} with granularity '{granularity}'"
+      )
     except Exception as e:
-      log_error(f"Failed to create time series collection {self.db}.{table}", e)
+      log_error(f"Failed to create time series collection {self.db}.{table}",
+                e)
       raise e
 
   async def insert(self, c: Ingester, table: str = ""):
@@ -173,11 +328,11 @@ class MongoDb(Tsdb):
 
     # Prepare document
     doc = {
-      "ts": c.last_ingested,
-      "meta": {
-        "ingester": c.name,
-        "tags": c.tags if c.tags else []
-      }
+        "ts": c.last_ingested,
+        "meta": {
+            "ingester": c.name,
+            "tags": c.tags if c.tags else []
+        }
     }
 
     # Add field values to document
@@ -203,7 +358,10 @@ class MongoDb(Tsdb):
         log_error(f"Failed to insert data into {self.db}.{table}", e)
         raise e
 
-  async def insert_many(self, c: Ingester, values: List[Tuple], table: str = ""):
+  async def insert_many(self,
+                        c: Ingester,
+                        values: List[Tuple],
+                        table: str = ""):
     """Insert multiple records into MongoDB time series collection."""
     await self.ensure_connected()
     table = table or c.name
@@ -218,11 +376,11 @@ class MongoDb(Tsdb):
         timestamp = datetime.fromtimestamp(timestamp, UTC)
 
       doc = {
-        "ts": timestamp,
-        "meta": {
-          "ingester": c.name,
-          "tags": c.tags if c.tags else []
-        }
+          "ts": timestamp,
+          "meta": {
+              "ingester": c.name,
+              "tags": c.tags if c.tags else []
+          }
       }
 
       # Add field values
@@ -252,14 +410,12 @@ class MongoDb(Tsdb):
         log_error(f"Failed to batch insert data into {self.db}.{table}", e)
         raise e
 
-  async def fetch(
-    self,
-    table: str,
-    from_date: datetime | None = None,
-    to_date: datetime | None = None,
-    aggregation_interval: Interval = "m5",
-    columns: list[str] = []
-  ) -> tuple[list[str], list[tuple]]:
+  async def fetch(self,
+                  table: str,
+                  from_date: datetime | None = None,
+                  to_date: datetime | None = None,
+                  aggregation_interval: Interval = "m5",
+                  columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     """Fetch data from MongoDB time series collection with aggregation."""
     await self.ensure_connected()
 
@@ -272,15 +428,15 @@ class MongoDb(Tsdb):
 
     # Build aggregation pipeline
     pipeline = [
-      # Match time range
-      {
-        "$match": {
-          "ts": {
-            "$gte": from_date,
-            "$lte": to_date
-          }
+        # Match time range
+        {
+            "$match": {
+                "ts": {
+                    "$gte": from_date,
+                    "$lte": to_date
+                }
+            }
         }
-      }
     ]
 
     # If specific columns requested, project only those
@@ -293,13 +449,24 @@ class MongoDb(Tsdb):
     # Add time bucketing for aggregation
     bucket_expr = BUCKET_GRANULARITY.get(aggregation_interval)
     if bucket_expr:
-      group_fields: Dict[str, Any] = {col: {"$last": f"${col}"} for col in columns} if columns else {"data": {"$last": "$$ROOT"}}
+      group_fields: Dict[str, Any] = {
+          col: {
+              "$last": f"${col}"
+          }
+          for col in columns
+      } if columns else {
+          "data": {
+              "$last": "$$ROOT"
+          }
+      }
       group_stage: Dict[str, Any] = {
-        "$group": {
-          "_id": bucket_expr,
-          "ts": {"$last": "$ts"},
-          **group_fields
-        }
+          "$group": {
+              "_id": bucket_expr,
+              "ts": {
+                  "$last": "$ts"
+              },
+              **group_fields
+          }
       }
       sort_stage: Dict[str, Any] = {"$sort": {"ts": -1}}
       pipeline.extend([group_stage, sort_stage])
@@ -319,8 +486,10 @@ class MongoDb(Tsdb):
       if not columns and results:
         # Get columns from first document (excluding _id, ts, meta)
         sample_doc = results[0].get("data", results[0])
-        columns = [key for key in sample_doc.keys()
-                  if key not in ["_id", "ts", "meta"]]
+        columns = [
+            key for key in sample_doc.keys()
+            if key not in ["_id", "ts", "meta"]
+        ]
 
       result_columns = ["ts"] + columns
       result_data = []
@@ -343,19 +512,18 @@ class MongoDb(Tsdb):
       raise e
 
   async def fetch_batch(
-    self,
-    tables: list[str],
-    from_date: datetime | None = None,
-    to_date: datetime | None = None,
-    aggregation_interval: Interval = "m5",
-    columns: list[str] = []
-  ) -> tuple[list[str], list[tuple]]:
+      self,
+      tables: list[str],
+      from_date: datetime | None = None,
+      to_date: datetime | None = None,
+      aggregation_interval: Interval = "m5",
+      columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     """Fetch data from multiple MongoDB collections."""
     from asyncio import gather
 
     results = await gather(*[
-      self.fetch(table, from_date, to_date, aggregation_interval, columns)
-      for table in tables
+        self.fetch(table, from_date, to_date, aggregation_interval, columns)
+        for table in tables
     ])
 
     # Combine results from all collections

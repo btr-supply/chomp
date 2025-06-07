@@ -30,8 +30,8 @@ class TestUtilsModule:
   def test_utils_submodules_exist(self):
     """Test that expected utils submodules exist."""
     expected_modules = [
-      'argparser', 'date', 'estimators', 'format',
-      'maths', 'runtime', 'safe_eval', 'types'
+        'argparser', 'date', 'estimators', 'format', 'maths', 'runtime',
+        'safe_eval', 'types'
     ]
 
     for module_name in expected_modules:
@@ -481,8 +481,8 @@ class TestUtilsImports:
   def test_import_all_utils(self):
     """Test importing all available utils modules."""
     utils_modules = [
-      'argparser', 'date', 'estimators', 'format',
-      'maths', 'runtime', 'safe_eval', 'types'
+        'argparser', 'date', 'estimators', 'format', 'maths', 'runtime',
+        'safe_eval', 'types'
     ]
 
     imported_count = 0

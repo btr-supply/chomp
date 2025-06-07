@@ -7,6 +7,7 @@ from ..actions import transform_and_store, scheduler
 from ..cache import ensure_claim_task
 from .. import state
 
+
 def parse_event_signature(signature: str) -> tuple[str, list[str], list[bool]]:
   event_name, params = signature.split('(')
   param_list = params.rstrip(')').split(',')
@@ -14,7 +15,9 @@ def parse_event_signature(signature: str) -> tuple[str, list[str], list[bool]]:
   indexed = ['indexed' in param for param in param_list]
   return event_name.strip(), param_types, indexed
 
-def decode_log_data(client: Web3, log: dict, topics_first: list[str], indexed: list[bool]) -> tuple:
+
+def decode_log_data(client: Web3, log: dict, topics_first: list[str],
+                    indexed: list[bool]) -> tuple:
   topics = log['topics'][1:]
   data = bytes()
   for t in topics:
@@ -22,6 +25,7 @@ def decode_log_data(client: Web3, log: dict, topics_first: list[str], indexed: l
   data += log['data']
   decoded = client.codec.decode(types=topics_first, data=data)
   return tuple(reorder_decoded_params(list(decoded), indexed))
+
 
 def reorder_decoded_params(decoded: list, indexed: list[bool]) -> list:
   """
@@ -37,7 +41,8 @@ def reorder_decoded_params(decoded: list, indexed: list[bool]) -> list:
   """
   reordered = []
   indexed_ptr = 0  # pointer for indexed params
-  non_indexed_ptr = sum(indexed)  # pointer for non-indexed params (start after all indexed)
+  non_indexed_ptr = sum(
+      indexed)  # pointer for non-indexed params (start after all indexed)
 
   for is_indexed in indexed:
     if is_indexed:
@@ -48,6 +53,7 @@ def reorder_decoded_params(decoded: list, indexed: list[bool]) -> list:
       non_indexed_ptr += 1
 
   return reordered
+
 
 async def schedule(c: Ingester) -> list[Task]:
 
@@ -67,9 +73,10 @@ async def schedule(c: Ingester) -> list[Task]:
   for contract in contracts:
 
     chain_id, addr = split_chain_addr(contract)
-    addr = Web3.to_checksum_address(addr) # enforce checksum
+    addr = Web3.to_checksum_address(addr)  # enforce checksum
 
-    for event in events_by_contract[contract].copy(): # copy to avoid modifying while iterating
+    for event in events_by_contract[contract].copy(
+    ):  # copy to avoid modifying while iterating
       event_name, param_types, indexed = parse_event_signature(event)
       index_types, non_index_types = [], []
       event_id = f"{contract}:{event}"
@@ -79,22 +86,28 @@ async def schedule(c: Ingester) -> list[Task]:
       event_hashes[event_hash] = event_id
 
       for i, is_indexed in enumerate(indexed):
-        index_types.append(param_types[i]) if is_indexed else non_index_types.append(param_types[i])
-      index_first_types_by_event[event_id] = list(index_types) + non_index_types
+        index_types.append(
+            param_types[i]) if is_indexed else non_index_types.append(
+                param_types[i])
+      index_first_types_by_event[event_id] = list(
+          index_types) + non_index_types
 
       events_by_contract.setdefault(contract, set()).add(event_id)
       data_by_event.setdefault(event_id, {})
 
-      filter_by_contract.setdefault(contract, {
-        "fromBlock": "latest",
-        "toBlock": "latest",
-        "address": addr,
-        "topics": []
-      })["topics"].append(event_hashes[event_id])
+      filter_by_contract.setdefault(
+          contract, {
+              "fromBlock": "latest",
+              "toBlock": "latest",
+              "address": addr,
+              "topics": []
+          })["topics"].append(event_hashes[event_id])
 
-      filter_index_by_event[event_id] = len(filter_by_contract[contract]["topics"]) - 1
+      filter_index_by_event[event_id] = len(
+          filter_by_contract[contract]["topics"]) - 1
 
-    filter_by_contract[contract]["topics"] = list(set(filter_by_contract[contract]["topics"])) # remove duplicates
+    filter_by_contract[contract]["topics"] = list(
+        set(filter_by_contract[contract]["topics"]))  # remove duplicates
 
   async def poll_events(contract: str):
     chain_id, addr = split_chain_addr(contract)
@@ -118,7 +131,9 @@ async def schedule(c: Ingester) -> list[Task]:
       end_block = current_block
       f.update({"fromBlock": hex(start_block), "toBlock": hex(end_block)})
       if start_block >= end_block:
-        log_info(f"No new blocks for {contract}, skipping event polling for {c.interval}")
+        log_info(
+            f"No new blocks for {contract}, skipping event polling for {c.interval}"
+        )
         break
       try:
         logs = client.eth.get_logs(f)
@@ -126,9 +141,13 @@ async def schedule(c: Ingester) -> list[Task]:
           event_id = event_hashes[log_entry["topics"][0].hex()]
           # Ensure we have a Web3 client for decoding
           if hasattr(client, 'eth'):
-            decoded_event = decode_log_data(client, log_entry, index_first_types_by_event[event_id], indexed)
+            decoded_event = decode_log_data(
+                client, log_entry, index_first_types_by_event[event_id],
+                indexed)
             if state.args.verbose:
-              log_debug(f"Block: {log_entry['blockNumber']} | Event: {decoded_event}")
+              log_debug(
+                  f"Block: {log_entry['blockNumber']} | Event: {decoded_event}"
+              )
         start_block = end_block + 1
       except Exception as error:
         log_error(f"Failed to poll event logs for contract {c}: {error}")

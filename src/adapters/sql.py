@@ -9,6 +9,7 @@ from ..model import Ingester, FieldType, Tsdb
 
 UTC = timezone.utc
 
+
 class SqlAdapter(Tsdb, ABC):
   """
   Base adapter for SQL-based time series databases.
@@ -23,8 +24,12 @@ class SqlAdapter(Tsdb, ABC):
   conn: Any = None
   pool: Any = None
 
-  def __init__(self, host: str = "localhost", port: int = 5432, db: str = "default",
-               user: str = "admin", password: str = "pass"):
+  def __init__(self,
+               host: str = "localhost",
+               port: int = 5432,
+               db: str = "default",
+               user: str = "admin",
+               password: str = "pass"):
     super().__init__(host=host, port=port, db=db, user=user, password=password)
 
   @property
@@ -39,22 +44,19 @@ class SqlAdapter(Tsdb, ABC):
     return "ts"
 
   @classmethod
-  async def connect(
-    cls,
-    host: str | None = None,
-    port: int | None = None,
-    db: str | None = None,
-    user: str | None = None,
-    password: str | None = None
-  ) -> "SqlAdapter":
+  async def connect(cls,
+                    host: str | None = None,
+                    port: int | None = None,
+                    db: str | None = None,
+                    user: str | None = None,
+                    password: str | None = None) -> "SqlAdapter":
     """Factory method to create and connect to database."""
-    self = cls(
-      host=host or env.get("DB_HOST") or "localhost",
-      port=int(port) if port is not None else int(env.get("DB_PORT") or 5432),
-      db=db or env.get("DB_NAME") or "default",
-      user=user or env.get("DB_RW_USER") or "admin",
-      password=password or env.get("DB_RW_PASS") or "pass"
-    )
+    self = cls(host=host or env.get("DB_HOST") or "localhost",
+               port=int(port) if port is not None else int(
+                   env.get("DB_PORT") or 5432),
+               db=db or env.get("DB_NAME") or "default",
+               user=user or env.get("DB_RW_USER") or "admin",
+               password=password or env.get("DB_RW_PASS") or "pass")
     await self.ensure_connected()
     return self
 
@@ -142,7 +144,9 @@ class SqlAdapter(Tsdb, ABC):
     fields = []
 
     # Add timestamp column
-    fields.append(f"{self._quote_identifier(self.timestamp_column_name)} {self.timestamp_column_type}")
+    fields.append(
+        f"{self._quote_identifier(self.timestamp_column_name)} {self.timestamp_column_type}"
+    )
 
     # Add data fields
     for field in persistent_fields:
@@ -157,11 +161,13 @@ class SqlAdapter(Tsdb, ABC):
     )
     """
 
-  def _build_insert_sql(self, c: Ingester, table_name: str) -> tuple[str, list[Any]]:
+  def _build_insert_sql(self, c: Ingester,
+                        table_name: str) -> tuple[str, list[Any]]:
     """Build INSERT SQL and parameters."""
     persistent_fields = [field for field in c.fields if not field.transient]
 
-    columns = [self.timestamp_column_name] + [field.name for field in persistent_fields]
+    columns = [self.timestamp_column_name
+               ] + [field.name for field in persistent_fields]
     quoted_columns = [self._quote_identifier(col) for col in columns]
 
     # Build placeholders - this may need to be overridden for different parameter styles
@@ -183,13 +189,9 @@ class SqlAdapter(Tsdb, ABC):
     return ", ".join(["?" for _ in range(count)])
 
   def _build_aggregation_sql(
-    self,
-    table_name: str,
-    columns: list[str],
-    from_date: datetime,
-    to_date: datetime,
-    aggregation_interval: Interval
-  ) -> tuple[str, list[Any]]:
+      self, table_name: str, columns: list[str], from_date: datetime,
+      to_date: datetime,
+      aggregation_interval: Interval) -> tuple[str, list[Any]]:
     """Build aggregation query SQL. Should be overridden by subclasses for database-specific syntax."""
 
     # Basic SQL aggregation - subclasses should override for time bucket functions
@@ -197,9 +199,15 @@ class SqlAdapter(Tsdb, ABC):
     quoted_ts = self._quote_identifier(self.timestamp_column_name)
 
     if not columns:
-      select_cols = [f"LAST({self._quote_identifier(col)}) AS {self._quote_identifier(col)}" for col in ["*"]]
+      select_cols = [
+          f"LAST({self._quote_identifier(col)}) AS {self._quote_identifier(col)}"
+          for col in ["*"]
+      ]
     else:
-      select_cols = [quoted_ts] + [f"LAST({self._quote_identifier(col)}) AS {self._quote_identifier(col)}" for col in columns]
+      select_cols = [quoted_ts] + [
+          f"LAST({self._quote_identifier(col)}) AS {self._quote_identifier(col)}"
+          for col in columns
+      ]
 
     select_clause = ", ".join(select_cols)
 
@@ -216,7 +224,10 @@ class SqlAdapter(Tsdb, ABC):
     if not self.conn and not self.pool:
       await self._connect()
 
-  async def create_db(self, name: str, options: dict = {}, force: bool = False):
+  async def create_db(self,
+                      name: str,
+                      options: dict = {},
+                      force: bool = False):
     """Create database. Default implementation - can be overridden."""
     try:
       await self.ensure_connected()
@@ -267,7 +278,8 @@ class SqlAdapter(Tsdb, ABC):
       await self._execute(insert_sql, tuple(params))
     except Exception as e:
       error_message = str(e).lower()
-      if any(phrase in error_message for phrase in ["does not exist", "no such table", "relation"]):
+      if any(phrase in error_message
+             for phrase in ["does not exist", "no such table", "relation"]):
         log_warn(f"Table {self.db}.{table} does not exist, creating it now...")
         await self.create_table(c, name=table)
         await self._execute(insert_sql, tuple(params))
@@ -275,12 +287,16 @@ class SqlAdapter(Tsdb, ABC):
         log_error(f"Failed to insert data into {self.db}.{table}", e)
         raise e
 
-  async def insert_many(self, c: Ingester, values: list[tuple], table: str = ""):
+  async def insert_many(self,
+                        c: Ingester,
+                        values: list[tuple],
+                        table: str = ""):
     await self.ensure_connected()
     table = table or c.name
 
     persistent_fields = [field for field in c.fields if not field.transient]
-    columns = [self.timestamp_column_name] + [field.name for field in persistent_fields]
+    columns = [self.timestamp_column_name
+               ] + [field.name for field in persistent_fields]
     quoted_columns = [self._quote_identifier(col) for col in columns]
 
     placeholders = self._build_placeholders(len(columns))
@@ -295,7 +311,8 @@ class SqlAdapter(Tsdb, ABC):
       await self._executemany(insert_sql, values)
     except Exception as e:
       error_message = str(e).lower()
-      if any(phrase in error_message for phrase in ["does not exist", "no such table", "relation"]):
+      if any(phrase in error_message
+             for phrase in ["does not exist", "no such table", "relation"]):
         log_warn(f"Table {self.db}.{table} does not exist, creating it now...")
         await self.create_table(c, name=table)
         await self._executemany(insert_sql, values)
@@ -303,14 +320,12 @@ class SqlAdapter(Tsdb, ABC):
         log_error(f"Failed to batch insert data into {self.db}.{table}", e)
         raise e
 
-  async def fetch(
-    self,
-    table: str,
-    from_date: datetime | None = None,
-    to_date: datetime | None = None,
-    aggregation_interval: Interval = "m5",
-    columns: list[str] = []
-  ) -> tuple[list[str], list[tuple]]:
+  async def fetch(self,
+                  table: str,
+                  from_date: datetime | None = None,
+                  to_date: datetime | None = None,
+                  aggregation_interval: Interval = "m5",
+                  columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     await self.ensure_connected()
 
     to_date = to_date or now()
@@ -323,7 +338,8 @@ class SqlAdapter(Tsdb, ABC):
     if not columns:
       return ([], [])
 
-    query, params = self._build_aggregation_sql(table, columns, from_date, to_date, aggregation_interval)
+    query, params = self._build_aggregation_sql(table, columns, from_date,
+                                                to_date, aggregation_interval)
 
     try:
       result = await self._fetch(query, tuple(params))
@@ -350,16 +366,15 @@ class SqlAdapter(Tsdb, ABC):
       return []
 
   async def fetch_batch(
-    self,
-    tables: list[str],
-    from_date: datetime | None = None,
-    to_date: datetime | None = None,
-    aggregation_interval: Interval = "m5",
-    columns: list[str] = []
-  ) -> tuple[list[str], list[tuple]]:
+      self,
+      tables: list[str],
+      from_date: datetime | None = None,
+      to_date: datetime | None = None,
+      aggregation_interval: Interval = "m5",
+      columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     results = await gather(*[
-      self.fetch(table, from_date, to_date, aggregation_interval, columns)
-      for table in tables
+        self.fetch(table, from_date, to_date, aggregation_interval, columns)
+        for table in tables
     ])
 
     # Combine results from all tables
@@ -393,13 +408,16 @@ class SqlAdapter(Tsdb, ABC):
     """
 
     try:
-      result = await self._fetch(query, (self.db,))
+      result = await self._fetch(query, (self.db, ))
       return [row[0] for row in result]
     except Exception as e:
       log_error(f"Failed to list tables from {self.db}", e)
       return []
 
-  async def alter_table(self, table: str, add_columns: list[tuple[str, str]] = [], drop_columns: list[str] = []):
+  async def alter_table(self,
+                        table: str,
+                        add_columns: list[tuple[str, str]] = [],
+                        drop_columns: list[str] = []):
     """Alter table structure. Can be overridden by subclasses for database-specific syntax."""
     await self.ensure_connected()
 
@@ -413,9 +431,12 @@ class SqlAdapter(Tsdb, ABC):
           sql_type = 'TEXT'
         sql = f"ALTER TABLE {self._quote_identifier(table)} ADD COLUMN {self._quote_identifier(column_name)} {sql_type}"
         await self._execute(sql)
-        log_info(f"Added column {column_name} of type {column_type} to {self.db}.{table}")
+        log_info(
+            f"Added column {column_name} of type {column_type} to {self.db}.{table}"
+        )
       except Exception as e:
-        log_error(f"Failed to add column {column_name} to {self.db}.{table}", e)
+        log_error(f"Failed to add column {column_name} to {self.db}.{table}",
+                  e)
         raise e
 
     for column_name in drop_columns:
@@ -424,10 +445,12 @@ class SqlAdapter(Tsdb, ABC):
         await self._execute(sql)
         log_info(f"Dropped column {column_name} from {self.db}.{table}")
       except Exception as e:
-        log_error(f"Failed to drop column {column_name} from {self.db}.{table}", e)
+        log_error(
+            f"Failed to drop column {column_name} from {self.db}.{table}", e)
         raise e
 
   async def get_columns(self, table: str) -> list[tuple]:
     """Get table column information. Default implementation - can be overridden."""
     columns = await self._get_table_columns(table)
-    return [(col, "TEXT") for col in columns]  # Return tuples with default type
+    return [(col, "TEXT")
+            for col in columns]  # Return tuples with default type

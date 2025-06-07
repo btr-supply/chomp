@@ -19,7 +19,9 @@ if PLAYWRIGHT_AVAILABLE:
   from src.model import Ingester, ResourceField
 
 
-@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright dependencies not available (playwright)")
+@pytest.mark.skipif(
+    not PLAYWRIGHT_AVAILABLE,
+    reason="Playwright dependencies not available (playwright)")
 class TestPuppet:
   """Test Puppet class functionality."""
 
@@ -46,7 +48,8 @@ class TestPuppet:
     self.mock_browser.new_page = AsyncMock(return_value=self.mock_page)
     self.mock_page.locator = Mock(return_value=self.mock_locator)
     self.mock_page.goto = AsyncMock()
-    self.mock_locator.element_handles = AsyncMock(return_value=[self.mock_element])
+    self.mock_locator.element_handles = AsyncMock(
+        return_value=[self.mock_element])
     self.mock_element.text_content = AsyncMock(return_value="test content")
 
   def teardown_method(self):
@@ -65,7 +68,8 @@ class TestPuppet:
   @pytest.mark.asyncio
   async def test_from_field_no_actions(self):
     """Test creating Puppet from field with no actions."""
-    puppet = await Puppet.from_field(self.mock_field, self.mock_ingester, self.mock_playwright)
+    puppet = await Puppet.from_field(self.mock_field, self.mock_ingester,
+                                     self.mock_playwright)
 
     assert isinstance(puppet, Puppet)
     assert puppet.field == self.mock_field
@@ -76,7 +80,8 @@ class TestPuppet:
     self.mock_field.actions = ["browser:use", "page:goto"]
 
     with patch.object(Puppet, 'act', new_callable=AsyncMock) as mock_act:
-      await Puppet.from_field(self.mock_field, self.mock_ingester, self.mock_playwright)
+      await Puppet.from_field(self.mock_field, self.mock_ingester,
+                              self.mock_playwright)
 
       assert mock_act.call_count == 2
       mock_act.assert_any_call("browser:use")
@@ -169,7 +174,10 @@ class TestPuppet:
     """Test ensuring selector when none exists."""
     puppet = Puppet(self.mock_field, self.mock_ingester, self.mock_playwright)
 
-    with patch.object(puppet, 'select', new_callable=AsyncMock, return_value=self.mock_locator) as mock_select:
+    with patch.object(puppet,
+                      'select',
+                      new_callable=AsyncMock,
+                      return_value=self.mock_locator) as mock_select:
       locator = await puppet.ensure_selected()
 
       assert locator == self.mock_locator
@@ -190,7 +198,10 @@ class TestPuppet:
     """Test ensuring elements when none exist."""
     puppet = Puppet(self.mock_field, self.mock_ingester, self.mock_playwright)
 
-    with patch.object(puppet, 'ensure_selected', new_callable=AsyncMock, return_value=self.mock_locator):
+    with patch.object(puppet,
+                      'ensure_selected',
+                      new_callable=AsyncMock,
+                      return_value=self.mock_locator):
       elements = await puppet.ensure_elements()
 
       assert elements == [self.mock_element]
@@ -211,7 +222,10 @@ class TestPuppet:
     """Test ensuring contents extraction."""
     puppet = Puppet(self.mock_field, self.mock_ingester, self.mock_playwright)
 
-    with patch.object(puppet, 'ensure_elements', new_callable=AsyncMock, return_value=[self.mock_element]):
+    with patch.object(puppet,
+                      'ensure_elements',
+                      new_callable=AsyncMock,
+                      return_value=[self.mock_element]):
       contents = await puppet.ensure_contents()
 
       assert contents == ["test content"]
@@ -222,7 +236,10 @@ class TestPuppet:
     """Test select with auto selector type."""
     puppet = Puppet(self.mock_field, self.mock_ingester, self.mock_playwright)
 
-    with patch.object(puppet, 'ensure_page', new_callable=AsyncMock, return_value=self.mock_page):
+    with patch.object(puppet,
+                      'ensure_page',
+                      new_callable=AsyncMock,
+                      return_value=self.mock_page):
       locator = await puppet.select(".test-class", "auto")
 
       assert locator == self.mock_locator
@@ -233,7 +250,10 @@ class TestPuppet:
     """Test select with CSS selector type."""
     puppet = Puppet(self.mock_field, self.mock_ingester, self.mock_playwright)
 
-    with patch.object(puppet, 'ensure_page', new_callable=AsyncMock, return_value=self.mock_page):
+    with patch.object(puppet,
+                      'ensure_page',
+                      new_callable=AsyncMock,
+                      return_value=self.mock_page):
       await puppet.select(".test", "css")
 
       self.mock_page.locator.assert_called_with("css=.test")
@@ -243,7 +263,10 @@ class TestPuppet:
     """Test select with XPath selector type."""
     puppet = Puppet(self.mock_field, self.mock_ingester, self.mock_playwright)
 
-    with patch.object(puppet, 'ensure_page', new_callable=AsyncMock, return_value=self.mock_page):
+    with patch.object(puppet,
+                      'ensure_page',
+                      new_callable=AsyncMock,
+                      return_value=self.mock_page):
       await puppet.select("//div", "xpath")
 
       self.mock_page.locator.assert_called_with("xpath=//div")
@@ -254,7 +277,10 @@ class TestPuppet:
     puppet = Puppet(self.mock_field, self.mock_ingester, self.mock_playwright)
     self.mock_page.get_by_text = Mock(return_value=self.mock_locator)
 
-    with patch.object(puppet, 'ensure_page', new_callable=AsyncMock, return_value=self.mock_page):
+    with patch.object(puppet,
+                      'ensure_page',
+                      new_callable=AsyncMock,
+                      return_value=self.mock_page):
       await puppet.select("Click me", "text")
 
       self.mock_page.get_by_text.assert_called_with("Click me")
@@ -265,7 +291,10 @@ class TestPuppet:
     puppet = Puppet(self.mock_field, self.mock_ingester, self.mock_playwright)
     self.mock_page.get_by_role = Mock(return_value=self.mock_locator)
 
-    with patch.object(puppet, 'ensure_page', new_callable=AsyncMock, return_value=self.mock_page):
+    with patch.object(puppet,
+                      'ensure_page',
+                      new_callable=AsyncMock,
+                      return_value=self.mock_page):
       await puppet.select("button", "role")
 
       self.mock_page.get_by_role.assert_called_with("button")
@@ -275,13 +304,18 @@ class TestPuppet:
     """Test select with custom data attribute."""
     puppet = Puppet(self.mock_field, self.mock_ingester, self.mock_playwright)
 
-    with patch.object(puppet, 'ensure_page', new_callable=AsyncMock, return_value=self.mock_page):
+    with patch.object(puppet,
+                      'ensure_page',
+                      new_callable=AsyncMock,
+                      return_value=self.mock_page):
       await puppet.select("test-id", "data-testid")
 
       self.mock_page.locator.assert_called_with("[data-data-testid=test-id]")
 
 
-@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright dependencies not available (playwright)")
+@pytest.mark.skipif(
+    not PLAYWRIGHT_AVAILABLE,
+    reason="Playwright dependencies not available (playwright)")
 class TestPuppetActions:
   """Test Puppet action methods."""
 
@@ -297,7 +331,8 @@ class TestPuppetActions:
     self.mock_browser = AsyncMock()
     self.mock_page = AsyncMock()
 
-    self.puppet = Puppet(self.mock_field, self.mock_ingester, self.mock_playwright)
+    self.puppet = Puppet(self.mock_field, self.mock_ingester,
+                         self.mock_playwright)
 
   def teardown_method(self):
     """Clean up after tests."""
@@ -307,7 +342,8 @@ class TestPuppetActions:
   async def test_act_browser_use(self):
     """Test browser use action."""
     with patch.object(self.puppet, 'play') as mock_play:
-      mock_play.__getitem__.return_value.launch = AsyncMock(return_value=self.mock_browser)
+      mock_play.__getitem__.return_value.launch = AsyncMock(
+          return_value=self.mock_browser)
 
       await self.puppet.act("browser:use", "firefox")
 
@@ -325,7 +361,10 @@ class TestPuppetActions:
   @pytest.mark.asyncio
   async def test_act_page_goto(self):
     """Test page goto action."""
-    with patch.object(self.puppet, 'ensure_page', new_callable=AsyncMock, return_value=self.mock_page):
+    with patch.object(self.puppet,
+                      'ensure_page',
+                      new_callable=AsyncMock,
+                      return_value=self.mock_page):
       await self.puppet.act("page:goto", "http://test.com")
 
       self.mock_page.goto.assert_called_with("http://test.com")
@@ -334,7 +373,10 @@ class TestPuppetActions:
   async def test_act_page_click(self):
     """Test page click action."""
     mock_locator = AsyncMock()
-    with patch.object(self.puppet, 'ensure_selected', new_callable=AsyncMock, return_value=mock_locator):
+    with patch.object(self.puppet,
+                      'ensure_selected',
+                      new_callable=AsyncMock,
+                      return_value=mock_locator):
       await self.puppet.act("page:click", ".button")
 
       mock_locator.click.assert_called_once()
@@ -343,7 +385,10 @@ class TestPuppetActions:
   async def test_act_element_click(self):
     """Test element click action."""
     mock_element = AsyncMock()
-    with patch.object(self.puppet, 'ensure_elements', new_callable=AsyncMock, return_value=[mock_element]):
+    with patch.object(self.puppet,
+                      'ensure_elements',
+                      new_callable=AsyncMock,
+                      return_value=[mock_element]):
       await self.puppet.act("element:click")
 
       mock_element.click.assert_called_once()
@@ -352,7 +397,10 @@ class TestPuppetActions:
   async def test_act_element_fill(self):
     """Test element fill action."""
     mock_element = AsyncMock()
-    with patch.object(self.puppet, 'ensure_elements', new_callable=AsyncMock, return_value=[mock_element]):
+    with patch.object(self.puppet,
+                      'ensure_elements',
+                      new_callable=AsyncMock,
+                      return_value=[mock_element]):
       await self.puppet.act("element:fill", "test input")
 
       mock_element.fill.assert_called_with("test input")
@@ -360,7 +408,10 @@ class TestPuppetActions:
   @pytest.mark.asyncio
   async def test_act_keyboard_press(self):
     """Test keyboard press action."""
-    with patch.object(self.puppet, 'ensure_page', new_callable=AsyncMock, return_value=self.mock_page):
+    with patch.object(self.puppet,
+                      'ensure_page',
+                      new_callable=AsyncMock,
+                      return_value=self.mock_page):
       await self.puppet.act("keyboard:press", "Enter")
 
       self.mock_page.keyboard.press.assert_called_with("Enter")
@@ -384,7 +435,9 @@ class TestPuppetActions:
       mock_log_error.assert_called()
 
 
-@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright dependencies not available (playwright)")
+@pytest.mark.skipif(
+    not PLAYWRIGHT_AVAILABLE,
+    reason="Playwright dependencies not available (playwright)")
 class TestUpdatePage:
   """Test update_page function."""
 
@@ -437,7 +490,9 @@ class TestUpdatePage:
       mock_log_error.assert_called()
 
 
-@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright dependencies not available (playwright)")
+@pytest.mark.skipif(
+    not PLAYWRIGHT_AVAILABLE,
+    reason="Playwright dependencies not available (playwright)")
 class TestSchedule:
   """Test schedule function."""
 
@@ -476,7 +531,8 @@ class TestSchedule:
 
       # Mock the async context manager
       mock_playwright = AsyncMock()
-      mock_playwright_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_playwright)
+      mock_playwright_ctx.return_value.__aenter__ = AsyncMock(
+          return_value=mock_playwright)
       mock_playwright_ctx.return_value.__aexit__ = AsyncMock(return_value=None)
 
       # Mock Puppet.from_field
@@ -504,7 +560,9 @@ class TestSchedule:
       mock_add.assert_called_once()
 
 
-@pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright dependencies not available (playwright)")
+@pytest.mark.skipif(
+    not PLAYWRIGHT_AVAILABLE,
+    reason="Playwright dependencies not available (playwright)")
 class TestSelectorTypes:
   """Test SelectorType functionality."""
 
@@ -514,10 +572,10 @@ class TestSelectorTypes:
 
     # These should not raise type errors
     selector_types = [
-      "auto", "css", "xpath", "id", "name", "class",
-      "role", "strict_role", "value", "text", "strict_text",
-      "alt_text", "strict_alt_text", "title", "strict_title",
-      "label", "strict_label", "placeholder", "strict_placeholder"
+        "auto", "css", "xpath", "id", "name", "class", "role", "strict_role",
+        "value", "text", "strict_text", "alt_text", "strict_alt_text", "title",
+        "strict_title", "label", "strict_label", "placeholder",
+        "strict_placeholder"
     ]
 
     for selector_type in selector_types:

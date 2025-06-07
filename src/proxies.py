@@ -19,20 +19,25 @@ args: Any
 thread_pool: ThreadPoolExecutor
 meta = PackageMeta(package="chomp")
 
+
 class ThreadPoolProxy:
+
   def __init__(self):
     self._thread_pool = None
 
   @property
   def thread_pool(self) -> ThreadPoolExecutor:
     if not self._thread_pool:
-      self._thread_pool = ThreadPoolExecutor(max_workers=cpu_count() if args.threaded else 2)
+      self._thread_pool = ThreadPoolExecutor(
+          max_workers=cpu_count() if args.threaded else 2)
     return self._thread_pool
 
   def __getattr__(self, name):
     return getattr(self.thread_pool, name)
 
+
 class NoCLTransport(AsyncBaseTransport):
+
   async def handle_async_request(self, request: Request) -> Response:
     # rm Content-Length header if present
     for h in ["content-length", "Content-Length", "Content-length"]:
@@ -40,12 +45,13 @@ class NoCLTransport(AsyncBaseTransport):
         del request.headers[h]
     request = Request(
         method=request.method,
-      url=request.url,
-      headers=request.headers,
-      content=request.content,
-      stream=request.stream,
+        url=request.url,
+        headers=request.headers,
+        content=request.content,
+        stream=request.stream,
     )
     return await super().handle_async_request(request)
+
 
 class Web3Proxy:
 
@@ -54,15 +60,22 @@ class Web3Proxy:
     self._next_index_by_chain = {}
     self._rpcs_by_chain = {}
 
-  def rpcs(self, chain_id: str | int, load_all=False) -> dict[str | int, list[str]]:
+  def rpcs(self,
+           chain_id: str | int,
+           load_all=False) -> dict[str | int, list[str]]:
     if load_all and not self._rpcs_by_chain:
-      self._rpcs_by_chain.update({k[:-10]: v.split(",") for k, v in env.items() if k.startswith("HTTP_RPCS")})
+      self._rpcs_by_chain.update({
+          k[:-10]: v.split(",")
+          for k, v in env.items() if k.startswith("HTTP_RPCS")
+      })
 
     if chain_id not in self._rpcs_by_chain:
       env_key = f"HTTP_RPCS_{chain_id}".upper()
       rpc_env = env.get(env_key)
       if not rpc_env:
-        raise ValueError(f"Missing RPC endpoints for chain {chain_id} ({env_key} environment variable not found)")
+        raise ValueError(
+            f"Missing RPC endpoints for chain {chain_id} ({env_key} environment variable not found)"
+        )
       self._rpcs_by_chain[chain_id] = rpc_env.split(",")
     return self._rpcs_by_chain[chain_id]
 
@@ -73,7 +86,9 @@ class Web3Proxy:
       try:
         if is_evm:
           if web3_module is None:
-            raise ImportError("Missing optional dependency 'web3'. Install with 'pip install web3' or 'pip install chomp[evm]'")
+            raise ImportError(
+                "Missing optional dependency 'web3'. Install with 'pip install web3' or 'pip install chomp[evm]'"
+            )
           EvmClient = web3_module.Web3
           c = EvmClient(EvmClient.HTTPProvider(rpc_url))
         elif chain_id == "sui":
@@ -89,7 +104,8 @@ class Web3Proxy:
         else:
           raise Exception("Connection failure")
       except Exception as e:
-        log_error(f"Could not connect to chain {chain_id} using rpc {rpc_url}: {e}")
+        log_error(
+            f"Could not connect to chain {chain_id} using rpc {rpc_url}: {e}")
         return None
 
     async def is_connected(c: Any) -> bool:
@@ -99,7 +115,7 @@ class Web3Proxy:
           if hasattr(result, '__await__'):
             return await result
           return bool(result)
-        else: # any of non evm rpc clients
+        else:  # any of non evm rpc clients
           return await c.is_connected()
       except Exception:
         return False
@@ -148,9 +164,13 @@ class Web3Proxy:
       self._next_index_by_chain[chain_id] = (current_index + 1) % len(rpcs)
       attempts += 1
 
-    raise Exception(f"Failed to connect to any RPC for chain {chain_id} after trying {max_attempts} endpoints")
+    raise Exception(
+        f"Failed to connect to any RPC for chain {chain_id} after trying {max_attempts} endpoints"
+    )
+
 
 class TsdbProxy:
+
   def __init__(self):
     self._tsdb = None
 
@@ -167,7 +187,9 @@ class TsdbProxy:
   def __getattr__(self, name):
     return getattr(self.tsdb, name)
 
+
 class RedisProxy:
+
   def __init__(self):
     self._pool = None
     self._redis = None
@@ -178,12 +200,12 @@ class RedisProxy:
     if not self._redis:
       if not self._pool:
         self._pool = ConnectionPool(
-          host=env.get("REDIS_HOST", "localhost"),
-          port=int(env.get("REDIS_PORT", 6379)),
-          username=env.get("DB_RW_USER", "rw"),
-          password=env.get("DB_RW_PASS", "pass"),
-          db=int(env.get("REDIS_DB", 0)),
-          max_connections=int(env.get("REDIS_MAX_CONNECTIONS", 2 ** 16)),
+            host=env.get("REDIS_HOST", "localhost"),
+            port=int(env.get("REDIS_PORT", 6379)),
+            username=env.get("DB_RW_USER", "rw"),
+            password=env.get("DB_RW_PASS", "pass"),
+            db=int(env.get("REDIS_DB", 0)),
+            max_connections=int(env.get("REDIS_MAX_CONNECTIONS", 2**16)),
         )
       self._redis = Redis(connection_pool=self._pool)
     return self._redis
@@ -225,7 +247,9 @@ class RedisProxy:
   def __getattr__(self, name):
     return getattr(self.redis, name)
 
+
 class ConfigProxy:
+
   def __init__(self, _args):
     global args
     args = _args
@@ -239,10 +263,13 @@ class ConfigProxy:
     schema = yamale.make_schema(str(schema_path))
 
     # Handle comma-delimited list of config files
-    config_files = [path.strip() for path in INGESTER_CONFIGS.split(',') if path.strip()]
+    config_files = [
+        path.strip() for path in INGESTER_CONFIGS.split(',') if path.strip()
+    ]
 
     def is_config_file_path(value: str) -> bool:
-      return isinstance(value, str) and value.lower().endswith(('.yml', '.yaml', '.json'))
+      return isinstance(value, str) and value.lower().endswith(
+          ('.yml', '.yaml', '.json'))
 
     def load_and_merge_yaml(yaml_path: str) -> dict:
       config_data = yamale.make_data(yaml_path)[0]
@@ -255,18 +282,27 @@ class ConfigProxy:
           return load_and_merge_yaml(nested_path)
         elif isinstance(value, list):
           processed_list = [resolve_nested_config(item) for item in value]
-          processed_list = [item for item in processed_list if item is not None]
+          processed_list = [
+              item for item in processed_list if item is not None
+          ]
           return processed_list if processed_list else None
         elif isinstance(value, dict):
-          processed_dict = {k: resolve_nested_config(v) for k, v in value.items()}
-          processed_dict = {k: v for k, v in processed_dict.items() if v is not None}
+          processed_dict = {
+              k: resolve_nested_config(v)
+              for k, v in value.items()
+          }
+          processed_dict = {
+              k: v
+              for k, v in processed_dict.items() if v is not None
+          }
           return processed_dict if processed_dict else None
         else:
           return None
 
       # process all top-level keys
       if isinstance(config_data, dict):
-        config_data.pop('vars', None) # remove the vars if any section used for genericity
+        config_data.pop(
+            'vars', None)  # remove the vars if any section used for genericity
         for key, value in config_data.items():
           nested_data = resolve_nested_config(value)
           if nested_data is None:
@@ -276,7 +312,8 @@ class ConfigProxy:
               nested_data = [nested_data]
             for d in nested_data:
               el = d[key] if key in d else d
-              if key in config_data and is_iterable(el) and is_iterable(config_data[key]):
+              if key in config_data and is_iterable(el) and is_iterable(
+                  config_data[key]):
                 # pop the last item if any since it is the subconfig file path
                 config_data[key] = [*el, *config_data[key][:-1]]
               else:
@@ -323,7 +360,8 @@ class ConfigProxy:
   def config(self) -> Config:
     if not self._config:
       workdir = env.get('WORKDIR', '')
-      self._config = self.load_config(path.abspath(path.join(workdir, self._ingester_configs)))
+      self._config = self.load_config(
+          path.abspath(path.join(workdir, self._ingester_configs)))
     return self._config
 
   def __getattr__(self, name):
@@ -331,5 +369,6 @@ class ConfigProxy:
     if not hasattr(self, '_config') or self._config is None:
       # Load config without going through __getattr__ again
       workdir = env.get('WORKDIR', '')
-      self._config = self.load_config(path.abspath(path.join(workdir, self._ingester_configs)))
+      self._config = self.load_config(
+          path.abspath(path.join(workdir, self._ingester_configs)))
     return getattr(self._config, name)

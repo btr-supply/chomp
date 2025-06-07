@@ -29,7 +29,8 @@ class TestCacheModule:
     """Test Redis ping failure."""
     with patch('src.cache.state') as mock_state, \
          patch('src.cache.log_error') as mock_log_error:
-      mock_state.redis.ping = AsyncMock(side_effect=Exception("Connection failed"))
+      mock_state.redis.ping = AsyncMock(
+          side_effect=Exception("Connection failed"))
       result = await cache.ping()
       assert result is False
       mock_log_error.assert_called_once()
@@ -155,7 +156,8 @@ class TestCacheModule:
     with patch('src.cache.state') as mock_state, \
          patch('src.cache.is_task_claimed', return_value=True):
       mock_state.args.proc_id = "worker_1"
-      mock_state.redis.get = AsyncMock(return_value=b"worker_2")  # Different owner
+      mock_state.redis.get = AsyncMock(
+          return_value=b"worker_2")  # Different owner
 
       result = await cache.free_task(mock_ingester)
       assert result is False
@@ -286,15 +288,12 @@ class TestCacheModule:
   async def test_get_cache_batch(self):
     """Test batch cache retrieval."""
     with patch('src.cache.state') as mock_state:
-      mock_state.redis.mget = AsyncMock(return_value=[b"value1", b"value2", None])
+      mock_state.redis.mget = AsyncMock(
+          return_value=[b"value1", b"value2", None])
 
       result = await cache.get_cache_batch(["key1", "key2", "key3"])
 
-      expected = {
-        "key1": b"value1",
-        "key2": b"value2",
-        "key3": None
-      }
+      expected = {"key1": b"value1", "key2": b"value2", "key3": None}
       assert result == expected
 
   @pytest.mark.asyncio
@@ -423,7 +422,8 @@ class TestCacheModule:
   async def test_get_cached_resources(self):
     """Test getting cached resources."""
     with patch('src.cache.state') as mock_state:
-      mock_state.redis.keys = AsyncMock(return_value=[b"chomp:status:resource1", b"chomp:status:resource2"])
+      mock_state.redis.keys = AsyncMock(
+          return_value=[b"chomp:status:resource1", b"chomp:status:resource2"])
 
       result = await cache.get_cached_resources()
       assert result == ["resource1", "resource2"]

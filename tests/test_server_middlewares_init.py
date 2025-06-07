@@ -21,7 +21,8 @@ def test_middlewares_all_exports():
   import src.server.middlewares
 
   for item in src.server.middlewares.__all__:
-    assert hasattr(src.server.middlewares, item), f"Module should export '{item}'"
+    assert hasattr(src.server.middlewares,
+                   item), f"Module should export '{item}'"
 
 
 def test_middlewares_specific_exports():
@@ -33,6 +34,7 @@ def test_middlewares_specific_exports():
 
   for item in expected_items:
     if item in src.server.middlewares.__all__:
-      assert hasattr(src.server.middlewares, item), f"Should have '{item}' middleware"
+      assert hasattr(src.server.middlewares,
+                     item), f"Should have '{item}' middleware"
       middleware = getattr(src.server.middlewares, item)
       assert middleware is not None, f"Middleware '{item}' should not be None"

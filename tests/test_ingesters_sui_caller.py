@@ -75,7 +75,8 @@ class TestSuiCaller:
       assert result == []
 
   @pytest.mark.asyncio
-  async def test_ingest_single_object_success(self, mock_ingester, mock_sui_client):
+  async def test_ingest_single_object_success(self, mock_ingester,
+                                              mock_sui_client):
     """Test successful ingestion of a single Sui object."""
     # Mock the object data response
     mock_object_data = [{"balance": 1000, "type": "coin"}]
@@ -186,11 +187,15 @@ class TestSuiCaller:
     """Test RPC error handling and retry logic."""
     mock_sui_client1 = Mock(spec=SuiRpcClient)
     mock_sui_client1.endpoint = "https://rpc1.example.com"
-    mock_sui_client1.get_multi_object_fields = AsyncMock(side_effect=Exception("RPC Error"))
+    mock_sui_client1.get_multi_object_fields = AsyncMock(
+        side_effect=Exception("RPC Error"))
 
     mock_sui_client2 = Mock(spec=SuiRpcClient)
     mock_sui_client2.endpoint = "https://rpc2.example.com"
-    mock_sui_client2.get_multi_object_fields = AsyncMock(return_value=[{"balance": 1000}])
+    mock_sui_client2.get_multi_object_fields = AsyncMock(
+        return_value=[{
+            "balance": 1000
+        }])
 
     with patch('src.ingesters.sui_caller.scheduler') as mock_scheduler, \
          patch('src.ingesters.sui_caller.ensure_claim_task'), \
@@ -216,7 +221,8 @@ class TestSuiCaller:
     """Test behavior when max retries is exceeded."""
     mock_sui_client = Mock(spec=SuiRpcClient)
     mock_sui_client.endpoint = "https://rpc.example.com"
-    mock_sui_client.get_multi_object_fields = AsyncMock(side_effect=Exception("Persistent Error"))
+    mock_sui_client.get_multi_object_fields = AsyncMock(
+        side_effect=Exception("Persistent Error"))
 
     with patch('src.ingesters.sui_caller.scheduler') as mock_scheduler, \
          patch('src.ingesters.sui_caller.ensure_claim_task'), \
@@ -281,7 +287,8 @@ class TestSuiCaller:
       mock_log_debug.assert_called()
 
   @pytest.mark.asyncio
-  async def test_ingest_field_processing_error(self, mock_ingester, mock_sui_client):
+  async def test_ingest_field_processing_error(self, mock_ingester,
+                                               mock_sui_client):
     """Test handling of field processing errors."""
     mock_object_data = [{"balance": 1000}]
     mock_sui_client.get_multi_object_fields.return_value = mock_object_data
@@ -341,7 +348,8 @@ class TestSuiCaller:
       mock_sui_client.get_multi_object_fields.assert_not_called()
 
   @pytest.mark.asyncio
-  async def test_ingest_field_without_selector(self, mock_ingester, mock_sui_client):
+  async def test_ingest_field_without_selector(self, mock_ingester,
+                                               mock_sui_client):
     """Test field extraction without selector."""
     mock_ingester.fields[0].selector = None
     mock_object_data = [{"balance": 1000, "type": "coin"}]
@@ -412,11 +420,15 @@ class TestSuiCaller:
     """Test verbose logging during RPC switching."""
     mock_sui_client1 = Mock(spec=SuiRpcClient)
     mock_sui_client1.endpoint = "https://rpc1.example.com"
-    mock_sui_client1.get_multi_object_fields = AsyncMock(side_effect=Exception("RPC Error"))
+    mock_sui_client1.get_multi_object_fields = AsyncMock(
+        side_effect=Exception("RPC Error"))
 
     mock_sui_client2 = Mock(spec=SuiRpcClient)
     mock_sui_client2.endpoint = "https://rpc2.example.com"
-    mock_sui_client2.get_multi_object_fields = AsyncMock(return_value=[{"balance": 1000}])
+    mock_sui_client2.get_multi_object_fields = AsyncMock(
+        return_value=[{
+            "balance": 1000
+        }])
 
     with patch('src.ingesters.sui_caller.scheduler') as mock_scheduler, \
          patch('src.ingesters.sui_caller.ensure_claim_task'), \

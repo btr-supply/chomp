@@ -19,7 +19,8 @@ if DUCKDB_AVAILABLE:
   from src.adapters.duckdb import DuckDB, TYPES, INTERVALS, PRECISION
 
 
-@pytest.mark.skipif(not DUCKDB_AVAILABLE, reason="DuckDB dependencies not available (duckdb)")
+@pytest.mark.skipif(not DUCKDB_AVAILABLE,
+                    reason="DuckDB dependencies not available (duckdb)")
 class TestDuckDBAdapter:
   """Test the DuckDB adapter functionality."""
 
@@ -48,13 +49,11 @@ class TestDuckDBAdapter:
 
   def test_duckdb_initialization(self):
     """Test DuckDB adapter initialization."""
-    adapter = DuckDB(
-      host="localhost",
-      port=0,
-      db=":memory:",
-      user="test_user",
-      password="test_pass"
-    )
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     assert adapter.host == "localhost"
     assert adapter.port == 0
@@ -73,13 +72,11 @@ class TestDuckDBAdapter:
       mock_executor_instance = Mock()
       mock_executor.return_value = mock_executor_instance
 
-      adapter = await DuckDB.connect(
-        host="test_host",
-        port=0,
-        db="test.db",
-        user="test_user",
-        password="test_pass"
-      )
+      adapter = await DuckDB.connect(host="test_host",
+                                     port=0,
+                                     db="test.db",
+                                     user="test_user",
+                                     password="test_pass")
 
       assert isinstance(adapter, DuckDB)
       assert adapter.host == "test_host"
@@ -117,7 +114,11 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_ensure_connected_memory_db(self):
     """Test ensure_connected with in-memory database."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     with patch('src.adapters.duckdb.duckdb.connect') as mock_connect, \
          patch('src.adapters.duckdb.ThreadPoolExecutor') as mock_executor, \
@@ -128,7 +129,8 @@ class TestDuckDBAdapter:
       mock_executor_instance = Mock()
       mock_executor.return_value = mock_executor_instance
       mock_loop_instance = Mock()
-      mock_loop_instance.run_in_executor = AsyncMock(return_value=mock_connection)
+      mock_loop_instance.run_in_executor = AsyncMock(
+          return_value=mock_connection)
       mock_loop.return_value = mock_loop_instance
 
       await adapter.ensure_connected()
@@ -139,7 +141,11 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_ensure_connected_file_db(self):
     """Test ensure_connected with file-based database."""
-    adapter = DuckDB(host="localhost", port=0, db="test.db", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db="test.db",
+                     user="test_user",
+                     password="test_pass")
 
     with patch('src.adapters.duckdb.duckdb.connect') as mock_connect, \
          patch('src.adapters.duckdb.ThreadPoolExecutor') as mock_executor, \
@@ -150,7 +156,8 @@ class TestDuckDBAdapter:
       mock_executor_instance = Mock()
       mock_executor.return_value = mock_executor_instance
       mock_loop_instance = Mock()
-      mock_loop_instance.run_in_executor = AsyncMock(return_value=mock_connection)
+      mock_loop_instance.run_in_executor = AsyncMock(
+          return_value=mock_connection)
       mock_loop.return_value = mock_loop_instance
 
       await adapter.ensure_connected()
@@ -160,7 +167,11 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_ensure_connected_error(self):
     """Test ensure_connected with connection error."""
-    adapter = DuckDB(host="localhost", port=0, db="test.db", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db="test.db",
+                     user="test_user",
+                     password="test_pass")
 
     with patch('src.adapters.duckdb.ThreadPoolExecutor') as mock_executor, \
          patch('src.adapters.duckdb.get_event_loop') as mock_loop:
@@ -168,16 +179,22 @@ class TestDuckDBAdapter:
       mock_executor_instance = Mock()
       mock_executor.return_value = mock_executor_instance
       mock_loop_instance = Mock()
-      mock_loop_instance.run_in_executor = AsyncMock(side_effect=Exception("Connection failed"))
+      mock_loop_instance.run_in_executor = AsyncMock(
+          side_effect=Exception("Connection failed"))
       mock_loop.return_value = mock_loop_instance
 
-      with pytest.raises(ValueError, match="Failed to connect to DuckDB database"):
+      with pytest.raises(ValueError,
+                         match="Failed to connect to DuckDB database"):
         await adapter.ensure_connected()
 
   @pytest.mark.asyncio
   async def test_ping_success(self):
     """Test ping with successful connection."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     with patch.object(adapter, 'ensure_connected'), \
          patch.object(adapter, '_execute_async', return_value=[(1,)]):
@@ -188,9 +205,15 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_ping_failure(self):
     """Test ping with connection failure."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
-    with patch.object(adapter, 'ensure_connected', side_effect=Exception("Connection failed")):
+    with patch.object(adapter,
+                      'ensure_connected',
+                      side_effect=Exception("Connection failed")):
       result = await adapter.ping()
 
       assert result is False
@@ -198,7 +221,11 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_close_connection(self):
     """Test closing connections."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     mock_connection = Mock()
     mock_executor = Mock()
@@ -213,44 +240,58 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_execute_async_with_params(self):
     """Test _execute_async with parameters."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     mock_connection = Mock()
     mock_execute_result = Mock()
-    mock_execute_result.fetchall.return_value = [("result",)]
+    mock_execute_result.fetchall.return_value = [("result", )]
     mock_connection.execute.return_value = mock_execute_result
     adapter.conn = mock_connection
 
     with patch('src.adapters.duckdb.get_event_loop') as mock_loop:
       mock_loop_instance = Mock()
-      mock_loop_instance.run_in_executor = AsyncMock(return_value=[("result",)])
+      mock_loop_instance.run_in_executor = AsyncMock(
+          return_value=[("result", )])
       mock_loop.return_value = mock_loop_instance
 
       result = await adapter._execute_async("SELECT ?", ["param"])
 
-      assert result == [("result",)]
+      assert result == [("result", )]
 
   @pytest.mark.asyncio
   async def test_execute_async_without_params(self):
     """Test _execute_async without parameters."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     mock_connection = Mock()
     adapter.conn = mock_connection
 
     with patch('src.adapters.duckdb.get_event_loop') as mock_loop:
       mock_loop_instance = Mock()
-      mock_loop_instance.run_in_executor = AsyncMock(return_value=[("result",)])
+      mock_loop_instance.run_in_executor = AsyncMock(
+          return_value=[("result", )])
       mock_loop.return_value = mock_loop_instance
 
       result = await adapter._execute_async("SELECT 1")
 
-      assert result == [("result",)]
+      assert result == [("result", )]
 
   @pytest.mark.asyncio
   async def test_execute_async_void(self):
     """Test _execute_async_void method."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     with patch('src.adapters.duckdb.get_event_loop') as mock_loop:
       mock_loop_instance = Mock()
@@ -259,6 +300,7 @@ class TestDuckDBAdapter:
 
       def test_func():
         return "test"
+
       result = await adapter._execute_async_void(test_func)
 
       assert result == "result"
@@ -266,35 +308,56 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_get_dbs(self):
     """Test getting databases (schemas)."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
-    with patch.object(adapter, '_execute_async', return_value=[("schema1",), ("schema2",)]):
+    with patch.object(adapter,
+                      '_execute_async',
+                      return_value=[("schema1", ), ("schema2", )]):
       result = await adapter.get_dbs()
 
-      assert result == [("schema1",), ("schema2",)]
+      assert result == [("schema1", ), ("schema2", )]
 
   @pytest.mark.asyncio
   async def test_create_db_success(self):
     """Test creating database (schema) successfully."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     with patch.object(adapter, '_execute_async') as mock_execute:
       await adapter.create_db("new_schema")
 
-      mock_execute.assert_called_once_with("CREATE SCHEMA IF NOT EXISTS new_schema")
+      mock_execute.assert_called_once_with(
+          "CREATE SCHEMA IF NOT EXISTS new_schema")
 
   @pytest.mark.asyncio
   async def test_create_db_error(self):
     """Test create_db error handling."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
-    with patch.object(adapter, '_execute_async', side_effect=Exception("Schema error")):
+    with patch.object(adapter,
+                      '_execute_async',
+                      side_effect=Exception("Schema error")):
       await adapter.create_db("new_schema")  # Should not raise, just log error
 
   @pytest.mark.asyncio
   async def test_use_db_same_database(self):
     """Test using same database."""
-    adapter = DuckDB(host="localhost", port=0, db="test.db", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db="test.db",
+                     user="test_user",
+                     password="test_pass")
 
     # Should not close/reconnect if same database
     with patch.object(adapter, 'close') as mock_close, \
@@ -307,7 +370,11 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_use_db_different_database(self):
     """Test using different database."""
-    adapter = DuckDB(host="localhost", port=0, db="test.db", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db="test.db",
+                     user="test_user",
+                     password="test_pass")
 
     with patch.object(adapter, 'close') as mock_close, \
          patch.object(adapter, 'ensure_connected') as mock_connect:
@@ -322,15 +389,20 @@ class TestDuckDBAdapter:
     """Test creating table."""
     from src.model import Ingester
 
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     # Create mock ingester
     ingester = Mock(spec=Ingester)
     ingester.name = "test_table"
     ingester.fields = [
-      Mock(name="field1", type="int32", transient=False),
-      Mock(name="field2", type="string", transient=False),
-      Mock(name="temp_field", type="float64", transient=True)  # Should be excluded
+        Mock(name="field1", type="int32", transient=False),
+        Mock(name="field2", type="string", transient=False),
+        Mock(name="temp_field", type="float64",
+             transient=True)  # Should be excluded
     ]
 
     with patch.object(adapter, '_execute_async') as mock_execute:
@@ -349,66 +421,99 @@ class TestDuckDBAdapter:
     """Test create_table error handling."""
     from src.model import Ingester
 
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     ingester = Mock(spec=Ingester)
     ingester.name = "test_table"
     ingester.fields = []
 
-    with patch.object(adapter, '_execute_async', side_effect=Exception("SQL Error")):
+    with patch.object(adapter,
+                      '_execute_async',
+                      side_effect=Exception("SQL Error")):
       with pytest.raises(Exception, match="SQL Error"):
         await adapter.create_table(ingester)
 
   @pytest.mark.asyncio
   async def test_alter_table_add_columns(self):
     """Test altering table to add columns."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     with patch.object(adapter, 'ensure_connected'), \
          patch.object(adapter, '_execute_async') as mock_execute:
 
-      await adapter.alter_table("test_table", add_columns=[("new_col", "INTEGER")])
+      await adapter.alter_table("test_table",
+                                add_columns=[("new_col", "INTEGER")])
 
-      mock_execute.assert_called_with('ALTER TABLE "test_table" ADD COLUMN "new_col" INTEGER')
+      mock_execute.assert_called_with(
+          'ALTER TABLE "test_table" ADD COLUMN "new_col" INTEGER')
 
   @pytest.mark.asyncio
   async def test_alter_table_drop_columns(self):
     """Test altering table to drop columns."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     with patch.object(adapter, 'ensure_connected'), \
          patch.object(adapter, '_execute_async') as mock_execute:
 
       await adapter.alter_table("test_table", drop_columns=["old_col"])
 
-      mock_execute.assert_called_with('ALTER TABLE "test_table" DROP COLUMN "old_col"')
+      mock_execute.assert_called_with(
+          'ALTER TABLE "test_table" DROP COLUMN "old_col"')
 
   @pytest.mark.asyncio
   async def test_alter_table_error_handling(self):
     """Test alter_table error handling."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     with patch.object(adapter, 'ensure_connected'), \
          patch.object(adapter, '_execute_async', side_effect=Exception("Alter error")):
 
       with pytest.raises(Exception, match="Alter error"):
-        await adapter.alter_table("test_table", add_columns=[("new_col", "INTEGER")])
+        await adapter.alter_table("test_table",
+                                  add_columns=[("new_col", "INTEGER")])
 
   @pytest.mark.asyncio
   async def test_insert(self):
     """Test inserting data."""
     from src.model import Ingester
 
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     # Create mock ingester with data
     ingester = Mock(spec=Ingester)
     ingester.name = "test_table"
-    ingester.last_ingested = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    ingester.last_ingested = datetime(2024,
+                                      1,
+                                      1,
+                                      12,
+                                      0,
+                                      0,
+                                      tzinfo=timezone.utc)
     ingester.fields = [
-      Mock(name="field1", type="int32", transient=False, value=123),
-      Mock(name="field2", type="string", transient=False, value="test"),
-      Mock(name="temp_field", type="float64", transient=True, value=45.6)  # Should be excluded
+        Mock(name="field1", type="int32", transient=False, value=123),
+        Mock(name="field2", type="string", transient=False, value="test"),
+        Mock(name="temp_field", type="float64", transient=True,
+             value=45.6)  # Should be excluded
     ]
 
     with patch.object(adapter, 'ensure_connected'), \
@@ -430,11 +535,21 @@ class TestDuckDBAdapter:
     """Test insert error handling."""
     from src.model import Ingester
 
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     ingester = Mock(spec=Ingester)
     ingester.name = "test_table"
-    ingester.last_ingested = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    ingester.last_ingested = datetime(2024,
+                                      1,
+                                      1,
+                                      12,
+                                      0,
+                                      0,
+                                      tzinfo=timezone.utc)
     ingester.fields = []
 
     with patch.object(adapter, 'ensure_connected'), \
@@ -446,9 +561,15 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_list_tables(self):
     """Test listing tables."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
-    with patch.object(adapter, '_execute_async', return_value=[("table1",), ("table2",)]):
+    with patch.object(adapter,
+                      '_execute_async',
+                      return_value=[("table1", ), ("table2", )]):
       result = await adapter.list_tables()
 
       assert result == ["table1", "table2"]
@@ -456,7 +577,11 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_commit(self):
     """Test commit operation."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     with patch.object(adapter, '_execute_async') as mock_execute:
       await adapter.commit()
@@ -466,13 +591,11 @@ class TestDuckDBAdapter:
   def test_duckdb_inheritance(self):
     """Test that DuckDB inherits from Tsdb."""
     from src.model import Tsdb
-    adapter = DuckDB(
-      host="localhost",
-      port=0,
-      db=":memory:",
-      user="test_user",
-      password="test_pass"
-    )
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
     assert isinstance(adapter, Tsdb)
 
   @pytest.mark.asyncio
@@ -480,13 +603,23 @@ class TestDuckDBAdapter:
     """Test insert when table doesn't exist."""
     from src.model import Ingester
 
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     ingester = Mock(spec=Ingester)
     ingester.name = "test_table"
-    ingester.last_ingested = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    ingester.last_ingested = datetime(2024,
+                                      1,
+                                      1,
+                                      12,
+                                      0,
+                                      0,
+                                      tzinfo=timezone.utc)
     ingester.fields = [
-      Mock(name="field1", type="int32", transient=False, value=123)
+        Mock(name="field1", type="int32", transient=False, value=123)
     ]
 
     with patch.object(adapter, 'ensure_connected'), \
@@ -506,13 +639,23 @@ class TestDuckDBAdapter:
     """Test insert when column doesn't exist."""
     from src.model import Ingester
 
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     ingester = Mock(spec=Ingester)
     ingester.name = "test_table"
-    ingester.last_ingested = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    ingester.last_ingested = datetime(2024,
+                                      1,
+                                      1,
+                                      12,
+                                      0,
+                                      0,
+                                      tzinfo=timezone.utc)
     ingester.fields = [
-      Mock(name="field1", type="int32", transient=False, value=123)
+        Mock(name="field1", type="int32", transient=False, value=123)
     ]
 
     with patch.object(adapter, 'ensure_connected'), \
@@ -534,20 +677,25 @@ class TestDuckDBAdapter:
     """Test inserting multiple records."""
     from src.model import Ingester
 
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     ingester = Mock(spec=Ingester)
     ingester.name = "test_table"
     ingester.fields = [
-      Mock(name="field1", type="int32", transient=False),
-      Mock(name="field2", type="string", transient=False),
-      Mock(name="temp_field", type="float64", transient=True)  # Should be excluded
+        Mock(name="field1", type="int32", transient=False),
+        Mock(name="field2", type="string", transient=False),
+        Mock(name="temp_field", type="float64",
+             transient=True)  # Should be excluded
     ]
 
-    values = [
-      (datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 123, "test1"),
-      (datetime(2024, 1, 1, 12, 1, 0, tzinfo=timezone.utc), 456, "test2")
-    ]
+    values = [(datetime(2024, 1, 1, 12, 0, 0,
+                        tzinfo=timezone.utc), 123, "test1"),
+              (datetime(2024, 1, 1, 12, 1, 0,
+                        tzinfo=timezone.utc), 456, "test2")]
 
     with patch.object(adapter, '_execute_async') as mock_execute:
       await adapter.insert_many(ingester, values)
@@ -564,7 +712,11 @@ class TestDuckDBAdapter:
     """Test insert_many error handling."""
     from src.model import Ingester
 
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     ingester = Mock(spec=Ingester)
     ingester.name = "test_table"
@@ -572,11 +724,14 @@ class TestDuckDBAdapter:
 
     values = [(datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 123)]
 
-    with patch.object(adapter, '_execute_async', side_effect=[
-      None,  # BEGIN TRANSACTION
-      Exception("Insert failed"),  # INSERT error
-      None   # ROLLBACK
-    ]) as mock_execute:
+    with patch.object(
+        adapter,
+        '_execute_async',
+        side_effect=[
+            None,  # BEGIN TRANSACTION
+            Exception("Insert failed"),  # INSERT error
+            None  # ROLLBACK
+        ]) as mock_execute:
 
       with pytest.raises(Exception, match="Insert failed"):
         await adapter.insert_many(ingester, values)
@@ -588,11 +743,16 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_get_columns(self):
     """Test getting table columns."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     expected_columns = [("col1", "INTEGER"), ("col2", "VARCHAR")]
 
-    with patch.object(adapter, '_execute_async', return_value=expected_columns):
+    with patch.object(adapter, '_execute_async',
+                      return_value=expected_columns):
       result = await adapter.get_columns("test_table")
 
       assert result == expected_columns
@@ -600,9 +760,15 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_get_columns_error(self):
     """Test get_columns error handling."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
-    with patch.object(adapter, '_execute_async', side_effect=Exception("Table not found")):
+    with patch.object(adapter,
+                      '_execute_async',
+                      side_effect=Exception("Table not found")):
       result = await adapter.get_columns("nonexistent_table")
 
       assert result == []
@@ -610,11 +776,16 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_get_cache_columns(self):
     """Test getting cached table columns."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     mock_columns = [("col1", "INTEGER"), ("col2", "VARCHAR")]
 
-    with patch('src.adapters.duckdb.get_or_set_cache', return_value=mock_columns):
+    with patch('src.adapters.duckdb.get_or_set_cache',
+               return_value=mock_columns):
       result = await adapter.get_cache_columns("test_table")
 
       assert result == ["col1", "col2"]
@@ -622,12 +793,16 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_fetch_basic(self):
     """Test basic fetch functionality."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
-    expected_data = [
-      (datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 123, "test"),
-      (datetime(2024, 1, 1, 12, 5, 0, tzinfo=timezone.utc), 456, "test2")
-    ]
+    expected_data = [(datetime(2024, 1, 1, 12, 0, 0,
+                               tzinfo=timezone.utc), 123, "test"),
+                     (datetime(2024, 1, 1, 12, 5, 0,
+                               tzinfo=timezone.utc), 456, "test2")]
 
     with patch.object(adapter, 'get_cache_columns', return_value=["ts", "col1", "col2"]), \
          patch.object(adapter, '_execute_async', return_value=expected_data):
@@ -640,7 +815,11 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_fetch_with_parameters(self):
     """Test fetch with date range and interval parameters."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     from_date = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     to_date = datetime(2024, 1, 2, 0, 0, 0, tzinfo=timezone.utc)
@@ -648,14 +827,12 @@ class TestDuckDBAdapter:
     with patch.object(adapter, 'get_cache_columns', return_value=["ts", "col1"]), \
          patch.object(adapter, '_execute_async', return_value=[]) as mock_execute:
 
-      await adapter.fetch(
-        "test_table",
-        from_date=from_date,
-        to_date=to_date,
-        aggregation_interval="h1",
-        columns=["ts", "col1"],
-        use_first=True
-      )
+      await adapter.fetch("test_table",
+                          from_date=from_date,
+                          to_date=to_date,
+                          aggregation_interval="h1",
+                          columns=["ts", "col1"],
+                          use_first=True)
 
       # Verify the SQL query was constructed correctly
       call_args = mock_execute.call_args[0][0]
@@ -666,7 +843,11 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_fetch_time_bucket_fallback(self):
     """Test fetch fallback when time_bucket is not available."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     with patch.object(adapter, 'get_cache_columns', return_value=["ts", "col1"]), \
          patch.object(adapter, '_execute_async', side_effect=[
@@ -685,7 +866,11 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_fetch_no_columns(self):
     """Test fetch when no columns are found."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     with patch.object(adapter, 'get_cache_columns', return_value=[]):
       columns, data = await adapter.fetch("test_table")
@@ -696,11 +881,17 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_fetch_batch(self):
     """Test fetch_batch for multiple tables."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     expected_columns = ["ts", "col1", "col2"]
-    table1_data = [(datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 123, "test1")]
-    table2_data = [(datetime(2024, 1, 1, 12, 5, 0, tzinfo=timezone.utc), 456, "test2")]
+    table1_data = [(datetime(2024, 1, 1, 12, 0, 0,
+                             tzinfo=timezone.utc), 123, "test1")]
+    table2_data = [(datetime(2024, 1, 1, 12, 5, 0,
+                             tzinfo=timezone.utc), 456, "test2")]
 
     with patch.object(adapter, 'get_cache_columns', return_value=expected_columns), \
          patch.object(adapter, 'fetch', side_effect=[
@@ -718,7 +909,11 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_fetch_batch_with_parameters(self):
     """Test fetch_batch with parameters."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     from_date = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     to_date = datetime(2024, 1, 2, 0, 0, 0, tzinfo=timezone.utc)
@@ -726,28 +921,30 @@ class TestDuckDBAdapter:
     with patch.object(adapter, 'get_cache_columns', return_value=["ts", "col1"]), \
          patch.object(adapter, 'fetch', return_value=(["ts", "col1"], [])) as mock_fetch:
 
-      await adapter.fetch_batch(
-        ["table1", "table2"],
-        from_date=from_date,
-        to_date=to_date,
-        aggregation_interval="m15",
-        columns=["ts", "col1"]
-      )
+      await adapter.fetch_batch(["table1", "table2"],
+                                from_date=from_date,
+                                to_date=to_date,
+                                aggregation_interval="m15",
+                                columns=["ts", "col1"])
 
       # Should call fetch for each table with the same parameters
       assert mock_fetch.call_count == 2
       for call in mock_fetch.call_args_list:
         args, kwargs = call
         assert args[1] == from_date  # from_date
-        assert args[2] == to_date    # to_date
-        assert args[3] == "m15"      # aggregation_interval
+        assert args[2] == to_date  # to_date
+        assert args[3] == "m15"  # aggregation_interval
 
   @pytest.mark.asyncio
   async def test_fetch_all(self):
     """Test fetch_all method."""
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
-    expected_result = [("row1",), ("row2",)]
+    expected_result = [("row1", ), ("row2", )]
 
     with patch.object(adapter, '_execute_async', return_value=expected_result):
       result = await adapter.fetch_all("SELECT * FROM test_table")
@@ -759,7 +956,11 @@ class TestDuckDBAdapter:
     """Test insert_many with custom table name."""
     from src.model import Ingester
 
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     ingester = Mock(spec=Ingester)
     ingester.name = "default_table"
@@ -771,7 +972,10 @@ class TestDuckDBAdapter:
       await adapter.insert_many(ingester, values, table="custom_table")
 
       # Verify INSERT was called with custom table name
-      insert_calls = [call for call in mock_execute.call_args_list if call[0][0].startswith("INSERT")]
+      insert_calls = [
+          call for call in mock_execute.call_args_list
+          if call[0][0].startswith("INSERT")
+      ]
       assert len(insert_calls) == 1
       assert "custom_table" in insert_calls[0][0][0]
 
@@ -780,7 +984,11 @@ class TestDuckDBAdapter:
     """Test create_table with custom table name."""
     from src.model import Ingester
 
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     ingester = Mock(spec=Ingester)
     ingester.name = "default_table"
@@ -798,12 +1006,24 @@ class TestDuckDBAdapter:
     """Test insert with custom table name."""
     from src.model import Ingester
 
-    adapter = DuckDB(host="localhost", port=0, db=":memory:", user="test_user", password="test_pass")
+    adapter = DuckDB(host="localhost",
+                     port=0,
+                     db=":memory:",
+                     user="test_user",
+                     password="test_pass")
 
     ingester = Mock(spec=Ingester)
     ingester.name = "default_table"
-    ingester.last_ingested = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-    ingester.fields = [Mock(name="field1", type="int32", transient=False, value=123)]
+    ingester.last_ingested = datetime(2024,
+                                      1,
+                                      1,
+                                      12,
+                                      0,
+                                      0,
+                                      tzinfo=timezone.utc)
+    ingester.fields = [
+        Mock(name="field1", type="int32", transient=False, value=123)
+    ]
 
     with patch.object(adapter, 'ensure_connected'), \
          patch.object(adapter, '_execute_async') as mock_execute:

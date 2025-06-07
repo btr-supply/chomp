@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.services import loader
 
+
 class TestLoaderService:
   """Test loader service functionality."""
 
@@ -94,16 +95,23 @@ class TestLoaderService:
     assert len(module_attrs) > 0
 
     # Look for functions or classes
-    callables = [attr for attr in module_attrs if callable(getattr(loader, attr)) and not attr.startswith('_')]
+    callables = [
+        attr for attr in module_attrs
+        if callable(getattr(loader, attr)) and not attr.startswith('_')
+    ]
     assert len(callables) >= 0
 
   def test_loader_constants(self):
     """Test loader module constants."""
     # Check for any module-level constants
-    module_vars = [attr for attr in dir(loader) if not attr.startswith('_') and not callable(getattr(loader, attr))]
+    module_vars = [
+        attr for attr in dir(loader)
+        if not attr.startswith('_') and not callable(getattr(loader, attr))
+    ]
 
     # Should have some module-level variables or constants
     assert isinstance(module_vars, list)
+
 
 class TestLoaderUtilities:
   """Test loader utility functions."""
@@ -139,10 +147,7 @@ class TestLoaderUtilities:
     """Test validation utility functions."""
     try:
       if hasattr(loader, 'validate_ingester'):
-        mock_ingester = {
-          "name": "test",
-          "type": "http_api"
-        }
+        mock_ingester = {"name": "test", "type": "http_api"}
 
         # Test ingester validation
         result = loader.validate_ingester(mock_ingester)
@@ -150,6 +155,7 @@ class TestLoaderUtilities:
 
     except Exception:
       pytest.skip("Validation utilities not available")
+
 
 class TestLoaderIntegration:
   """Test loader integration scenarios."""
@@ -159,20 +165,18 @@ class TestLoaderIntegration:
     """Test full configuration loading scenario."""
     try:
       _ = {
-        "ingesters": [
-          {
-            "name": "test_ingester",
-            "type": "http_api",
-            "interval": "m1",
-            "fields": []
+          "ingesters": [{
+              "name": "test_ingester",
+              "type": "http_api",
+              "interval": "m1",
+              "fields": []
+          }],
+          "adapters": {
+              "default": {
+                  "type": "sqlite",
+                  "connection": ":memory:"
+              }
           }
-        ],
-        "adapters": {
-          "default": {
-            "type": "sqlite",
-            "connection": ":memory:"
-          }
-        }
       }
 
       with patch('src.services.loader.Path') as mock_path, \

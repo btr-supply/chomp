@@ -43,7 +43,9 @@ class TestRequesterID:
 
   def test_no_state_attribute(self):
     """Test when request has no state attribute."""
+
     class RequestWithoutState:
+
       def __init__(self):
         self.client = Mock()
         self.client.host = "10.0.0.1"
@@ -96,7 +98,8 @@ class TestHashedRequesterID:
     mock_request2.client.host = "192.168.1.11"  # Different IP to avoid cache
 
     result1 = hashed_requester_id(mock_request1, "salt1:")
-    result2 = hashed_requester_id(mock_request2, "salt1:")  # Same salt, different IP
+    result2 = hashed_requester_id(mock_request2,
+                                  "salt1:")  # Same salt, different IP
 
     # Different IPs with same salt should produce different hashes
     assert result1 != result2

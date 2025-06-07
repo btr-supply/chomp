@@ -39,11 +39,11 @@ class TestVictoriaMetrics:
   async def test_connect_with_env_vars(self):
     """Test connect with environment variables."""
     env_vars = {
-      'VICTORIAMETRICS_HOST': 'vm-host',
-      'VICTORIAMETRICS_PORT': '9090',
-      'VICTORIAMETRICS_DB': 'test-db',
-      'DB_RW_USER': 'test-user',
-      'DB_RW_PASS': 'test-pass'
+        'VICTORIAMETRICS_HOST': 'vm-host',
+        'VICTORIAMETRICS_PORT': '9090',
+        'VICTORIAMETRICS_DB': 'test-db',
+        'DB_RW_USER': 'test-user',
+        'DB_RW_PASS': 'test-pass'
     }
 
     with patch.dict(env, env_vars), \
@@ -61,15 +61,15 @@ class TestVictoriaMetrics:
   @pytest.mark.asyncio
   async def test_connect_with_parameters(self):
     """Test connect with explicit parameters."""
-    with patch.object(VictoriaMetrics, 'ensure_connected', new_callable=AsyncMock) as mock_ensure:
+    with patch.object(VictoriaMetrics,
+                      'ensure_connected',
+                      new_callable=AsyncMock) as mock_ensure:
 
-      adapter = await VictoriaMetrics.connect(
-        host="custom-host",
-        port=8080,
-        db="custom-db",
-        user="custom-user",
-        password="custom-pass"
-      )
+      adapter = await VictoriaMetrics.connect(host="custom-host",
+                                              port=8080,
+                                              db="custom-db",
+                                              user="custom-user",
+                                              password="custom-pass")
 
       assert adapter.host == "custom-host"
       assert adapter.port == 8080
@@ -81,7 +81,11 @@ class TestVictoriaMetrics:
   @pytest.mark.asyncio
   async def test_ensure_connected_without_auth(self):
     """Test ensure_connected without authentication."""
-    adapter = VictoriaMetrics(host="localhost", port=8428, db="test", user="", password="")
+    adapter = VictoriaMetrics(host="localhost",
+                              port=8428,
+                              db="test",
+                              user="",
+                              password="")
     adapter.session = None
 
     with patch('httpx.AsyncClient') as mock_session, \
@@ -90,13 +94,18 @@ class TestVictoriaMetrics:
       await adapter.ensure_connected()
 
       mock_session.assert_called_once_with(auth=None)
-      mock_log.assert_called_once_with("Connected to VictoriaMetrics on localhost:8428")
+      mock_log.assert_called_once_with(
+          "Connected to VictoriaMetrics on localhost:8428")
       assert adapter.session is not None
 
   @pytest.mark.asyncio
   async def test_ensure_connected_with_auth(self):
     """Test ensure_connected with authentication."""
-    adapter = VictoriaMetrics(host="localhost", port=8428, db="test", user="user", password="pass")
+    adapter = VictoriaMetrics(host="localhost",
+                              port=8428,
+                              db="test",
+                              user="user",
+                              password="pass")
     adapter.session = None
 
     with patch('httpx.AsyncClient') as mock_session, \
@@ -109,12 +118,17 @@ class TestVictoriaMetrics:
 
       mock_auth.assert_called_once_with("user", "pass")
       mock_session.assert_called_once_with(auth="mock_auth")
-      mock_log.assert_called_once_with("Connected to VictoriaMetrics on localhost:8428")
+      mock_log.assert_called_once_with(
+          "Connected to VictoriaMetrics on localhost:8428")
 
   @pytest.mark.asyncio
   async def test_ensure_connected_already_connected(self):
     """Test ensure_connected when already connected."""
-    adapter = VictoriaMetrics(host="localhost", port=8428, db="test", user="", password="")
+    adapter = VictoriaMetrics(host="localhost",
+                              port=8428,
+                              db="test",
+                              user="",
+                              password="")
     adapter.session = Mock()  # Already has a session
 
     with patch('httpx.AsyncClient') as mock_session, \

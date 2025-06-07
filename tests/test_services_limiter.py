@@ -98,8 +98,10 @@ class TestLimiterService:
       mock_pipe.get = Mock()
       mock_pipe.ttl = Mock()
       mock_pipe.execute = AsyncMock(return_value=["50", "3600"])
-      mock_state.redis.pipeline.return_value.__aenter__ = AsyncMock(return_value=mock_pipe)
-      mock_state.redis.pipeline.return_value.__aexit__ = AsyncMock(return_value=None)
+      mock_state.redis.pipeline.return_value.__aenter__ = AsyncMock(
+          return_value=mock_pipe)
+      mock_state.redis.pipeline.return_value.__aexit__ = AsyncMock(
+          return_value=None)
 
       mock_secs.return_value = 3600
       mock_fmt.return_value = "2023-12-01T12:00:00Z"
@@ -141,8 +143,10 @@ class TestLimiterService:
       mock_pipe.incrby = Mock()
       mock_pipe.expire = Mock()
       mock_pipe.execute = AsyncMock(return_value=[])
-      mock_state.redis.pipeline.return_value.__aenter__ = AsyncMock(return_value=mock_pipe)
-      mock_state.redis.pipeline.return_value.__aexit__ = AsyncMock(return_value=None)
+      mock_state.redis.pipeline.return_value.__aenter__ = AsyncMock(
+          return_value=mock_pipe)
+      mock_state.redis.pipeline.return_value.__aexit__ = AsyncMock(
+          return_value=None)
       mock_state.redis.get = AsyncMock(return_value="50")
 
       mock_secs.return_value = 3600
@@ -204,12 +208,14 @@ class TestLimiterService:
       assert error == ""
       assert data["current_counts"] == [0]
 
+
 # Legacy test functions for basic imports and structure
 def test_limiter_imports():
   """Test that limiter module imports correctly."""
   assert hasattr(limiter, 'check_limits')
   assert hasattr(limiter, 'get_user_limits')
   assert hasattr(limiter, 'increment_counters')
+
 
 def test_limiter_basic_functionality():
   """Test basic limiter functionality."""

@@ -21,7 +21,8 @@ class TestStatusChecker:
   @pytest.mark.asyncio
   @patch('src.services.status_checker.now')
   @patch('src.services.status_checker.requester_id')
-  async def test_check_status_success_with_utc_time(self, mock_requester_id, mock_now):
+  async def test_check_status_success_with_utc_time(self, mock_requester_id,
+                                                    mock_now):
     """Test successful status check with provided UTC time."""
     mock_request = Mock(spec=Request)
     mock_client = Mock()
@@ -48,7 +49,8 @@ class TestStatusChecker:
   @pytest.mark.asyncio
   @patch('src.services.status_checker.now')
   @patch('src.services.status_checker.requester_id')
-  async def test_check_status_success_without_utc_time(self, mock_requester_id, mock_now):
+  async def test_check_status_success_without_utc_time(self, mock_requester_id,
+                                                       mock_now):
     """Test successful status check without provided UTC time."""
     mock_request = Mock(spec=Request)
     mock_client = Mock()
@@ -129,7 +131,8 @@ class TestStatusChecker:
   @patch('src.services.status_checker.state.meta')
   @patch('src.services.status_checker.now')
   @patch('src.services.status_checker.requester_id')
-  async def test_check_status_includes_state_metadata(self, mock_requester_id, mock_now, mock_meta):
+  async def test_check_status_includes_state_metadata(self, mock_requester_id,
+                                                      mock_now, mock_meta):
     """Test that status includes application metadata."""
     mock_request = Mock(spec=Request)
     mock_client = Mock()

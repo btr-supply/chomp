@@ -168,6 +168,7 @@ class TestHTTPIngester:
       mock_response_success.text = orjson.dumps(test_data).decode()
 
       call_count = 0
+
       async def mock_get(*args, **kwargs):
         nonlocal call_count
         if call_count == 0:
@@ -296,6 +297,7 @@ class TestHTTPIngester:
       # Mock transformer function
       def mock_transformer(data):
         return {"transformed": {"value": data["raw"]}}
+
       mock_safe_eval.return_value = mock_transformer
 
       mock_select.return_value = "original_value"
@@ -311,7 +313,9 @@ class TestHTTPIngester:
       result = await schedule(mock_ingester)
 
       assert len(result) == 1
-      mock_safe_eval.assert_called_once_with("lambda data: {'transformed': {'value': data['raw']}}", callable_check=True)
+      mock_safe_eval.assert_called_once_with(
+          "lambda data: {'transformed': {'value': data['raw']}}",
+          callable_check=True)
 
   @pytest.mark.asyncio
   async def test_schedule_multiple_fields_same_url(self):
@@ -451,7 +455,8 @@ class TestHTTPIngester:
       result = await schedule(mock_ingester)
 
       assert len(result) == 1
-      mock_log_warn.assert_called_with("test_http_ingester missing fields: missing_field")
+      mock_log_warn.assert_called_with(
+          "test_http_ingester missing fields: missing_field")
 
   @pytest.mark.asyncio
   async def test_schedule_json_parse_error(self):

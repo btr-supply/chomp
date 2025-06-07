@@ -10,11 +10,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 try:
   import polars as pl
-  from src.services.loader import (
-    trim_resource, get_resources, parse_resources, parse_fields,
-    parse_resources_fields, get_schema, format_table,
-    get_last_values, get_history
-  )
+  from src.services.loader import (trim_resource, get_resources,
+                                   parse_resources, parse_fields,
+                                   parse_resources_fields, get_schema,
+                                   format_table, get_last_values, get_history)
   from src.model import Scope
   POLARS_AVAILABLE = True
 except ImportError:
@@ -33,15 +32,15 @@ class TestTrimResource:
   def test_trim_resource_basic(self):
     """Test basic resource trimming."""
     resource = {
-      "name": "test_resource",
-      "type": "api",
-      "fields": {
-        "field1": {
-          "type": "float",
-          "tags": ["tag1"],
-          "transient": False
+        "name": "test_resource",
+        "type": "api",
+        "fields": {
+            "field1": {
+                "type": "float",
+                "tags": ["tag1"],
+                "transient": False
+            }
         }
-      }
     }
 
     result = trim_resource(resource, Scope.DEFAULT)
@@ -54,12 +53,18 @@ class TestTrimResource:
   def test_trim_resource_transient_filtered(self):
     """Test that transient fields are filtered correctly."""
     resource = {
-      "name": "test_resource",
-      "type": "api",
-      "fields": {
-        "field1": {"type": "float", "transient": False},
-        "field2": {"type": "string", "transient": True}
-      }
+        "name": "test_resource",
+        "type": "api",
+        "fields": {
+            "field1": {
+                "type": "float",
+                "transient": False
+            },
+            "field2": {
+                "type": "string",
+                "transient": True
+            }
+        }
     }
 
     result = trim_resource(resource, Scope.DEFAULT)
@@ -70,12 +75,18 @@ class TestTrimResource:
   def test_trim_resource_transient_included(self):
     """Test that transient fields are included with TRANSIENT scope."""
     resource = {
-      "name": "test_resource",
-      "type": "api",
-      "fields": {
-        "field1": {"type": "float", "transient": False},
-        "field2": {"type": "string", "transient": True}
-      }
+        "name": "test_resource",
+        "type": "api",
+        "fields": {
+            "field1": {
+                "type": "float",
+                "transient": False
+            },
+            "field2": {
+                "type": "string",
+                "transient": True
+            }
+        }
     }
 
     result = trim_resource(resource, Scope.TRANSIENT | Scope.DEFAULT)
@@ -100,11 +111,15 @@ class TestGetResources:
   async def test_get_resources_cache_miss(self):
     """Test resource retrieval with cache miss."""
     mock_resources = {
-      "resource1": {
-        "name": "resource1",
-        "type": "api",
-        "fields": {"field1": {"type": "float"}}
-      }
+        "resource1": {
+            "name": "resource1",
+            "type": "api",
+            "fields": {
+                "field1": {
+                    "type": "float"
+                }
+            }
+        }
     }
 
     with patch('src.services.loader.get_resource_status', new_callable=AsyncMock, return_value=mock_resources), \
@@ -112,7 +127,10 @@ class TestGetResources:
          patch('src.services.loader.get_running_loop') as mock_loop:
 
       mock_state.thread_pool = Mock()
-      mock_loop.return_value.run_in_executor = AsyncMock(return_value={"name": "resource1", "fields": {}})
+      mock_loop.return_value.run_in_executor = AsyncMock(return_value={
+          "name": "resource1",
+          "fields": {}
+      })
 
       err, result = await get_resources(Scope.DEFAULT)
 
@@ -122,7 +140,8 @@ class TestGetResources:
   @pytest.mark.asyncio
   async def test_get_resources_unsupported_scope(self):
     """Test error handling for unsupported scope."""
-    with patch('src.services.loader._resources_by_scope', {Scope.DEFAULT: None}):
+    with patch('src.services.loader._resources_by_scope',
+               {Scope.DEFAULT: None}):
       err, result = await get_resources(999)  # Invalid scope
 
       assert "Unsupported resource scope" in err
@@ -138,7 +157,9 @@ class TestParseResources:
     """Test parsing resources with 'all' keyword."""
     mock_resources = {"resource1": {}, "resource2": {}}
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await parse_resources("all")
 
       assert err == ""
@@ -149,7 +170,9 @@ class TestParseResources:
     """Test parsing resources with wildcard."""
     mock_resources = {"resource1": {}, "resource2": {}}
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await parse_resources("*")
 
       assert err == ""
@@ -158,7 +181,11 @@ class TestParseResources:
   @pytest.mark.asyncio
   async def test_parse_resources_specific(self):
     """Test parsing specific resources."""
-    with patch('src.services.loader._resources_by_scope', {Scope.DEFAULT: {"resource1": {}, "resource2": {}}}):
+    with patch('src.services.loader._resources_by_scope',
+               {Scope.DEFAULT: {
+                   "resource1": {},
+                   "resource2": {}
+               }}):
       err, result = await parse_resources("resource1,resource2")
 
       assert err == ""
@@ -176,7 +203,8 @@ class TestParseResources:
   @pytest.mark.asyncio
   async def test_parse_resources_exception(self):
     """Test exception handling."""
-    with patch('src.services.loader.split', side_effect=Exception("Test error")):
+    with patch('src.services.loader.split',
+               side_effect=Exception("Test error")):
       err, result = await parse_resources("resource1")
 
       assert "Error parsing resources" in err
@@ -190,13 +218,11 @@ class TestParseFields:
   @pytest.mark.asyncio
   async def test_parse_fields_all(self):
     """Test parsing fields with 'all' keyword."""
-    mock_resources = {
-      "resource1": {
-        "fields": {"field1": {}, "field2": {}}
-      }
-    }
+    mock_resources = {"resource1": {"fields": {"field1": {}, "field2": {}}}}
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await parse_fields("resource1", "all")
 
       assert err == ""
@@ -206,12 +232,18 @@ class TestParseFields:
   async def test_parse_fields_specific(self):
     """Test parsing specific fields."""
     mock_resources = {
-      "resource1": {
-        "fields": {"field1": {}, "field2": {}, "field3": {}}
-      }
+        "resource1": {
+            "fields": {
+                "field1": {},
+                "field2": {},
+                "field3": {}
+            }
+        }
     }
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await parse_fields("resource1", "field1,field2")
 
       assert err == ""
@@ -222,7 +254,9 @@ class TestParseFields:
     """Test parsing fields for non-existent resource."""
     mock_resources = {}
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await parse_fields("nonexistent", "field1")
 
       assert "Resource not found" in err
@@ -233,7 +267,9 @@ class TestParseFields:
     """Test parsing fields when resource has no fields."""
     mock_resources = {"resource1": {}}
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await parse_fields("resource1", "field1")
 
       assert "Fields not found" in err
@@ -242,7 +278,8 @@ class TestParseFields:
   @pytest.mark.asyncio
   async def test_parse_fields_exception(self):
     """Test exception handling."""
-    with patch('src.services.loader.get_resources', side_effect=Exception("Test error")):
+    with patch('src.services.loader.get_resources',
+               side_effect=Exception("Test error")):
       err, result = await parse_fields("resource1", "field1")
 
       assert "Error parsing fields" in err
@@ -267,7 +304,9 @@ class TestParseResourcesFields:
   @pytest.mark.asyncio
   async def test_parse_resources_fields_resource_error(self):
     """Test error handling when parse_resources fails."""
-    with patch('src.services.loader.parse_resources', new_callable=AsyncMock, return_value=("Resource error", [])):
+    with patch('src.services.loader.parse_resources',
+               new_callable=AsyncMock,
+               return_value=("Resource error", [])):
 
       err, result = await parse_resources_fields("resource1", "field1")
 
@@ -293,12 +332,11 @@ class TestGetSchema:
   @pytest.mark.asyncio
   async def test_get_schema_all(self):
     """Test getting schema for all resources."""
-    mock_resources = {
-      "resource1": {"field1": {}},
-      "resource2": {"field2": {}}
-    }
+    mock_resources = {"resource1": {"field1": {}}, "resource2": {"field2": {}}}
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await get_schema()
 
       assert err == ""
@@ -307,12 +345,11 @@ class TestGetSchema:
   @pytest.mark.asyncio
   async def test_get_schema_specific_resources(self):
     """Test getting schema for specific resources."""
-    mock_resources = {
-      "resource1": {"field1": {}},
-      "resource2": {"field2": {}}
-    }
+    mock_resources = {"resource1": {"field1": {}}, "resource2": {"field2": {}}}
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await get_schema(resources=["resource1", "resource2"])
 
       assert err == ""
@@ -322,12 +359,11 @@ class TestGetSchema:
   @pytest.mark.asyncio
   async def test_get_schema_single_resource(self):
     """Test getting schema for single resource."""
-    mock_resources = {
-      "resource1": {"field1": {}},
-      "resource2": {"field2": {}}
-    }
+    mock_resources = {"resource1": {"field1": {}}, "resource2": {"field2": {}}}
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await get_schema(resources=["resource1"])
 
       assert err == ""
@@ -336,7 +372,9 @@ class TestGetSchema:
   @pytest.mark.asyncio
   async def test_get_schema_error(self):
     """Test error handling in get_schema."""
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("Resources error", {})):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("Resources error", {})):
       err, result = await get_schema()
 
       assert err == "Resources error"
@@ -374,7 +412,9 @@ class TestFormatTable:
   def test_format_table_polars_to_json_row(self):
     """Test converting from Polars to JSON row format."""
     data = pl.DataFrame({"col1": [1, 2], "col2": [3, 4]})
-    err, result = format_table(data, from_format="polars", to_format="json:row")
+    err, result = format_table(data,
+                               from_format="polars",
+                               to_format="json:row")
 
     assert err == ""
     assert isinstance(result, bytes)
@@ -382,7 +422,10 @@ class TestFormatTable:
   def test_format_table_with_columns(self):
     """Test formatting with custom column names."""
     data = pl.DataFrame({"old1": [1, 2], "old2": [3, 4]})
-    err, result = format_table(data, from_format="polars", to_format="polars", columns=["new1", "new2"])
+    err, result = format_table(data,
+                               from_format="polars",
+                               to_format="polars",
+                               columns=["new1", "new2"])
 
     assert err == ""
     assert result.columns == ["new1", "new2"]
@@ -390,7 +433,9 @@ class TestFormatTable:
   def test_format_table_unsupported_from_format(self):
     """Test error handling for unsupported from format."""
     data = [[1, 2], [3, 4]]
-    err, result = format_table(data, from_format="unsupported", to_format="polars")
+    err, result = format_table(data,
+                               from_format="unsupported",
+                               to_format="polars")
 
     assert "Unsupported from_format" in err
     assert result is None
@@ -398,7 +443,9 @@ class TestFormatTable:
   def test_format_table_unsupported_to_format(self):
     """Test error handling for unsupported to format."""
     data = pl.DataFrame({"col1": [1, 2]})
-    err, result = format_table(data, from_format="polars", to_format="unsupported")
+    err, result = format_table(data,
+                               from_format="polars",
+                               to_format="unsupported")
 
     assert "Unsupported to_format" in err
     assert result is None
@@ -406,7 +453,9 @@ class TestFormatTable:
   def test_format_table_json_input(self):
     """Test formatting JSON input."""
     data = '{"col1": [1, 2], "col2": [3, 4]}'
-    err, result = format_table(data, from_format="json:column", to_format="polars")
+    err, result = format_table(data,
+                               from_format="json:column",
+                               to_format="polars")
 
     assert err == ""
     assert isinstance(result, pl.DataFrame)
@@ -424,7 +473,9 @@ class TestFormatTable:
     """Test exception handling in format_table."""
     # Test with invalid data that causes polars to fail
     with patch('polars.DataFrame', side_effect=Exception("Test error")):
-      err, result = format_table([[1, 2]], from_format="py:row", to_format="polars")
+      err, result = format_table([[1, 2]],
+                                 from_format="py:row",
+                                 to_format="polars")
 
       assert "Error formatting table" in err
       assert result is None
@@ -439,7 +490,9 @@ class TestGetLastValues:
     """Test getting last values for single resource."""
     mock_data = {"field1": 100.0, "field2": 200.0}
 
-    with patch('src.services.loader.get_cache', new_callable=AsyncMock, return_value=mock_data):
+    with patch('src.services.loader.get_cache',
+               new_callable=AsyncMock,
+               return_value=mock_data):
       err, result = await get_last_values(["resource1"])
 
       assert err == ""
@@ -451,11 +504,17 @@ class TestGetLastValues:
   async def test_get_last_values_multiple_resources(self):
     """Test getting last values for multiple resources."""
     mock_batch_data = {
-      "resource1": {"field1": 100.0},
-      "resource2": {"field1": 200.0}
+        "resource1": {
+            "field1": 100.0
+        },
+        "resource2": {
+            "field1": 200.0
+        }
     }
 
-    with patch('src.services.loader.get_cache_batch', new_callable=AsyncMock, return_value=mock_batch_data):
+    with patch('src.services.loader.get_cache_batch',
+               new_callable=AsyncMock,
+               return_value=mock_batch_data):
       err, result = await get_last_values(["resource1", "resource2"])
 
       assert err == ""
@@ -465,7 +524,9 @@ class TestGetLastValues:
   @pytest.mark.asyncio
   async def test_get_last_values_missing_resource(self):
     """Test error handling for missing resource."""
-    with patch('src.services.loader.get_cache', new_callable=AsyncMock, return_value=None):
+    with patch('src.services.loader.get_cache',
+               new_callable=AsyncMock,
+               return_value=None):
       err, result = await get_last_values(["nonexistent"])
 
       assert "Resources not found" in err
@@ -477,7 +538,8 @@ class TestGetLastValues:
     mock_resource_data = {"field1": 100.0}
     mock_quote_data = {"idx": 1.5}
 
-    with patch('src.services.loader.get_cache', new_callable=AsyncMock) as mock_cache:
+    with patch('src.services.loader.get_cache',
+               new_callable=AsyncMock) as mock_cache:
       mock_cache.side_effect = [mock_resource_data, mock_quote_data]
 
       err, result = await get_last_values(["resource1"], quote="OTHER.idx")
@@ -490,10 +552,12 @@ class TestGetLastValues:
     """Test error handling when quote resource not found."""
     mock_resource_data = {"field1": 100.0}
 
-    with patch('src.services.loader.get_cache', new_callable=AsyncMock) as mock_cache:
+    with patch('src.services.loader.get_cache',
+               new_callable=AsyncMock) as mock_cache:
       mock_cache.side_effect = [mock_resource_data, None]
 
-      err, result = await get_last_values(["resource1"], quote="NONEXISTENT.idx")
+      err, result = await get_last_values(["resource1"],
+                                          quote="NONEXISTENT.idx")
 
       assert "Quote resource not found" in err
       assert result == {}
@@ -503,8 +567,11 @@ class TestGetLastValues:
     """Test error handling for invalid quote format."""
     mock_data = {"field1": 100.0}
 
-    with patch('src.services.loader.get_cache', new_callable=AsyncMock, return_value=mock_data):
-      err, result = await get_last_values(["resource1"], quote="invalid_format")
+    with patch('src.services.loader.get_cache',
+               new_callable=AsyncMock,
+               return_value=mock_data):
+      err, result = await get_last_values(["resource1"],
+                                          quote="invalid_format")
 
       assert "Quote must be in format resource.field" in err
       assert result == {}
@@ -528,11 +595,11 @@ class TestGetHistory:
     with patch('src.services.loader.state') as mock_state, \
          patch('src.services.loader.format_table', return_value=("", {"data": "formatted"})):
 
-      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns, mock_data))
+      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns,
+                                                            mock_data))
 
-      err, result = await get_history(
-        ["resource1"], ["field1"], self.from_date, self.to_date, "m5"
-      )
+      err, result = await get_history(["resource1"], ["field1"],
+                                      self.from_date, self.to_date, "m5")
 
       assert err == ""
       assert result == {"data": "formatted"}
@@ -543,9 +610,8 @@ class TestGetHistory:
     with patch('src.services.loader.state') as mock_state:
       mock_state.tsdb.fetch_batch = AsyncMock(return_value=([], []))
 
-      err, result = await get_history(
-        ["resource1"], ["field1"], self.from_date, self.to_date, "m5"
-      )
+      err, result = await get_history(["resource1"], ["field1"],
+                                      self.from_date, self.to_date, "m5")
 
       assert err == "No data found"
       assert result is None
@@ -561,12 +627,16 @@ class TestGetHistory:
     with patch('src.services.loader.state') as mock_state, \
          patch('src.services.loader.format_table', return_value=("", {"data": "formatted"})):
 
-      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns, mock_data))
-      mock_state.tsdb.fetch = AsyncMock(return_value=(mock_quote_columns, mock_quote_data))
+      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns,
+                                                            mock_data))
+      mock_state.tsdb.fetch = AsyncMock(return_value=(mock_quote_columns,
+                                                      mock_quote_data))
 
-      err, result = await get_history(
-        ["resource1"], ["field1"], self.from_date, self.to_date, "m5", quote="USDC.idx"
-      )
+      err, result = await get_history(["resource1"], ["field1"],
+                                      self.from_date,
+                                      self.to_date,
+                                      "m5",
+                                      quote="USDC.idx")
 
       assert err == ""
       assert result == {"data": "formatted"}
@@ -578,12 +648,15 @@ class TestGetHistory:
     mock_data = [[[self.from_date, 100.0]]]
 
     with patch('src.services.loader.state') as mock_state:
-      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns, mock_data))
+      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns,
+                                                            mock_data))
       mock_state.tsdb.fetch = AsyncMock(return_value=([], []))
 
-      err, result = await get_history(
-        ["resource1"], ["field1"], self.from_date, self.to_date, "m5", quote="OTHER.idx"
-      )
+      err, result = await get_history(["resource1"], ["field1"],
+                                      self.from_date,
+                                      self.to_date,
+                                      "m5",
+                                      quote="OTHER.idx")
 
       assert err == "No quote data found"
       assert result is None
@@ -655,12 +728,21 @@ class TestParseFieldsEdgeCases:
   async def test_parse_fields_dict_filtered_case(self):
     """Test parse_fields when filtered result is a dict."""
     mock_resources = {
-      "resource1": {
-        "fields": {"field1": {"type": "float"}, "field2": {"type": "string"}}
-      }
+        "resource1": {
+            "fields": {
+                "field1": {
+                    "type": "float"
+                },
+                "field2": {
+                    "type": "string"
+                }
+            }
+        }
     }
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await parse_fields("resource1", "field1,field2")
 
       assert err == ""
@@ -674,10 +756,12 @@ class TestFormatTableAdvanced:
   def test_format_table_timestamp_conversion(self):
     """Test timestamp conversion for JS compatibility."""
     data = pl.DataFrame({
-      "ts": [datetime(2024, 1, 1, tzinfo=timezone.utc)],
-      "value": [100.0]
+        "ts": [datetime(2024, 1, 1, tzinfo=timezone.utc)],
+        "value": [100.0]
     })
-    err, result = format_table(data, from_format="polars", to_format="json:row")
+    err, result = format_table(data,
+                               from_format="polars",
+                               to_format="json:row")
 
     assert err == ""
     assert isinstance(result, bytes)
@@ -685,7 +769,9 @@ class TestFormatTableAdvanced:
   def test_format_table_json_string_input(self):
     """Test JSON string input parsing."""
     data = '{"col1": [1, 2], "col2": [3, 4]}'
-    err, result = format_table(data, from_format="json:row", to_format="polars")
+    err, result = format_table(data,
+                               from_format="json:row",
+                               to_format="polars")
 
     assert err == ""
     assert isinstance(result, pl.DataFrame)
@@ -707,7 +793,9 @@ class TestFormatTableAdvanced:
     assert "|" in result
 
     # Test py:column
-    err, result = format_table(data, from_format="polars", to_format="py:column")
+    err, result = format_table(data,
+                               from_format="polars",
+                               to_format="py:column")
     assert err == ""
     assert isinstance(result, list)
 
@@ -736,7 +824,8 @@ class TestGetLastValuesAdvanced:
     mock_resource_data = {"field1": 100.0}
     mock_quote_data = {"idx": float('nan')}
 
-    with patch('src.services.loader.get_cache', new_callable=AsyncMock) as mock_cache:
+    with patch('src.services.loader.get_cache',
+               new_callable=AsyncMock) as mock_cache:
       mock_cache.side_effect = [mock_resource_data, mock_quote_data]
 
       err, result = await get_last_values(["resource1"], quote="OTHER.idx")
@@ -750,7 +839,8 @@ class TestGetLastValuesAdvanced:
     mock_resource_data = {"field1": 100.0}
     mock_quote_data = {"other": 1.5}  # Missing idx field
 
-    with patch('src.services.loader.get_cache', new_callable=AsyncMock) as mock_cache:
+    with patch('src.services.loader.get_cache',
+               new_callable=AsyncMock) as mock_cache:
       mock_cache.side_effect = [mock_resource_data, mock_quote_data]
 
       err, result = await get_last_values(["resource1"], quote="OTHER.idx")
@@ -764,7 +854,8 @@ class TestGetLastValuesAdvanced:
     mock_resource_data = {"field1": 100.0, "field2": "string_value"}
     mock_quote_data = {"idx": 1.5}
 
-    with patch('src.services.loader.get_cache', new_callable=AsyncMock) as mock_cache:
+    with patch('src.services.loader.get_cache',
+               new_callable=AsyncMock) as mock_cache:
       mock_cache.side_effect = [mock_resource_data, mock_quote_data]
 
       err, result = await get_last_values(["resource1"], quote="OTHER.idx")
@@ -793,11 +884,14 @@ class TestGetHistoryAdvanced:
          patch('src.services.loader.format_table', return_value=("", {"data": "formatted"})), \
          patch('src.services.loader.numeric_columns', return_value=["field1"]):
 
-      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns, mock_data))
+      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns,
+                                                            mock_data))
 
-      err, result = await get_history(
-        ["resource1"], ["field1"], self.from_date, self.to_date, "m5", fill_mode="none"
-      )
+      err, result = await get_history(["resource1"], ["field1"],
+                                      self.from_date,
+                                      self.to_date,
+                                      "m5",
+                                      fill_mode="none")
 
       assert err == ""
       assert result == {"data": "formatted"}
@@ -812,11 +906,11 @@ class TestGetHistoryAdvanced:
          patch('src.services.loader.format_table', return_value=("", {"data": "formatted"})), \
          patch('src.services.loader.numeric_columns', return_value=[]):
 
-      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns, mock_data))
+      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns,
+                                                            mock_data))
 
-      err, result = await get_history(
-        ["resource1"], ["text_field"], self.from_date, self.to_date, "m5"
-      )
+      err, result = await get_history(["resource1"], ["text_field"],
+                                      self.from_date, self.to_date, "m5")
 
       assert err == ""
       assert result == {"data": "formatted"}
@@ -831,12 +925,14 @@ class TestGetHistoryAdvanced:
          patch('src.services.loader.format_table', return_value=("", {"data": "formatted"})), \
          patch('src.services.loader.numeric_columns', return_value=["field1"]):
 
-      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns, mock_data))
+      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns,
+                                                            mock_data))
 
-      err, result = await get_history(
-        ["resource1"], ["field1"], self.from_date, self.to_date, "m5",
-        truncate_leading_zeros=False
-      )
+      err, result = await get_history(["resource1"], ["field1"],
+                                      self.from_date,
+                                      self.to_date,
+                                      "m5",
+                                      truncate_leading_zeros=False)
 
       assert err == ""
       assert result == {"data": "formatted"}
@@ -849,11 +945,11 @@ class TestGetHistoryAdvanced:
 
     with patch('src.services.loader.state') as mock_state:
 
-      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns, mock_data))
+      mock_state.tsdb.fetch_batch = AsyncMock(return_value=(mock_columns,
+                                                            mock_data))
 
-      err, result = await get_history(
-        ["resource1"], ["field1"], self.from_date, self.to_date, "m5"
-      )
+      err, result = await get_history(["resource1"], ["field1"],
+                                      self.from_date, self.to_date, "m5")
 
       # Should handle empty DataFrame gracefully
       assert err == "No dataset to format"
@@ -868,11 +964,27 @@ class TestGetSchemaAdvanced:
   async def test_get_schema_multiple_resources_filtered(self):
     """Test schema with multiple resources and field filtering."""
     mock_resources = {
-      "resource1": {"field1": {"type": "float"}, "field2": {"type": "string"}},
-      "resource2": {"field1": {"type": "int"}, "field3": {"type": "bool"}}
+        "resource1": {
+            "field1": {
+                "type": "float"
+            },
+            "field2": {
+                "type": "string"
+            }
+        },
+        "resource2": {
+            "field1": {
+                "type": "int"
+            },
+            "field3": {
+                "type": "bool"
+            }
+        }
     }
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await get_schema(["resource1", "resource2"], ["field1"])
 
       assert err == ""
@@ -887,10 +999,19 @@ class TestGetSchemaAdvanced:
   async def test_get_schema_single_resource_dict_extraction(self):
     """Test schema extraction for single resource (dict case)."""
     mock_resources = {
-      "resource1": {"field1": {"type": "float"}, "field2": {"type": "string"}}
+        "resource1": {
+            "field1": {
+                "type": "float"
+            },
+            "field2": {
+                "type": "string"
+            }
+        }
     }
 
-    with patch('src.services.loader.get_resources', new_callable=AsyncMock, return_value=("", mock_resources)):
+    with patch('src.services.loader.get_resources',
+               new_callable=AsyncMock,
+               return_value=("", mock_resources)):
       err, result = await get_schema(["resource1"])
 
       assert err == ""

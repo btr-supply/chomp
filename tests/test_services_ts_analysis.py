@@ -10,16 +10,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 try:
   import polars as pl
-  from src.services.ts_analysis import (
-    ensure_df, add_metrics, get_volatility, get_trend,
-    get_momentum, get_all, get_oprange
-  )
+  from src.services.ts_analysis import (ensure_df, add_metrics, get_volatility,
+                                        get_trend, get_momentum, get_all,
+                                        get_oprange)
   POLARS_AVAILABLE = True
 except ImportError:
   POLARS_AVAILABLE = False
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestEnsureDF:
   """Test ensure_df function."""
 
@@ -35,9 +35,11 @@ class TestEnsureDF:
     """Test ensure_df when DataFrame is already provided."""
     mock_df = Mock(spec=pl.DataFrame)
 
-    err, result = await ensure_df(
-      self.resources, self.fields, self.from_date, self.to_date, df=mock_df
-    )
+    err, result = await ensure_df(self.resources,
+                                  self.fields,
+                                  self.from_date,
+                                  self.to_date,
+                                  df=mock_df)
 
     assert err == ""
     assert result == mock_df
@@ -45,9 +47,8 @@ class TestEnsureDF:
   @pytest.mark.asyncio
   async def test_ensure_df_no_fields(self):
     """Test ensure_df with no fields provided."""
-    err, result = await ensure_df(
-      self.resources, [], self.from_date, self.to_date
-    )
+    err, result = await ensure_df(self.resources, [], self.from_date,
+                                  self.to_date)
 
     assert err == "No fields provided"
     assert isinstance(result, pl.DataFrame)
@@ -57,17 +58,16 @@ class TestEnsureDF:
   async def test_ensure_df_load_data_success(self):
     """Test successful data loading in ensure_df."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [1.0, 2.0],
-      "field2": [3.0, 4.0]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [1.0, 2.0],
+        "field2": [3.0, 4.0]
     })
 
     with patch('src.services.ts_analysis.fit_date_params', return_value=(self.from_date, self.to_date, 'm5', 1000)), \
          patch('src.services.ts_analysis.loader.get_history', new_callable=AsyncMock, return_value=("", mock_df)):
 
-      err, result = await ensure_df(
-        self.resources, self.fields, self.from_date, self.to_date
-      )
+      err, result = await ensure_df(self.resources, self.fields,
+                                    self.from_date, self.to_date)
 
       assert err == ""
       assert isinstance(result, pl.DataFrame)
@@ -79,9 +79,8 @@ class TestEnsureDF:
     with patch('src.services.ts_analysis.fit_date_params', return_value=(self.from_date, self.to_date, 'm5', 1000)), \
          patch('src.services.ts_analysis.loader.get_history', new_callable=AsyncMock, return_value=("Load error", pl.DataFrame())):
 
-      err, result = await ensure_df(
-        self.resources, self.fields, self.from_date, self.to_date
-      )
+      err, result = await ensure_df(self.resources, self.fields,
+                                    self.from_date, self.to_date)
 
       assert err == "Load error"
       assert isinstance(result, pl.DataFrame)
@@ -95,9 +94,8 @@ class TestEnsureDF:
     with patch('src.services.ts_analysis.fit_date_params', return_value=(self.from_date, self.to_date, 'm5', 1000)), \
          patch('src.services.ts_analysis.loader.get_history', new_callable=AsyncMock, return_value=("", empty_df)):
 
-      err, result = await ensure_df(
-        self.resources, self.fields, self.from_date, self.to_date
-      )
+      err, result = await ensure_df(self.resources, self.fields,
+                                    self.from_date, self.to_date)
 
       assert err == "No data found"
       assert isinstance(result, pl.DataFrame)
@@ -109,16 +107,16 @@ class TestEnsureDF:
     with patch('src.services.ts_analysis.fit_date_params', return_value=(self.from_date, self.to_date, 'm5', 1000)), \
          patch('src.services.ts_analysis.loader.get_history', new_callable=AsyncMock, return_value=("", "not_a_dataframe")):
 
-      err, result = await ensure_df(
-        self.resources, self.fields, self.from_date, self.to_date
-      )
+      err, result = await ensure_df(self.resources, self.fields,
+                                    self.from_date, self.to_date)
 
       assert err == "Expected DataFrame from get_history"
       assert isinstance(result, pl.DataFrame)
       assert result.height == 0
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestAddMetrics:
   """Test add_metrics function."""
 
@@ -131,19 +129,23 @@ class TestAddMetrics:
     self.periods = [10, 20]
 
     self.mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [1.0, 2.0],
-      "field2": [3.0, 4.0]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [1.0, 2.0],
+        "field2": [3.0, 4.0]
     })
 
   @pytest.mark.asyncio
   async def test_add_metrics_success(self):
     """Test successful metrics addition."""
+
     def mock_get_metrics(df, col, period):
       return {f"{col}_metric_{period}": pl.Series([1.0, 2.0])}
 
     mock_future = Mock()
-    mock_future.result.return_value = ({"field1_metric_10": pl.Series([1.0, 2.0])}, None)
+    mock_future.result.return_value = ({
+        "field1_metric_10":
+        pl.Series([1.0, 2.0])
+    }, None)
 
     with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("", self.mock_df)), \
          patch('src.services.ts_analysis.numeric_columns', return_value=["field1"]), \
@@ -151,10 +153,10 @@ class TestAddMetrics:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await add_metrics(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', self.periods, None, 6, None, mock_get_metrics
-      )
+      err, result = await add_metrics(self.resources, self.fields,
+                                      self.from_date, self.to_date, 'm5',
+                                      self.periods, None, 6, None,
+                                      mock_get_metrics)
 
       assert err == ""
       assert isinstance(result, pl.DataFrame)
@@ -162,15 +164,18 @@ class TestAddMetrics:
   @pytest.mark.asyncio
   async def test_add_metrics_ensure_df_error(self):
     """Test error handling when ensure_df fails."""
+
     def mock_get_metrics(df, col, period):
       return {}
 
-    with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("Data error", pl.DataFrame())):
+    with patch('src.services.ts_analysis.ensure_df',
+               new_callable=AsyncMock,
+               return_value=("Data error", pl.DataFrame())):
 
-      err, result = await add_metrics(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', self.periods, None, 6, None, mock_get_metrics
-      )
+      err, result = await add_metrics(self.resources, self.fields,
+                                      self.from_date, self.to_date, 'm5',
+                                      self.periods, None, 6, None,
+                                      mock_get_metrics)
 
       assert err == "Data error"
       assert isinstance(result, pl.DataFrame)
@@ -179,6 +184,7 @@ class TestAddMetrics:
   @pytest.mark.asyncio
   async def test_add_metrics_compute_error(self):
     """Test error handling when compute function fails."""
+
     def mock_get_metrics(df, col, period):
       return {}
 
@@ -191,17 +197,18 @@ class TestAddMetrics:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await add_metrics(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', self.periods, None, 6, None, mock_get_metrics
-      )
+      err, result = await add_metrics(self.resources, self.fields,
+                                      self.from_date, self.to_date, 'm5',
+                                      self.periods, None, 6, None,
+                                      mock_get_metrics)
 
       assert err == "Compute error"
       assert isinstance(result, pl.DataFrame)
       assert result.height == 0
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestGetVolatility:
   """Test get_volatility function."""
 
@@ -213,8 +220,8 @@ class TestGetVolatility:
     self.fields = ["price"]
 
     self.mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "price": [100.0, 110.0]
+        "timestamp": [self.from_date, self.to_date],
+        "price": [100.0, 110.0]
     })
 
   @pytest.mark.asyncio
@@ -223,9 +230,8 @@ class TestGetVolatility:
     with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", self.mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("", self.mock_df)):
 
-      err, result = await get_volatility(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_volatility(self.resources, self.fields,
+                                         self.from_date, self.to_date, 'm5')
 
       assert err == ""
       assert isinstance(result, pl.DataFrame)
@@ -233,11 +239,12 @@ class TestGetVolatility:
   @pytest.mark.asyncio
   async def test_get_volatility_add_metrics_error(self):
     """Test error handling when add_metrics fails."""
-    with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("Metrics error", pl.DataFrame())):
+    with patch('src.services.ts_analysis.add_metrics',
+               new_callable=AsyncMock,
+               return_value=("Metrics error", pl.DataFrame())):
 
-      err, result = await get_volatility(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_volatility(self.resources, self.fields,
+                                         self.from_date, self.to_date, 'm5')
 
       assert err == "Metrics error"
       assert isinstance(result, pl.DataFrame)
@@ -249,9 +256,8 @@ class TestGetVolatility:
     with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", self.mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("Format error", None)):
 
-      err, result = await get_volatility(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_volatility(self.resources, self.fields,
+                                         self.from_date, self.to_date, 'm5')
 
       assert err == "Format error"
       assert isinstance(result, pl.DataFrame)
@@ -259,18 +265,20 @@ class TestGetVolatility:
   @pytest.mark.asyncio
   async def test_get_volatility_none_dataframe(self):
     """Test handling of None DataFrame."""
-    with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", None)):
+    with patch('src.services.ts_analysis.add_metrics',
+               new_callable=AsyncMock,
+               return_value=("", None)):
 
-      err, result = await get_volatility(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_volatility(self.resources, self.fields,
+                                         self.from_date, self.to_date, 'm5')
 
       assert err == "Failed to compute volatility metrics"
       assert isinstance(result, pl.DataFrame)
       assert result.height == 0
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestGetTrend:
   """Test get_trend function."""
 
@@ -282,8 +290,8 @@ class TestGetTrend:
     self.fields = ["price"]
 
     self.mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "price": [100.0, 110.0]
+        "timestamp": [self.from_date, self.to_date],
+        "price": [100.0, 110.0]
     })
 
   @pytest.mark.asyncio
@@ -292,9 +300,8 @@ class TestGetTrend:
     with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", self.mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("", self.mock_df)):
 
-      err, result = await get_trend(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_trend(self.resources, self.fields,
+                                    self.from_date, self.to_date, 'm5')
 
       assert err == ""
       assert isinstance(result, pl.DataFrame)
@@ -305,15 +312,19 @@ class TestGetTrend:
     with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", self.mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("", self.mock_df)):
 
-      err, result = await get_trend(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5', format="polars"
-      )
+      err, result = await get_trend(self.resources,
+                                    self.fields,
+                                    self.from_date,
+                                    self.to_date,
+                                    'm5',
+                                    format="polars")
 
       assert err == ""
       assert isinstance(result, pl.DataFrame)
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestGetMomentum:
   """Test get_momentum function."""
 
@@ -325,8 +336,8 @@ class TestGetMomentum:
     self.fields = ["price"]
 
     self.mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "price": [100.0, 110.0]
+        "timestamp": [self.from_date, self.to_date],
+        "price": [100.0, 110.0]
     })
 
   @pytest.mark.asyncio
@@ -335,15 +346,15 @@ class TestGetMomentum:
     with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", self.mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("", self.mock_df)):
 
-      err, result = await get_momentum(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_momentum(self.resources, self.fields,
+                                       self.from_date, self.to_date, 'm5')
 
       assert err == ""
       assert isinstance(result, pl.DataFrame)
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestGetAll:
   """Test get_all function."""
 
@@ -355,8 +366,8 @@ class TestGetAll:
     self.fields = ["price"]
 
     self.mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "price": [100.0, 110.0]
+        "timestamp": [self.from_date, self.to_date],
+        "price": [100.0, 110.0]
     })
 
   @pytest.mark.asyncio
@@ -367,9 +378,8 @@ class TestGetAll:
          patch('src.services.ts_analysis.get_momentum', new_callable=AsyncMock, return_value=("", self.mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("", {"data": "formatted"})):
 
-      err, result = await get_all(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_all(self.resources, self.fields, self.from_date,
+                                  self.to_date, 'm5')
 
       assert err == ""
       assert result == {"data": "formatted"}
@@ -377,11 +387,12 @@ class TestGetAll:
   @pytest.mark.asyncio
   async def test_get_all_volatility_error(self):
     """Test error handling when volatility calculation fails."""
-    with patch('src.services.ts_analysis.get_volatility', new_callable=AsyncMock, return_value=("Volatility error", None)):
+    with patch('src.services.ts_analysis.get_volatility',
+               new_callable=AsyncMock,
+               return_value=("Volatility error", None)):
 
-      err, result = await get_all(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_all(self.resources, self.fields, self.from_date,
+                                  self.to_date, 'm5')
 
       assert err == "Volatility error"
       assert result is None
@@ -392,9 +403,8 @@ class TestGetAll:
     with patch('src.services.ts_analysis.get_volatility', new_callable=AsyncMock, return_value=("", self.mock_df)), \
          patch('src.services.ts_analysis.get_trend', new_callable=AsyncMock, return_value=("Trend error", None)):
 
-      err, result = await get_all(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_all(self.resources, self.fields, self.from_date,
+                                  self.to_date, 'm5')
 
       assert err == "Trend error"
       assert result is None
@@ -406,9 +416,8 @@ class TestGetAll:
          patch('src.services.ts_analysis.get_trend', new_callable=AsyncMock, return_value=("", self.mock_df)), \
          patch('src.services.ts_analysis.get_momentum', new_callable=AsyncMock, return_value=("Momentum error", None)):
 
-      err, result = await get_all(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_all(self.resources, self.fields, self.from_date,
+                                  self.to_date, 'm5')
 
       assert err == "Momentum error"
       assert result is None
@@ -416,11 +425,11 @@ class TestGetAll:
   @pytest.mark.asyncio
   async def test_get_all_exception_handling(self):
     """Test exception handling in get_all."""
-    with patch('src.services.ts_analysis.get_volatility', side_effect=Exception("Test exception")):
+    with patch('src.services.ts_analysis.get_volatility',
+               side_effect=Exception("Test exception")):
 
-      err, result = await get_all(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_all(self.resources, self.fields, self.from_date,
+                                  self.to_date, 'm5')
 
       assert "Error computing metrics: Test exception" in err
       assert result is None
@@ -433,15 +442,15 @@ class TestGetAll:
          patch('src.services.ts_analysis.get_momentum', new_callable=AsyncMock, return_value=("", self.mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("Format error", None)):
 
-      err, result = await get_all(
-        self.resources, self.fields, self.from_date, self.to_date, 'm5'
-      )
+      err, result = await get_all(self.resources, self.fields, self.from_date,
+                                  self.to_date, 'm5')
 
       assert err == "Format error"
       assert result is None
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestGetOprange:
   """Test get_oprange function."""
 
@@ -453,8 +462,8 @@ class TestGetOprange:
     self.fields = ["price"]
 
     self.mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "price": [100.0, 110.0]
+        "timestamp": [self.from_date, self.to_date],
+        "price": [100.0, 110.0]
     })
 
   @pytest.mark.asyncio
@@ -462,10 +471,10 @@ class TestGetOprange:
     """Test successful operating range calculation."""
     mock_future = Mock()
     mock_future.result.return_value = {
-      "price:min": 100.0,
-      "price:max": 110.0,
-      "price:range": 10.0,
-      "price:range_position": 1.0
+        "price:min": 100.0,
+        "price:max": 110.0,
+        "price:range": 10.0,
+        "price:range_position": 1.0
     }
 
     with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("", self.mock_df)), \
@@ -475,9 +484,8 @@ class TestGetOprange:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await get_oprange(
-        self.resources, self.fields, self.from_date, self.to_date
-      )
+      err, result = await get_oprange(self.resources, self.fields,
+                                      self.from_date, self.to_date)
 
       assert err == ""
       assert result == {"data": "formatted"}
@@ -485,11 +493,12 @@ class TestGetOprange:
   @pytest.mark.asyncio
   async def test_get_oprange_ensure_df_error(self):
     """Test error handling when ensure_df fails."""
-    with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("Data error", pl.DataFrame())):
+    with patch('src.services.ts_analysis.ensure_df',
+               new_callable=AsyncMock,
+               return_value=("Data error", pl.DataFrame())):
 
-      err, result = await get_oprange(
-        self.resources, self.fields, self.from_date, self.to_date
-      )
+      err, result = await get_oprange(self.resources, self.fields,
+                                      self.from_date, self.to_date)
 
       assert err == "Data error"
       assert isinstance(result, pl.DataFrame)
@@ -497,11 +506,12 @@ class TestGetOprange:
   @pytest.mark.asyncio
   async def test_get_oprange_none_dataframe(self):
     """Test handling of None DataFrame."""
-    with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("", None)):
+    with patch('src.services.ts_analysis.ensure_df',
+               new_callable=AsyncMock,
+               return_value=("", None)):
 
-      err, result = await get_oprange(
-        self.resources, self.fields, self.from_date, self.to_date
-      )
+      err, result = await get_oprange(self.resources, self.fields,
+                                      self.from_date, self.to_date)
 
       assert err == "Failed to load DataFrame for range analysis"
       assert isinstance(result, pl.DataFrame)
@@ -519,9 +529,8 @@ class TestGetOprange:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await get_oprange(
-        self.resources, self.fields, self.from_date, self.to_date
-      )
+      err, result = await get_oprange(self.resources, self.fields,
+                                      self.from_date, self.to_date)
 
       assert err == "Format error"
       assert isinstance(result, pl.DataFrame)
@@ -554,7 +563,8 @@ class TestTSAnalysisIntegration:
       assert callable(get_oprange)
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestAddMetricsEdgeCases:
   """Test edge cases in add_metrics function."""
 
@@ -569,14 +579,17 @@ class TestAddMetricsEdgeCases:
   @pytest.mark.asyncio
   async def test_add_metrics_none_dataframe_after_ensure(self):
     """Test add_metrics when ensure_df returns None DataFrame."""
+
     def mock_get_metrics(df, col, period):
       return {}
 
-    with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("", None)):
-      err, result = await add_metrics(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', self.periods, None, 6, None, mock_get_metrics
-      )
+    with patch('src.services.ts_analysis.ensure_df',
+               new_callable=AsyncMock,
+               return_value=("", None)):
+      err, result = await add_metrics(self.resources, self.fields,
+                                      self.from_date, self.to_date, 'm5',
+                                      self.periods, None, 6, None,
+                                      mock_get_metrics)
 
       assert err == "Failed to load DataFrame"
       assert isinstance(result, pl.DataFrame)
@@ -586,8 +599,8 @@ class TestAddMetricsEdgeCases:
   async def test_add_metrics_keyerror_handling(self):
     """Test KeyError handling in compute function."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [1.0, 2.0]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [1.0, 2.0]
     })
 
     def mock_get_metrics(df, col, period):
@@ -595,7 +608,8 @@ class TestAddMetricsEdgeCases:
       raise KeyError(f"Column '{col}' not found")
 
     mock_future = Mock()
-    mock_future.result.return_value = ({}, "Required column 'field1' not found in resource resource1")
+    mock_future.result.return_value = (
+        {}, "Required column 'field1' not found in resource resource1")
 
     with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("", mock_df)), \
          patch('src.services.ts_analysis.numeric_columns', return_value=["field1"]), \
@@ -603,10 +617,10 @@ class TestAddMetricsEdgeCases:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await add_metrics(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', self.periods, None, 6, None, mock_get_metrics
-      )
+      err, result = await add_metrics(self.resources, self.fields,
+                                      self.from_date, self.to_date, 'm5',
+                                      self.periods, None, 6, None,
+                                      mock_get_metrics)
 
       assert "Required column 'field1' not found in resource resource1" in err
       assert isinstance(result, pl.DataFrame)
@@ -615,8 +629,8 @@ class TestAddMetricsEdgeCases:
   async def test_add_metrics_expr_series_handling(self):
     """Test handling of pl.Expr objects in metrics."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [1.0, 2.0]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [1.0, 2.0]
     })
 
     def mock_get_metrics(df, col, period):
@@ -624,7 +638,10 @@ class TestAddMetricsEdgeCases:
       return {f"{col}_series": pl.Series("test_series", [3.0, 3.0])}
 
     mock_future = Mock()
-    mock_future.result.return_value = ({"field1_series": pl.Series("test_series", [3.0, 3.0])}, None)
+    mock_future.result.return_value = ({
+        "field1_series":
+        pl.Series("test_series", [3.0, 3.0])
+    }, None)
 
     with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("", mock_df)), \
          patch('src.services.ts_analysis.numeric_columns', return_value=["field1"]), \
@@ -632,10 +649,10 @@ class TestAddMetricsEdgeCases:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await add_metrics(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', self.periods, None, 6, None, mock_get_metrics
-      )
+      err, result = await add_metrics(self.resources, self.fields,
+                                      self.from_date, self.to_date, 'm5',
+                                      self.periods, None, 6, None,
+                                      mock_get_metrics)
 
       assert err == ""
       assert isinstance(result, pl.DataFrame)
@@ -644,8 +661,8 @@ class TestAddMetricsEdgeCases:
   async def test_add_metrics_list_values_handling(self):
     """Test handling of list values in metrics."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [1.0, 2.0]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [1.0, 2.0]
     })
 
     def mock_get_metrics(df, col, period):
@@ -661,16 +678,17 @@ class TestAddMetricsEdgeCases:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await add_metrics(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', self.periods, None, 6, None, mock_get_metrics
-      )
+      err, result = await add_metrics(self.resources, self.fields,
+                                      self.from_date, self.to_date, 'm5',
+                                      self.periods, None, 6, None,
+                                      mock_get_metrics)
 
       assert err == ""
       assert isinstance(result, pl.DataFrame)
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestVolatilityEdgeCases:
   """Test edge cases in get_volatility function."""
 
@@ -684,11 +702,12 @@ class TestVolatilityEdgeCases:
   @pytest.mark.asyncio
   async def test_get_volatility_none_dataframe_post_computation(self):
     """Test get_volatility when add_metrics returns None DataFrame."""
-    with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", None)):
-      err, result = await get_volatility(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', [20], None, 6, "json:row", None
-      )
+    with patch('src.services.ts_analysis.add_metrics',
+               new_callable=AsyncMock,
+               return_value=("", None)):
+      err, result = await get_volatility(self.resources, self.fields,
+                                         self.from_date, self.to_date, 'm5',
+                                         [20], None, 6, "json:row", None)
 
       assert err == "Failed to compute volatility metrics"
       assert isinstance(result, pl.DataFrame)
@@ -698,23 +717,24 @@ class TestVolatilityEdgeCases:
   async def test_get_volatility_non_polars_format_return(self):
     """Test get_volatility with non-polars format returning original DataFrame."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [1.0, 2.0]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [1.0, 2.0]
     })
 
     with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("", {"formatted": "data"})):
 
-      err, result = await get_volatility(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', [20], None, 6, "json:row", None
-      )
+      err, result = await get_volatility(self.resources, self.fields,
+                                         self.from_date, self.to_date, 'm5',
+                                         [20], None, 6, "json:row", None)
 
       assert err == ""
-      assert result.equals(mock_df)  # Should return original df for non-polars format
+      assert result.equals(
+          mock_df)  # Should return original df for non-polars format
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestTrendEdgeCases:
   """Test edge cases in get_trend function."""
 
@@ -728,11 +748,12 @@ class TestTrendEdgeCases:
   @pytest.mark.asyncio
   async def test_get_trend_none_dataframe_post_computation(self):
     """Test get_trend when add_metrics returns None DataFrame."""
-    with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", None)):
-      err, result = await get_trend(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', [20], None, 6, "json:row", None
-      )
+    with patch('src.services.ts_analysis.add_metrics',
+               new_callable=AsyncMock,
+               return_value=("", None)):
+      err, result = await get_trend(self.resources, self.fields,
+                                    self.from_date, self.to_date, 'm5', [20],
+                                    None, 6, "json:row", None)
 
       assert err == "Failed to compute trend metrics"
       assert isinstance(result, pl.DataFrame)
@@ -742,17 +763,16 @@ class TestTrendEdgeCases:
   async def test_get_trend_format_error_handling(self):
     """Test get_trend format error handling."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [1.0, 2.0]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [1.0, 2.0]
     })
 
     with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("Format error", None)):
 
-      err, result = await get_trend(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', [20], None, 6, "json:row", None
-      )
+      err, result = await get_trend(self.resources, self.fields,
+                                    self.from_date, self.to_date, 'm5', [20],
+                                    None, 6, "json:row", None)
 
       assert err == "Format error"
       assert isinstance(result, pl.DataFrame)
@@ -761,23 +781,24 @@ class TestTrendEdgeCases:
   async def test_get_trend_non_polars_format_return(self):
     """Test get_trend with non-polars format returning original DataFrame."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [1.0, 2.0]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [1.0, 2.0]
     })
 
     with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("", {"formatted": "data"})):
 
-      err, result = await get_trend(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', [20], None, 6, "json:row", None
-      )
+      err, result = await get_trend(self.resources, self.fields,
+                                    self.from_date, self.to_date, 'm5', [20],
+                                    None, 6, "json:row", None)
 
       assert err == ""
-      assert result.equals(mock_df)  # Should return original df for non-polars format
+      assert result.equals(
+          mock_df)  # Should return original df for non-polars format
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestMomentumEdgeCases:
   """Test edge cases in get_momentum function."""
 
@@ -791,11 +812,12 @@ class TestMomentumEdgeCases:
   @pytest.mark.asyncio
   async def test_get_momentum_none_dataframe_post_computation(self):
     """Test get_momentum when add_metrics returns None DataFrame."""
-    with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", None)):
-      err, result = await get_momentum(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', [20], None, 6, "json:row", None
-      )
+    with patch('src.services.ts_analysis.add_metrics',
+               new_callable=AsyncMock,
+               return_value=("", None)):
+      err, result = await get_momentum(self.resources, self.fields,
+                                       self.from_date, self.to_date, 'm5',
+                                       [20], None, 6, "json:row", None)
 
       assert err == "Failed to compute momentum metrics"
       assert isinstance(result, pl.DataFrame)
@@ -805,17 +827,16 @@ class TestMomentumEdgeCases:
   async def test_get_momentum_format_error_handling(self):
     """Test get_momentum format error handling."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [1.0, 2.0]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [1.0, 2.0]
     })
 
     with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("Format error", None)):
 
-      err, result = await get_momentum(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', [20], None, 6, "json:row", None
-      )
+      err, result = await get_momentum(self.resources, self.fields,
+                                       self.from_date, self.to_date, 'm5',
+                                       [20], None, 6, "json:row", None)
 
       assert err == "Format error"
       assert isinstance(result, pl.DataFrame)
@@ -824,23 +845,24 @@ class TestMomentumEdgeCases:
   async def test_get_momentum_non_polars_format_return(self):
     """Test get_momentum with non-polars format returning original DataFrame."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [1.0, 2.0]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [1.0, 2.0]
     })
 
     with patch('src.services.ts_analysis.add_metrics', new_callable=AsyncMock, return_value=("", mock_df)), \
          patch('src.services.ts_analysis.loader.format_table', return_value=("", {"formatted": "data"})):
 
-      err, result = await get_momentum(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', [20], None, 6, "json:row", None
-      )
+      err, result = await get_momentum(self.resources, self.fields,
+                                       self.from_date, self.to_date, 'm5',
+                                       [20], None, 6, "json:row", None)
 
       assert err == ""
-      assert result.equals(mock_df)  # Should return original df for non-polars format
+      assert result.equals(
+          mock_df)  # Should return original df for non-polars format
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestGetAllEdgeCases:
   """Test edge cases in get_all function."""
 
@@ -858,16 +880,16 @@ class TestGetAllEdgeCases:
          patch('src.services.ts_analysis.get_trend', new_callable=AsyncMock, return_value=("", None)), \
          patch('src.services.ts_analysis.get_momentum', new_callable=AsyncMock, return_value=("", None)):
 
-      err, result = await get_all(
-        self.resources, self.fields, self.from_date, self.to_date,
-        'm5', [20], None, 6, None, "json:row"
-      )
+      err, result = await get_all(self.resources, self.fields, self.from_date,
+                                  self.to_date, 'm5', [20], None, 6, None,
+                                  "json:row")
 
       assert err == "Failed to compute all metrics"
       assert result is None
 
 
-@pytest.mark.skipif(not POLARS_AVAILABLE, reason="Polars dependencies not available")
+@pytest.mark.skipif(not POLARS_AVAILABLE,
+                    reason="Polars dependencies not available")
 class TestGetOprangeComprehensive:
   """Comprehensive tests for get_oprange function."""
 
@@ -883,18 +905,19 @@ class TestGetOprangeComprehensive:
     """Test comprehensive functionality of get_oprange."""
     # Create a DataFrame with enough data for ATR calculation
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date + pl.duration(minutes=i*5) for i in range(20)],
-      "field1": [1.0 + i*0.1 for i in range(20)]  # Increasing values
+        "timestamp":
+        [self.from_date + pl.duration(minutes=i * 5) for i in range(20)],
+        "field1": [1.0 + i * 0.1 for i in range(20)]  # Increasing values
     })
 
     mock_future = Mock()
     mock_future.result.return_value = {
-      "field1:min": 1.0,
-      "field1:max": 2.9,
-      "field1:range": 1.9,
-      "field1:range_position": 0.9,
-      "field1:atr_14": 0.1,
-      "field1:current": 2.9
+        "field1:min": 1.0,
+        "field1:max": 2.9,
+        "field1:range": 1.9,
+        "field1:range_position": 0.9,
+        "field1:atr_14": 0.1,
+        "field1:current": 2.9
     }
 
     with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("", mock_df)), \
@@ -904,10 +927,9 @@ class TestGetOprangeComprehensive:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await get_oprange(
-        self.resources, self.fields, self.from_date, self.to_date,
-        6, None, "json:row"
-      )
+      err, result = await get_oprange(self.resources, self.fields,
+                                      self.from_date, self.to_date, 6, None,
+                                      "json:row")
 
       assert err == ""
       assert result == {"formatted": "data"}
@@ -915,10 +937,7 @@ class TestGetOprangeComprehensive:
   @pytest.mark.asyncio
   async def test_get_oprange_empty_series_handling(self):
     """Test get_oprange with empty series handling."""
-    mock_df = pl.DataFrame({
-      "timestamp": [],
-      "field1": []
-    })
+    mock_df = pl.DataFrame({"timestamp": [], "field1": []})
 
     mock_future = Mock()
     mock_future.result.return_value = {}  # Empty metrics for empty series
@@ -930,10 +949,9 @@ class TestGetOprangeComprehensive:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await get_oprange(
-        self.resources, self.fields, self.from_date, self.to_date,
-        6, None, "json:row"
-      )
+      err, result = await get_oprange(self.resources, self.fields,
+                                      self.from_date, self.to_date, 6, None,
+                                      "json:row")
 
       assert err == ""
       assert result == {"formatted": "data"}
@@ -942,8 +960,8 @@ class TestGetOprangeComprehensive:
   async def test_get_oprange_non_numeric_values(self):
     """Test get_oprange with non-numeric values."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": ["text", "more_text"]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": ["text", "more_text"]
     })
 
     mock_future = Mock()
@@ -956,10 +974,9 @@ class TestGetOprangeComprehensive:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await get_oprange(
-        self.resources, self.fields, self.from_date, self.to_date,
-        6, None, "json:row"
-      )
+      err, result = await get_oprange(self.resources, self.fields,
+                                      self.from_date, self.to_date, 6, None,
+                                      "json:row")
 
       assert err == ""
       assert result == {"formatted": "data"}
@@ -968,23 +985,24 @@ class TestGetOprangeComprehensive:
   async def test_get_oprange_atr_calculation_exception(self):
     """Test get_oprange when ATR calculation fails."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [1.0, 2.0]
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [1.0, 2.0]
     })
 
     def mock_compute_with_atr_exception(df, col):
       # Simulate ATR calculation failure
       return {
-        f"{col}:min": 1.0,
-        f"{col}:max": 2.0,
-        f"{col}:range": 1.0,
-        f"{col}:range_position": 1.0,
-        f"{col}:atr_14": None,  # ATR failed
-        f"{col}:current": 2.0
+          f"{col}:min": 1.0,
+          f"{col}:max": 2.0,
+          f"{col}:range": 1.0,
+          f"{col}:range_position": 1.0,
+          f"{col}:atr_14": None,  # ATR failed
+          f"{col}:current": 2.0
       }
 
     mock_future = Mock()
-    mock_future.result.return_value = mock_compute_with_atr_exception(mock_df, "field1")
+    mock_future.result.return_value = mock_compute_with_atr_exception(
+        mock_df, "field1")
 
     with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("", mock_df)), \
          patch('src.services.ts_analysis.numeric_columns', return_value=["field1"]), \
@@ -993,10 +1011,9 @@ class TestGetOprangeComprehensive:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await get_oprange(
-        self.resources, self.fields, self.from_date, self.to_date,
-        6, None, "json:row"
-      )
+      err, result = await get_oprange(self.resources, self.fields,
+                                      self.from_date, self.to_date, 6, None,
+                                      "json:row")
 
       assert err == ""
       assert result == {"formatted": "data"}
@@ -1005,18 +1022,18 @@ class TestGetOprangeComprehensive:
   async def test_get_oprange_zero_range_calculation(self):
     """Test get_oprange with zero range (same min/max values)."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "field1": [2.0, 2.0]  # Same values = zero range
+        "timestamp": [self.from_date, self.to_date],
+        "field1": [2.0, 2.0]  # Same values = zero range
     })
 
     mock_future = Mock()
     mock_future.result.return_value = {
-      "field1:min": 2.0,
-      "field1:max": 2.0,
-      "field1:range": 0.0,
-      "field1:range_position": None,  # Should be None for zero range
-      "field1:atr_14": None,
-      "field1:current": 2.0
+        "field1:min": 2.0,
+        "field1:max": 2.0,
+        "field1:range": 0.0,
+        "field1:range_position": None,  # Should be None for zero range
+        "field1:atr_14": None,
+        "field1:current": 2.0
     }
 
     with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("", mock_df)), \
@@ -1026,10 +1043,9 @@ class TestGetOprangeComprehensive:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await get_oprange(
-        self.resources, self.fields, self.from_date, self.to_date,
-        6, None, "json:row"
-      )
+      err, result = await get_oprange(self.resources, self.fields,
+                                      self.from_date, self.to_date, 6, None,
+                                      "json:row")
 
       assert err == ""
       assert result == {"formatted": "data"}
@@ -1038,16 +1054,16 @@ class TestGetOprangeComprehensive:
   async def test_get_oprange_multiple_resources(self):
     """Test get_oprange with multiple resources."""
     mock_df = pl.DataFrame({
-      "timestamp": [self.from_date, self.to_date],
-      "resource1.field1": [1.0, 2.0],
-      "resource2.field1": [3.0, 4.0]
+        "timestamp": [self.from_date, self.to_date],
+        "resource1.field1": [1.0, 2.0],
+        "resource2.field1": [3.0, 4.0]
     })
 
     mock_future = Mock()
     mock_future.result.return_value = {
-      "resource1.field1:min": 1.0,
-      "resource1.field1:max": 2.0,
-      "resource1.field1:current": 2.0
+        "resource1.field1:min": 1.0,
+        "resource1.field1:max": 2.0,
+        "resource1.field1:current": 2.0
     }
 
     with patch('src.services.ts_analysis.ensure_df', new_callable=AsyncMock, return_value=("", mock_df)), \
@@ -1057,10 +1073,9 @@ class TestGetOprangeComprehensive:
 
       mock_state.thread_pool.submit.return_value = mock_future
 
-      err, result = await get_oprange(
-        ["resource1", "resource2"], self.fields, self.from_date, self.to_date,
-        6, None, "json:row"
-      )
+      err, result = await get_oprange(["resource1", "resource2"], self.fields,
+                                      self.from_date, self.to_date, 6, None,
+                                      "json:row")
 
       assert err == ""
       assert result == {"formatted": "data"}

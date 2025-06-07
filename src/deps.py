@@ -4,7 +4,10 @@
 import importlib
 from typing import Optional, Any
 
-def lazy_import(module_name: str, package: Optional[str] = None, alias: Optional[str] = None) -> Optional[Any]:
+
+def lazy_import(module_name: str,
+                package: Optional[str] = None,
+                alias: Optional[str] = None) -> Optional[Any]:
   """
   Lazily import a module with helpful error message if missing.
 
@@ -27,10 +30,9 @@ def lazy_import(module_name: str, package: Optional[str] = None, alias: Optional
   except ImportError:
     install_name = package or module_name
     extra_msg = f" or 'pip install chomp[{alias}]'" if alias else ""
-    raise ImportError(
-      f"Missing optional dependency '{module_name}'. "
-      f"Install with 'pip install {install_name}'{extra_msg}"
-    )
+    raise ImportError(f"Missing optional dependency '{module_name}'. "
+                      f"Install with 'pip install {install_name}'{extra_msg}")
+
 
 def safe_import(module_name: str) -> Optional[Any]:
   """

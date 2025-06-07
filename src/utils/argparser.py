@@ -6,6 +6,7 @@ from dotenv import dotenv_values
 from .types import is_bool
 from .format import prettify
 
+
 class ArgParser(ArgumentParser):
 
   info: dict[str, tuple] = {}
@@ -31,7 +32,8 @@ class ArgParser(ArgumentParser):
         action.type = type(action.default)
       else:
         action.type = str  # Default to str when no type and no default
-    self.info[action.dest] = (action.type, action.default) # arg type and default value
+    self.info[action.dest] = (action.type, action.default
+                              )  # arg type and default value
     return action
 
   def get_info(self, arg_name: str) -> Optional[tuple]:
@@ -41,20 +43,20 @@ class ArgParser(ArgumentParser):
     self.parsed = super().parse_args(*args, **kwargs)
     return self.parsed
 
-  def argument_tuple_to_kwargs(self, arg_tuple: tuple) -> tuple[Any, dict[str, Any]]:
+  def argument_tuple_to_kwargs(self,
+                               arg_tuple: tuple) -> tuple[Any, dict[str, Any]]:
     names_tuple, arg_type, default, action, help_str = arg_tuple
     args = names_tuple
-    kwargs = {
-      "default": default,
-      "help": help_str
-    }
+    kwargs = {"default": default, "help": help_str}
     if arg_type and not action:
       kwargs["type"] = arg_type
     if action:
       kwargs["action"] = action
     return args, kwargs
 
-  def add_arguments(self, arguments: list[tuple], group: Optional[_ArgumentGroup]=None) -> None:
+  def add_arguments(self,
+                    arguments: list[tuple],
+                    group: Optional[_ArgumentGroup] = None) -> None:
     for arg_tuple in arguments:
       args, kwargs = self.argument_tuple_to_kwargs(arg_tuple)
       if group:
@@ -69,7 +71,7 @@ class ArgParser(ArgumentParser):
     for group_name, arguments in groups.items():
       self.add_group(group_name, arguments)
 
-  def load_env(self, path: Optional[str]=None) -> Any:
+  def load_env(self, path: Optional[str] = None) -> Any:
     if not self.parsed:
       self.parse_args()
     env_file = dotenv_values(path or self.parsed.env)
@@ -83,21 +85,24 @@ class ArgParser(ArgumentParser):
       dotenv_val = env_file.get(k)
       env_os_val = env.get(k)
       if dotenv_val:
-        selected = arg_type(dotenv_val) if not isinstance(arg_type, type) or arg_type is not bool else dotenv_val.lower() == "true"
+        selected = arg_type(dotenv_val) if not isinstance(
+            arg_type,
+            type) or arg_type is not bool else dotenv_val.lower() == "true"
         self.origin[k_lower] = ".env file"
       elif env_os_val:
-        selected = arg_type(env_os_val) if not isinstance(arg_type, type) or arg_type is not bool else env_os_val.lower() == "true"
+        selected = arg_type(env_os_val) if not isinstance(
+            arg_type,
+            type) or arg_type is not bool else env_os_val.lower() == "true"
         self.origin[k_lower] = "os env"
       else:
         selected = v
-        env[k.upper()] = str(v) # inject into env for naive access
-        self.origin[k_lower] = "cli" # if is_default else "cli"
+        env[k.upper()] = str(v)  # inject into env for naive access
+        self.origin[k_lower] = "cli"  # if is_default else "cli"
       setattr(self.parsed, k_lower, selected)
     return self.parsed
 
   def pretty(self) -> str:
-    rows = [
-      [arg, getattr(self.parsed, arg), self.origin.get(arg, "unknown")]
-      for arg in vars(self.parsed)
-    ]
+    rows = [[arg,
+             getattr(self.parsed, arg),
+             self.origin.get(arg, "unknown")] for arg in vars(self.parsed)]
     return prettify(data=rows, headers=["Name", "Value", "Source"])

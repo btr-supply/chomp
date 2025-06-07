@@ -68,10 +68,10 @@ def test_numeric_columns_function():
 
   # Create a test DataFrame with mixed column types
   df = pl.DataFrame({
-    "ts": ["2023-01-01", "2023-01-02", "2023-01-03"],
-    "value": [1.0, 2.0, 3.0],
-    "count": [10, 20, 30],
-    "name": ["a", "b", "c"]
+      "ts": ["2023-01-01", "2023-01-02", "2023-01-03"],
+      "value": [1.0, 2.0, 3.0],
+      "count": [10, 20, 30],
+      "name": ["a", "b", "c"]
   })
 
   # Test numeric columns extraction
@@ -221,19 +221,22 @@ class TestNormalize:
     """Test normalization with constant values"""
     data = [5, 5, 5, 5]
     result = normalize(data)
-    np.testing.assert_array_equal(result, [0, 0, 0, 0])  # All should be min_val
+    np.testing.assert_array_equal(result,
+                                  [0, 0, 0, 0])  # All should be min_val
 
   def test_constant_array_custom_range(self):
     """Test normalization with constant values and custom range"""
     data = [5, 5, 5, 5]
     result = normalize(data, min_val=2, max_val=8)
-    np.testing.assert_array_equal(result, [2, 2, 2, 2])  # All should be min_val
+    np.testing.assert_array_equal(result,
+                                  [2, 2, 2, 2])  # All should be min_val
 
   def test_standardization_constant_array(self):
     """Test standardization with constant values (std=0)"""
     data = [5, 5, 5, 5]
     result = normalize(data, standardize=True)
-    np.testing.assert_array_equal(result, [0, 0, 0, 0])  # Should be mean-centered
+    np.testing.assert_array_equal(result,
+                                  [0, 0, 0, 0])  # Should be mean-centered
 
   def test_nan_handling(self):
     """Test handling of NaN and infinite values"""
@@ -270,9 +273,9 @@ class TestNumericColumns:
   def test_all_numeric_columns(self):
     """Test DataFrame with all numeric columns"""
     df = pl.DataFrame({
-      "int_col": [1, 2, 3],
-      "float_col": [1.1, 2.2, 3.3],
-      "bool_col": [True, False, True]
+        "int_col": [1, 2, 3],
+        "float_col": [1.1, 2.2, 3.3],
+        "bool_col": [True, False, True]
     })
     result = numeric_columns(df)
     # Polars doesn't consider bool as numeric, only int and float
@@ -282,10 +285,10 @@ class TestNumericColumns:
   def test_mixed_columns(self):
     """Test DataFrame with mixed column types"""
     df = pl.DataFrame({
-      "numeric": [1, 2, 3],
-      "string": ["a", "b", "c"],
-      "float": [1.1, 2.2, 3.3],
-      "text": ["x", "y", "z"]
+        "numeric": [1, 2, 3],
+        "string": ["a", "b", "c"],
+        "float": [1.1, 2.2, 3.3],
+        "text": ["x", "y", "z"]
     })
     result = numeric_columns(df)
     assert set(result) == {"numeric", "float"}
@@ -293,9 +296,9 @@ class TestNumericColumns:
   def test_exclude_ts_column(self):
     """Test that 'ts' column is excluded by default"""
     df = pl.DataFrame({
-      "ts": [1, 2, 3],
-      "value": [1.1, 2.2, 3.3],
-      "count": [10, 20, 30]
+        "ts": [1, 2, 3],
+        "value": [1.1, 2.2, 3.3],
+        "count": [10, 20, 30]
     })
     result = numeric_columns(df)
     assert set(result) == {"value", "count"}
@@ -304,10 +307,10 @@ class TestNumericColumns:
   def test_custom_exclude_columns(self):
     """Test with custom exclude columns"""
     df = pl.DataFrame({
-      "id": [1, 2, 3],
-      "value": [1.1, 2.2, 3.3],
-      "count": [10, 20, 30],
-      "name": ["a", "b", "c"]
+        "id": [1, 2, 3],
+        "value": [1.1, 2.2, 3.3],
+        "count": [10, 20, 30],
+        "name": ["a", "b", "c"]
     })
     result = numeric_columns(df, exclude_columns=["id", "name"])
     assert set(result) == {"value", "count"}
@@ -320,19 +323,13 @@ class TestNumericColumns:
 
   def test_only_excluded_columns(self):
     """Test DataFrame where all numeric columns are excluded"""
-    df = pl.DataFrame({
-      "ts": [1, 2, 3],
-      "text": ["a", "b", "c"]
-    })
+    df = pl.DataFrame({"ts": [1, 2, 3], "text": ["a", "b", "c"]})
     result = numeric_columns(df)
     assert result == []
 
   def test_no_numeric_columns(self):
     """Test DataFrame with no numeric columns"""
-    df = pl.DataFrame({
-      "text1": ["a", "b", "c"],
-      "text2": ["x", "y", "z"]
-    })
+    df = pl.DataFrame({"text1": ["a", "b", "c"], "text2": ["x", "y", "z"]})
     result = numeric_columns(df)
     assert result == []
 

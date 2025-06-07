@@ -20,7 +20,8 @@ if CLICKHOUSE_AVAILABLE:
   from src.model import Ingester  # noqa: E402
 
 
-@pytest.mark.skipif(not CLICKHOUSE_AVAILABLE, reason="ClickHouse dependencies not available (asynch)")
+@pytest.mark.skipif(not CLICKHOUSE_AVAILABLE,
+                    reason="ClickHouse dependencies not available (asynch)")
 class TestClickHouseAdapter:
   """Test ClickHouse adapter functionality."""
 
@@ -57,14 +58,16 @@ class TestClickHouseAdapter:
   @pytest.mark.asyncio
   async def test_connect_class_method(self):
     """Test ClickHouse connect class method."""
-    with patch.dict(env, {
-      'CLICKHOUSE_HOST': 'envhost',
-      'CLICKHOUSE_PORT': '9000',
-      'CLICKHOUSE_DB': 'envdb',
-      'DB_RW_USER': 'envuser',
-      'DB_RW_PASS': 'envpass'
-    }):
-      with patch.object(ClickHouse, 'ensure_connected', new_callable=AsyncMock) as mock_ensure:
+    with patch.dict(
+        env, {
+            'CLICKHOUSE_HOST': 'envhost',
+            'CLICKHOUSE_PORT': '9000',
+            'CLICKHOUSE_DB': 'envdb',
+            'DB_RW_USER': 'envuser',
+            'DB_RW_PASS': 'envpass'
+        }):
+      with patch.object(ClickHouse, 'ensure_connected',
+                        new_callable=AsyncMock) as mock_ensure:
         adapter = await ClickHouse.connect()
 
         assert adapter.host == 'envhost'
@@ -77,14 +80,13 @@ class TestClickHouseAdapter:
   @pytest.mark.asyncio
   async def test_connect_with_parameters(self):
     """Test ClickHouse connect with explicit parameters."""
-    with patch.object(ClickHouse, 'ensure_connected', new_callable=AsyncMock) as mock_ensure:
-      adapter = await ClickHouse.connect(
-        host="testhost",
-        port=9000,
-        db="testdb",
-        user="testuser",
-        password="testpass"
-      )
+    with patch.object(ClickHouse, 'ensure_connected',
+                      new_callable=AsyncMock) as mock_ensure:
+      adapter = await ClickHouse.connect(host="testhost",
+                                         port=9000,
+                                         db="testdb",
+                                         user="testuser",
+                                         password="testpass")
 
       assert adapter.host == "testhost"
       assert adapter.port == 9000
@@ -136,7 +138,11 @@ class TestClickHouseAdapter:
   @pytest.mark.asyncio
   async def test_ensure_connected_success(self):
     """Test successful connection establishment."""
-    adapter = ClickHouse(host="localhost", port=9000, db="testdb", user="testuser", password="testpass")
+    adapter = ClickHouse(host="localhost",
+                         port=9000,
+                         db="testdb",
+                         user="testuser",
+                         password="testpass")
 
     mock_conn = AsyncMock()
     mock_cursor = AsyncMock()
@@ -147,13 +153,11 @@ class TestClickHouseAdapter:
 
       await adapter.ensure_connected()
 
-      mock_connect.assert_called_once_with(
-        host="localhost",
-        port=9000,
-        database="testdb",
-        user="testuser",
-        password="testpass"
-      )
+      mock_connect.assert_called_once_with(host="localhost",
+                                           port=9000,
+                                           database="testdb",
+                                           user="testuser",
+                                           password="testpass")
       assert adapter.conn == mock_conn
       assert adapter.cursor == mock_cursor
       mock_log_info.assert_called_once()
@@ -161,7 +165,11 @@ class TestClickHouseAdapter:
   @pytest.mark.asyncio
   async def test_ensure_connected_database_not_exist(self):
     """Test connection when database doesn't exist."""
-    adapter = ClickHouse(host="localhost", port=9000, db="nonexistent", user="testuser", password="testpass")
+    adapter = ClickHouse(host="localhost",
+                         port=9000,
+                         db="nonexistent",
+                         user="testuser",
+                         password="testpass")
 
     mock_temp_conn = AsyncMock()
     mock_temp_cursor = AsyncMock()
@@ -177,9 +185,7 @@ class TestClickHouseAdapter:
          patch('src.adapters.clickhouse.log_info'):
 
       mock_connect.side_effect = [
-        Exception("Database doesn't exist"),
-        mock_temp_conn,
-        mock_final_conn
+          Exception("Database doesn't exist"), mock_temp_conn, mock_final_conn
       ]
 
       await adapter.ensure_connected()
@@ -187,7 +193,8 @@ class TestClickHouseAdapter:
       # Should create database and reconnect
       assert mock_connect.call_count == 3
       mock_log_warn.assert_called_once()
-      mock_temp_cursor.execute.assert_called_once_with("CREATE DATABASE IF NOT EXISTS nonexistent")
+      mock_temp_cursor.execute.assert_called_once_with(
+          "CREATE DATABASE IF NOT EXISTS nonexistent")
       assert adapter.conn == mock_final_conn
       assert adapter.cursor == mock_final_cursor
 
@@ -196,7 +203,9 @@ class TestClickHouseAdapter:
     """Test connection with other errors."""
     adapter = ClickHouse()
 
-    with patch('src.adapters.clickhouse.connect', new_callable=AsyncMock, side_effect=Exception("Connection refused")):
+    with patch('src.adapters.clickhouse.connect',
+               new_callable=AsyncMock,
+               side_effect=Exception("Connection refused")):
       with pytest.raises(ValueError) as exc_info:
         await adapter.ensure_connected()
 
@@ -207,12 +216,12 @@ class TestClickHouseAdapter:
     """Test getting databases."""
     adapter = ClickHouse()
     mock_cursor = AsyncMock()
-    mock_cursor.fetchall.return_value = [("db1",), ("db2",)]
+    mock_cursor.fetchall.return_value = [("db1", ), ("db2", )]
     adapter.cursor = mock_cursor
 
     result = await adapter.get_dbs()
 
-    assert result == [("db1",), ("db2",)]
+    assert result == [("db1", ), ("db2", )]
     mock_cursor.execute.assert_called_once_with("SHOW DATABASES")
 
   @pytest.mark.asyncio
@@ -237,7 +246,9 @@ class TestClickHouseAdapter:
     adapter.cursor = mock_cursor
 
     # First call fails, second succeeds
-    mock_cursor.execute.side_effect = [Exception("Temporary error"), None, None]
+    mock_cursor.execute.side_effect = [
+        Exception("Temporary error"), None, None
+    ]
 
     with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep, \
          patch('src.adapters.clickhouse.log_warn') as mock_log_warn:
@@ -278,7 +289,8 @@ class TestClickHouseAdapter:
     adapter = ClickHouse()
     adapter.conn = None
 
-    with patch.object(adapter, 'connect', new_callable=AsyncMock) as mock_connect:
+    with patch.object(adapter, 'connect',
+                      new_callable=AsyncMock) as mock_connect:
       await adapter.use_db("new_db")
 
       mock_connect.assert_called_once_with(db="new_db")
@@ -346,7 +358,13 @@ class TestClickHouseAdapter:
 
     mock_ingester = Mock(spec=Ingester)
     mock_ingester.name = "test_table"
-    mock_ingester.last_ingested = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    mock_ingester.last_ingested = datetime(2023,
+                                           1,
+                                           1,
+                                           12,
+                                           0,
+                                           0,
+                                           tzinfo=timezone.utc)
 
     mock_field = Mock()
     mock_field.name = "field1"
@@ -400,8 +418,8 @@ class TestClickHouseAdapter:
     mock_ingester.fields = [mock_field]
 
     values = [
-      (datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 100),
-      (datetime(2023, 1, 1, 12, 1, 0, tzinfo=timezone.utc), 200),
+        (datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 100),
+        (datetime(2023, 1, 1, 12, 1, 0, tzinfo=timezone.utc), 200),
     ]
 
     await adapter.insert_many(mock_ingester, values)
@@ -414,8 +432,8 @@ class TestClickHouseAdapter:
     adapter = ClickHouse()
     mock_cursor = AsyncMock()
     mock_cursor.fetchall.return_value = [
-      ("col1", "Int32", ""),
-      ("col2", "String", ""),
+        ("col1", "Int32", ""),
+        ("col2", "String", ""),
     ]
     adapter.cursor = mock_cursor
 
@@ -429,7 +447,11 @@ class TestClickHouseAdapter:
     """Test getting cache columns."""
     adapter = ClickHouse()
 
-    with patch.object(adapter, 'get_columns', new_callable=AsyncMock, return_value=[("ts", "DateTime", ""), ("field1", "Int32", "")]):
+    with patch.object(adapter,
+                      'get_columns',
+                      new_callable=AsyncMock,
+                      return_value=[("ts", "DateTime", ""),
+                                    ("field1", "Int32", "")]):
       columns = await adapter.get_cache_columns("test_table")
 
       assert columns == ["field1"]  # Should exclude 'ts'
@@ -440,19 +462,21 @@ class TestClickHouseAdapter:
     adapter = ClickHouse()
     mock_cursor = AsyncMock()
     mock_cursor.fetchall.return_value = [
-      (datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 100),
-      (datetime(2023, 1, 1, 12, 5, 0, tzinfo=timezone.utc), 200),
+        (datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 100),
+        (datetime(2023, 1, 1, 12, 5, 0, tzinfo=timezone.utc), 200),
     ]
     adapter.cursor = mock_cursor
 
-    with patch.object(adapter, 'get_cache_columns', new_callable=AsyncMock, return_value=["field1"]):
+    with patch.object(adapter,
+                      'get_cache_columns',
+                      new_callable=AsyncMock,
+                      return_value=["field1"]):
       columns, rows = await adapter.fetch(
-        "test_table",
-        from_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
-        to_date=datetime(2023, 1, 2, tzinfo=timezone.utc),
-        aggregation_interval="m5",
-        columns=["field1"]
-      )
+          "test_table",
+          from_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+          to_date=datetime(2023, 1, 2, tzinfo=timezone.utc),
+          aggregation_interval="m5",
+          columns=["field1"])
 
       assert "ts" in columns
       assert "field1" in columns
@@ -464,12 +488,15 @@ class TestClickHouseAdapter:
     """Test fetching batch data."""
     adapter = ClickHouse()
 
-    with patch.object(adapter, 'fetch', new_callable=AsyncMock, return_value=(["ts", "field1"], [(datetime.now(), 100)])) as mock_fetch:
+    with patch.object(adapter,
+                      'fetch',
+                      new_callable=AsyncMock,
+                      return_value=(["ts", "field1"], [(datetime.now(), 100)
+                                                       ])) as mock_fetch:
       columns, rows = await adapter.fetch_batch(
-        ["table1", "table2"],
-        from_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
-        to_date=datetime(2023, 1, 2, tzinfo=timezone.utc)
-      )
+          ["table1", "table2"],
+          from_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+          to_date=datetime(2023, 1, 2, tzinfo=timezone.utc))
 
       # Should fetch from each table and combine results
       assert mock_fetch.call_count == 2
@@ -481,12 +508,12 @@ class TestClickHouseAdapter:
     """Test fetch all with custom query."""
     adapter = ClickHouse()
     mock_cursor = AsyncMock()
-    mock_cursor.fetchall.return_value = [("result1",), ("result2",)]
+    mock_cursor.fetchall.return_value = [("result1", ), ("result2", )]
     adapter.cursor = mock_cursor
 
     result = await adapter.fetch_all("SELECT * FROM test_table")
 
-    assert result == [("result1",), ("result2",)]
+    assert result == [("result1", ), ("result2", )]
     mock_cursor.execute.assert_called_once_with("SELECT * FROM test_table")
 
   @pytest.mark.asyncio
@@ -494,7 +521,7 @@ class TestClickHouseAdapter:
     """Test listing tables."""
     adapter = ClickHouse()
     mock_cursor = AsyncMock()
-    mock_cursor.fetchall.return_value = [("table1",), ("table2",)]
+    mock_cursor.fetchall.return_value = [("table1", ), ("table2", )]
     adapter.cursor = mock_cursor
 
     tables = await adapter.list_tables()

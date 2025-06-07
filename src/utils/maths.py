@@ -2,6 +2,7 @@ import math
 import numpy as np
 import polars as pl
 
+
 def round_sigfig(value: float, precision: int = 6) -> float:
   """
   Round a number to a specified number of significant figures.
@@ -22,13 +23,16 @@ def round_sigfig(value: float, precision: int = 6) -> float:
     return 0
   value = float(value)
   precision = int(precision)
-  return round(value, -int(math.floor(math.log10(abs(value)))) + (precision - 1))
+  return round(value,
+               -int(math.floor(math.log10(abs(value)))) + (precision - 1))
+
 
 def symlog(s):
   """Symmetrical log transformation"""
   if hasattr(s, 'to_numpy'):
     s = s.to_numpy()
   return np.sign(s) * np.log1p(np.abs(s))
+
 
 def normalize(s, min_val=0, max_val=1, scale='linear', standardize=False):
   """
@@ -70,10 +74,13 @@ def normalize(s, min_val=0, max_val=1, scale='linear', standardize=False):
     return np.full_like(s, min_val)  # Avoid division by zero
   return min_val + (s - s_min) * (max_val - min_val) / (s_max - s_min)
 
-def numeric_columns(df: pl.DataFrame, exclude_columns: list[str] = ['ts']) -> list[str]:
+
+def numeric_columns(df: pl.DataFrame,
+                    exclude_columns: list[str] = ['ts']) -> list[str]:
   """Filter out non-numeric columns and specified columns from the DataFrame"""
   numeric_columns = []
   for col in df.columns:
-    if col not in exclude_columns and df[col].dtype.is_numeric(): # native + polars
+    if col not in exclude_columns and df[col].dtype.is_numeric(
+    ):  # native + polars
       numeric_columns.append(col)
   return numeric_columns

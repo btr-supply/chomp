@@ -13,11 +13,7 @@ class TestResourceFieldModel:
 
   def test_field_creation(self):
     """Test ResourceField creation."""
-    field = ResourceField(
-      name="price",
-      selector="data.price",
-      type="float64"
-    )
+    field = ResourceField(name="price", selector="data.price", type="float64")
 
     assert field.name == "price"
     assert field.selector == "data.price"
@@ -26,23 +22,17 @@ class TestResourceFieldModel:
 
   def test_field_with_value(self):
     """Test ResourceField with value."""
-    field = ResourceField(
-      name="volume",
-      selector="data.volume",
-      value=1000000
-    )
+    field = ResourceField(name="volume", selector="data.volume", value=1000000)
 
     assert field.name == "volume"
     assert field.value == 1000000
 
   def test_field_serialization(self):
     """Test ResourceField serialization."""
-    field = ResourceField(
-      name="price",
-      selector="data.price",
-      type="float64",
-      transformers=["normalize"]
-    )
+    field = ResourceField(name="price",
+                          selector="data.price",
+                          type="float64",
+                          transformers=["normalize"])
 
     # Default scope doesn't include transformers
     field_dict = field.to_dict()
@@ -79,12 +69,10 @@ class TestIngesterModel:
     """Test Ingester model creation."""
     field = ResourceField(name="price", selector="data.price")
 
-    ingester = Ingester(
-      name="crypto_ingester",
-      ingester_type="http_api",
-      interval="5m",
-      fields=[field]
-    )
+    ingester = Ingester(name="crypto_ingester",
+                        ingester_type="http_api",
+                        interval="5m",
+                        fields=[field])
 
     assert ingester.name == "crypto_ingester"
     assert ingester.ingester_type == "http_api"
@@ -97,22 +85,18 @@ class TestIngesterModel:
     valid_types = ["http_api", "ws_api", "evm_caller", "processor"]
 
     for ingester_type in valid_types:
-      ingester = Ingester(
-        name=f"test_{ingester_type}",
-        ingester_type=ingester_type,
-        interval="1m",
-        fields=[]
-      )
+      ingester = Ingester(name=f"test_{ingester_type}",
+                          ingester_type=ingester_type,
+                          interval="1m",
+                          fields=[])
       assert ingester.ingester_type == ingester_type
 
   def test_ingester_properties(self):
     """Test Ingester computed properties."""
-    ingester = Ingester(
-      name="test",
-      ingester_type="http_api",
-      interval="m5",
-      fields=[]
-    )
+    ingester = Ingester(name="test",
+                        ingester_type="http_api",
+                        interval="m5",
+                        fields=[])
 
     # Test interval_sec property
     assert ingester.interval_sec == 300  # 5 minutes = 300 seconds
@@ -124,12 +108,10 @@ class TestIngesterModel:
   def test_ingester_serialization(self):
     """Test Ingester serialization."""
     field = ResourceField(name="price", selector="data.price")
-    ingester = Ingester(
-      name="test_ingester",
-      ingester_type="http_api",
-      interval="1h",
-      fields=[field]
-    )
+    ingester = Ingester(name="test_ingester",
+                        ingester_type="http_api",
+                        interval="1h",
+                        fields=[field])
 
     ingester_dict = ingester.to_dict()
     assert ingester_dict["name"] == "test_ingester"
@@ -151,7 +133,9 @@ class TestModelValidation:
   def test_selector_validation(self):
     """Test selector validation."""
     # Valid selectors
-    valid_selectors = ["data.price", "result[0].value", "response.data.market.price"]
+    valid_selectors = [
+        "data.price", "result[0].value", "response.data.market.price"
+    ]
     for selector in valid_selectors:
       field = ResourceField(name="test", selector=selector)
       assert field.selector == selector
@@ -159,9 +143,8 @@ class TestModelValidation:
   def test_url_validation(self):
     """Test URL validation in fields."""
     valid_urls = [
-      "https://api.example.com/data",
-      "http://localhost:8080/api",
-      "wss://stream.example.com/ws"
+        "https://api.example.com/data", "http://localhost:8080/api",
+        "wss://stream.example.com/ws"
     ]
 
     for url in valid_urls:
@@ -174,12 +157,10 @@ class TestModelMethods:
 
   def test_field_signature(self):
     """Test ResourceField signature generation."""
-    field = ResourceField(
-      name="price",
-      type="float64",
-      target="https://api.example.com",
-      selector="data.price"
-    )
+    field = ResourceField(name="price",
+                          type="float64",
+                          target="https://api.example.com",
+                          selector="data.price")
 
     signature = field.signature()
     assert isinstance(signature, str)
@@ -190,13 +171,12 @@ class TestModelMethods:
     """Test Ingester dependency extraction."""
     field1 = ResourceField(name="field1", selector="SourceA.value")
     field2 = ResourceField(name="field2", selector="SourceB.price")
-    field3 = ResourceField(name="field3", selector="data.volume")  # This is also a dependency
+    field3 = ResourceField(name="field3",
+                           selector="data.volume")  # This is also a dependency
 
-    ingester = Ingester(
-      name="test",
-      ingester_type="processor",
-      fields=[field1, field2, field3]
-    )
+    ingester = Ingester(name="test",
+                        ingester_type="processor",
+                        fields=[field1, field2, field3])
 
     deps = ingester.dependencies()
     assert "SourceA" in deps
