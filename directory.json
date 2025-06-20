@@ -4,6 +4,7 @@
       "name": "BTR Markets",
       "description": "Open market data aggregation and streaming platform",
       "url": "https://api.btr.markets",
+      "logo": "https://cdn.astrolab.fi/assets/images/icons/btr-markets.svg",
       "sponsor_tiers": "1",
       "contributor": "true"
     },
@@ -11,6 +12,7 @@
       "name": "BTR Supply",
       "description": "Automated liquidity manager for modern DEXs",
       "url": "https://api.btr.supply",
+      "logo": "https://cdn.astrolab.fi/assets/images/icons/btr-supply.svg",
       "sponsor_tiers": "1",
       "contributor": "true"
     }
