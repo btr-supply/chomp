@@ -9,7 +9,7 @@ from os import environ as env
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.deps import safe_import
+from chomp.src.utils.deps import safe_import
 
 # Check if InfluxDB dependencies are available
 influxdb_client = safe_import("influxdb_client")
@@ -44,7 +44,7 @@ class TestInfluxDbAdapter:
 
   def test_inheritance(self):
     """Test InfluxDb inherits from Tsdb."""
-    from src.model import Tsdb
+    from src.models import Tsdb
     assert issubclass(InfluxDb, Tsdb)
 
   def test_initialization(self):

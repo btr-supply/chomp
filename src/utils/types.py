@@ -1,12 +1,14 @@
-from typing import Any
+from typing import Any, TypeVar
+
+T = TypeVar("T")
 
 
 def is_bool(value: Any) -> bool:
   return str(value).lower() in ["true", "false", "yes", "no", "1", "0"]
 
 
-def to_bool(value: str) -> bool:
-  return value.lower() in ["true", "yes", "1"]
+def to_bool(value: Any) -> bool:
+  return str(value).lower() in ["true", "yes", "1"]
 
 
 def is_float(s: str) -> bool:
@@ -42,19 +44,49 @@ def is_iterable(value: Any) -> bool:
   return isinstance(value, (list, tuple, set, frozenset))
 
 
-def flatten(items, depth=1, current_depth=0, flatten_maps=False):
-  if not is_iterable(items):
-    yield items
-    return
-
-  for x in items:
-    if is_iterable(x) or (flatten_maps and isinstance(x, dict)):
-      if current_depth < depth:
-        yield from flatten(x,
-                           depth=depth,
-                           current_depth=current_depth + 1,
-                           flatten_maps=flatten_maps)
-      else:
-        yield x
+def flatten(nested_list: list[Any]) -> list[Any]:
+  """Flatten a nested list structure."""
+  result = []
+  for item in nested_list:
+    if isinstance(item, list):
+      result.extend(flatten(item))
     else:
-      yield x
+      result.append(item)
+  return result
+
+
+def handle_none_value(value: Any, default_return: Any = None) -> Any:
+  """
+  Consistent None value handling utility function.
+  Returns default_return if value is None, otherwise returns the value.
+
+  Args:
+    value: The value to check for None
+    default_return: What to return if value is None (defaults to None)
+
+  Returns:
+    default_return if value is None, otherwise the original value
+  """
+  return default_return if value is None else value
+
+
+def safe_field_value(field_value: Any, field_type: str = "string") -> str:
+  """
+  Safely convert field values for database insertion, handling None values.
+
+  Args:
+    field_value: The field value to convert
+    field_type: The type of field for proper escaping
+
+  Returns:
+    Properly escaped string representation or NULL for None values
+  """
+  if field_value is None:
+    return "NULL"
+
+  if field_type in ["string", "binary", "varbinary"]:
+    return f"'{field_value}'"
+  elif field_type == "bool":
+    return "1" if field_value else "0"
+  else:
+    return str(field_value)

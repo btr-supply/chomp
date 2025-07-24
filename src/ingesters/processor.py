@@ -4,11 +4,11 @@ from os import path
 from typing import Callable, Union, Any
 
 from ..actions.schedule import scheduler
-from ..actions.store import transform_and_store
-from ..cache import ensure_claim_task, get_cache
-from ..model import Ingester
+from ..cache import get_cache
+
 from ..utils import log_debug, log_error, log_warn, safe_eval
 from .. import state
+from ..models.ingesters import Ingester
 
 
 async def load_handler(
@@ -45,68 +45,66 @@ async def load_handler(
     raise
 
 
-async def schedule(c: Ingester) -> list[Task]:
+async def schedule(ing: "Ingester") -> list[Task]:
   """Schedule processor ingester"""
 
-  async def ingest(c: Ingester):
-    await ensure_claim_task(c)
+  async def ingest(ing: "Ingester"):
+    await ing.pre_ingest()
 
     # Wait for dependencies to be processed (half the interval)
-    wait_time = c.interval_sec // 2
+    wait_time = ing.interval_sec // 2
     if wait_time > 0:
-      # Check if state.args exists and is not None before checking verbose
-      if hasattr(state, 'args') and state.args is not None and hasattr(
-          state.args, 'verbose') and state.args.verbose:
+      if state.args.verbose:
         log_debug(f"Waiting {wait_time}s for dependencies to be processed...")
       await sleep(wait_time)
 
     # Load handler if specified
     handler = None
-    if hasattr(c, 'handler'):
-      handler = await load_handler(c.handler)
+    if hasattr(ing, 'handler'):
+      handler = await load_handler(ing.handler)
 
     # Get dependency data
     inputs = {}
-    deps = c.dependencies()
+    deps = ing.dependencies()
     cache_tasks = [get_cache(dep, pickled=True) for dep in deps]
 
     # Handle empty cache_tasks properly
     if cache_tasks:
-      cache_results = await gather(*cache_tasks)
-      inputs = dict(zip(deps, cache_results))
+      sync_caches = await gather(*cache_tasks)
+      inputs = dict(zip(deps, sync_caches))
     else:
-      cache_results = []
+      sync_caches = []
       inputs = {}
 
     if not any(inputs.values()):
-      log_warn(f"No dependency data available for {c.name}")
+      log_warn(f"No dependency data available for {ing.name}")
 
     # Process data through handler
     try:
       if handler:
-        results = handler(c, inputs)
+        results = handler(ing, inputs)
       else:
         # If no handler specified, just copy selected fields
         results = {}
-        for field in c.fields:
+        for field in ing.fields:
           if field.selector and '.' in field.selector:
             ingester_name, field_name = field.selector.split('.', 1)
             if ingester_name in inputs:
               results[field.name] = inputs[ingester_name].get(field_name)
 
       # Update field values
-      for field in c.fields:
+      for field in ing.fields:
         if field.name in results:
           field.value = results[field.name]
         elif not field.selector:  # Warn about missing computed fields
           log_warn(f"Handler did not return value for field {field.name}")
 
       # Store results
-      await transform_and_store(c)  # jsonify=True
+      await ing.post_ingest(response_data=results)
 
     except Exception as e:
-      log_error(f"Failed to process {c.name}: {e}")
+      log_error(f"Failed to process {ing.name}: {e}")
 
   # Register/schedule the ingester
-  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+  task = await scheduler.add_ingester(ing, fn=ingest, start=False)
   return [task] if task is not None else []

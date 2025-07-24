@@ -1,15 +1,16 @@
 """Standalone tests for src.utils.format module."""
 import pytest
 import sys
-from pathlib import Path
+import os
 from unittest.mock import patch, mock_open
 from datetime import datetime, timezone
 import logging
 
 # Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import src.utils.format as format_module
+from src.utils.date import now
 
 
 class TestSplitFunction:
@@ -133,7 +134,7 @@ class TestDateFunctions:
     # Test "now"
     result = format_module.parse_date("now")
     assert result is not None
-    assert abs((result - datetime.now(timezone.utc)).total_seconds()) < 2
+    assert abs((result - now()).total_seconds()) < 2
 
     # Test "today"
     result = format_module.parse_date("today")
@@ -143,12 +144,12 @@ class TestDateFunctions:
     # Test "yesterday"
     result = format_module.parse_date("yesterday")
     assert result is not None
-    assert result < datetime.now(timezone.utc)
+    assert result < now()
 
     # Test "tomorrow"
     result = format_module.parse_date("tomorrow")
     assert result is not None
-    assert result > datetime.now(timezone.utc)
+    assert result > now()
 
   def test_parse_date_string_format(self):
     """Test parse_date with formatted date string."""
@@ -202,33 +203,6 @@ class TestLogHandler:
     with patch('src.utils.format.log') as mock_log:
       handler.emit(record)
       mock_log.assert_called_once()
-
-
-class TestGenerateHash:
-  """Test generate_hash function."""
-
-  def test_generate_hash_default(self):
-    """Test generate_hash with default parameters."""
-    result = format_module.generate_hash()
-    assert len(result) == 32
-    assert isinstance(result, str)
-
-  def test_generate_hash_custom_length(self):
-    """Test generate_hash with custom length."""
-    result = format_module.generate_hash(length=16)
-    assert len(result) == 16
-
-  def test_generate_hash_with_derive_from(self):
-    """Test generate_hash with custom derive_from."""
-    result1 = format_module.generate_hash(derive_from="test")
-    result2 = format_module.generate_hash(derive_from="test")
-    # Should be different due to random component
-    assert result1 != result2
-
-  def test_generate_hash_sha256(self):
-    """Test generate_hash uses sha256 for length > 32."""
-    result = format_module.generate_hash(length=64)
-    assert len(result) == 64
 
 
 class TestSplitChainAddr:

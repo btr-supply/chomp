@@ -1,10 +1,11 @@
 from datetime import datetime
 from os import environ as env
-import httpx
-from typing import Any
+from typing import Any, Optional
 
-from ..utils import log_error, log_info, Interval
-from ..model import Ingester, FieldType
+from ..utils import log_error, log_info, Interval, now
+from ..utils.http import get
+from ..models.ingesters import Ingester
+from ..models.base import FieldType
 from .sql import SqlAdapter
 
 # QuestDB data type mapping
@@ -68,7 +69,6 @@ class QuestDb(SqlAdapter):
   """QuestDB adapter that extends SqlAdapter but uses HTTP API."""
 
   TYPES = TYPES
-  session: httpx.AsyncClient | None = None
   base_url: str
 
   @property
@@ -77,11 +77,11 @@ class QuestDb(SqlAdapter):
 
   @classmethod
   async def connect(cls,
-                    host: str | None = None,
-                    port: int | None = None,
-                    db: str | None = None,
-                    user: str | None = None,
-                    password: str | None = None) -> "QuestDb":
+                    host: Optional[str] = None,
+                    port: Optional[int] = None,
+                    db: Optional[str] = None,
+                    user: Optional[str] = None,
+                    password: Optional[str] = None) -> "QuestDb":
     self = cls(host=host or env.get("QUESTDB_HOST") or "localhost",
                port=int(port or env.get("QUESTDB_PORT") or 9000),
                db=db or env.get("QUESTDB_DB") or "default",
@@ -92,22 +92,13 @@ class QuestDb(SqlAdapter):
 
   async def _connect(self):
     """QuestDB uses HTTP API instead of SQL connections."""
-    if not self.session:
-      self.base_url = f"http://{self.host}:{self.port}"
-
-      # Create session with basic auth if credentials provided
-      auth = None
-      if self.user and self.password:
-        auth = httpx.BasicAuth(self.user, self.password)
-
-      self.session = httpx.AsyncClient(auth=auth)
-      log_info(f"Connected to QuestDB on {self.host}:{self.port}")
+    self.base_url = f"http://{self.host}:{self.port}"
+    log_info(f"Connected to QuestDB on {self.host}:{self.port}")
 
   async def _close_connection(self):
     """Close QuestDB HTTP session."""
-    if self.session:
-      await self.session.aclose()
-      self.session = None
+    # Singleton client is managed globally
+    pass
 
   async def _execute(self, query: str, params: tuple = ()) -> Any:
     """Execute SQL via QuestDB HTTP API."""
@@ -129,10 +120,10 @@ class QuestDb(SqlAdapter):
     else:
       formatted_query = query
 
-    if self.session is None:
-      raise Exception("QuestDB session not connected")
-    response = await self.session.get(f"{self.base_url}/exec",
-                                      params={"query": formatted_query})
+    response = await get(f"{self.base_url}/exec",
+                         params={"query": formatted_query},
+                         user=self.user if self.user else None,
+                         password=self.password if self.password else None)
     if response.status_code != 200:
       error_text = response.text
       raise Exception(
@@ -153,20 +144,36 @@ class QuestDb(SqlAdapter):
     """QuestDB uses single quotes for table names in some contexts."""
     return f"'{identifier}'"
 
-  def _build_create_table_sql(self, c: Ingester, table_name: str) -> str:
+  def _build_create_table_sql(self, ing: Ingester, table_name: str) -> str:
     """QuestDB-specific CREATE TABLE syntax with designated timestamp."""
-    persistent_fields = [field for field in c.fields if not field.transient]
-    fields = ", ".join([
-        f"{field.name} {self.TYPES[field.type]}" for field in persistent_fields
-    ])
+    persistent_fields = [field for field in ing.fields if not field.transient]
 
-    # QuestDB requires a designated timestamp column for time-series tables
-    return f"""
-    CREATE TABLE IF NOT EXISTS '{table_name}' (
-      {self.timestamp_column_name} timestamp,
-      {fields}
-    ) timestamp({self.timestamp_column_name}) PARTITION BY DAY
-    """
+    # Build field definitions including ts field
+    field_definitions = []
+    for field in persistent_fields:
+      field_type = TYPES.get(field.type, "string")
+      field_definitions.append(f"{field.name} {field_type}")
+
+    if not field_definitions:
+      # Fallback for ingesters with no persistent fields
+      field_definitions = ["value string"]
+
+    fields = ", ".join(field_definitions)
+
+    # For TimeSeriesIngester, use ts field as designated timestamp
+    if getattr(ing, 'ts', None) and ing.resource_type == 'timeseries':
+      return f"""
+      CREATE TABLE IF NOT EXISTS '{table_name}' (
+        {fields}
+      ) timestamp(ts) PARTITION BY DAY
+      """
+    else:
+      # Regular table for non-timeseries ingesters
+      return f"""
+      CREATE TABLE IF NOT EXISTS '{table_name}' (
+        {fields}
+      )
+      """
 
   def _build_aggregation_sql(
       self, table_name: str, columns: list[str], from_date: datetime,
@@ -180,18 +187,18 @@ class QuestDb(SqlAdapter):
 
     sample_by_interval = INTERVALS.get(aggregation_interval, "5m")
 
-    # Build aggregation query using SAMPLE BY
-    select_cols = [self.timestamp_column_name]
+    # Build aggregation query using SAMPLE BY with ts field directly
+    select_cols = ["ts"]  # Use ts field directly
     select_cols.extend([f"last({col}) as {col}" for col in columns])
     select_clause = ", ".join(select_cols)
 
     query = f"""
     SELECT {select_clause}
     FROM '{table_name}'
-    WHERE {self.timestamp_column_name} >= {from_timestamp}
-      AND {self.timestamp_column_name} <= {to_timestamp}
+    WHERE ts >= {from_timestamp}
+      AND ts <= {to_timestamp}
     SAMPLE BY {sample_by_interval}
-    ORDER BY {self.timestamp_column_name} DESC
+    ORDER BY ts DESC
     """
 
     return query, []  # No parameters since we embedded them
@@ -200,7 +207,8 @@ class QuestDb(SqlAdapter):
     """QuestDB-specific column information query."""
     try:
       result = await self._fetch(f"SHOW COLUMNS FROM '{table}'")
-      return [row[0] for row in result if row[0] != self.timestamp_column_name]
+      # Return all columns including ts since it's now a proper field
+      return [row[0] for row in result]
     except Exception:
       return []
 
@@ -226,17 +234,50 @@ class QuestDb(SqlAdapter):
       log_error("Failed to list tables from QuestDB", e)
       return []
 
-  async def insert(self, c: Ingester, table: str = ""):
+  async def fetch_batch_by_ids(self, table: str,
+                               uids: list[str]) -> list[tuple]:
+    """Fetch multiple records by their UIDs in a single QuestDB query for efficiency"""
+    await self.ensure_connected()
+    try:
+      if not uids:
+        return []
+
+      # Build parameterized query for QuestDB (similar to PostgreSQL syntax)
+      placeholders = ",".join([f"'{uid}'" for uid in uids])
+      query = f"SELECT * FROM {table} WHERE uid IN ({placeholders}) ORDER BY updated_at DESC"
+
+      result = await self._fetch(query)
+      return result if result else []
+    except Exception as e:
+      log_error(
+          f"Failed to fetch batch records by IDs from QuestDB {table}: {e}")
+      return []
+
+  async def insert(self, ing: Ingester, table: str = ""):
     """QuestDB-specific insert using ILP (InfluxDB Line Protocol) for better performance."""
     await self.ensure_connected()
-    table = table or c.name
+    table = table or ing.name
 
     # Convert to ILP format for better ingestion performance
-    persistent_fields = [field for field in c.fields if not field.transient]
+    persistent_fields = [field for field in ing.fields if not field.transient]
 
-    # Build field values
+    # Get timestamp from ts field
+    ts_value = None
+    for field in persistent_fields:
+      if field.name == 'ts':
+        ts_value = field.value
+        break
+
+    # Fallback to last_ingested if no ts field found
+    if ts_value is None:
+      ts_value = ing.last_ingested or now()
+
+    # Build field values (excluding ts since it's handled separately as timestamp)
     field_values = []
     for field in persistent_fields:
+      if field.name == 'ts':  # Skip ts field since it's handled as timestamp
+        continue
+
       if field.type in ["string", "binary", "varbinary"]:
         field_values.append(f'{field.name}="{field.value}"')
       elif field.type in [
@@ -252,9 +293,9 @@ class QuestDb(SqlAdapter):
         field_values.append(f'{field.name}={field.value}')
 
     # Convert timestamp to nanoseconds
-    if c.last_ingested is None:
+    if ts_value is None:
       raise Exception("No timestamp available for ingester")
-    timestamp_ns = int(c.last_ingested.timestamp() * 1_000_000_000)
+    timestamp_ns = int(ts_value.timestamp() * 1_000_000_000)
 
     # ILP format: table_name field_name=value timestamp
     ilp_line = f'{table} {",".join(field_values)} {timestamp_ns}'
@@ -273,7 +314,7 @@ class QuestDb(SqlAdapter):
       error_message = str(e).lower()
       if "does not exist" in error_message:
         log_info(f"Table {table} does not exist, creating it now...")
-        await self.create_table(c, name=table)
+        await self.create_table(ing, name=table)
         # Retry the insert
         if self.session is None:
           raise Exception("QuestDB session not connected")

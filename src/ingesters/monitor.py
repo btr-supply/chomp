@@ -3,13 +3,10 @@
 
 from asyncio import Task
 import psutil
-import time
 
 from ..actions.schedule import scheduler
-from ..actions.store import transform_and_store
-from ..utils import log_debug, log_error
-from ..cache import ensure_claim_task
-from ..model import Ingester
+from ..utils import log_debug, log_error, now
+from ..models.ingesters import Ingester
 from .. import state
 
 # Initialize CPU measurement (required for non-blocking calls)
@@ -19,15 +16,15 @@ except Exception:
   pass
 
 
-async def schedule(c: Ingester) -> list[Task]:
+async def schedule(ing: Ingester) -> list[Task]:
   """Schedule monitor ingester for system vitals collection"""
 
-  async def ingest(c: Ingester):
+  async def ingest(ing: Ingester):
     """Collect and store system vitals"""
-    await ensure_claim_task(c)
+    await ing.pre_ingest()
 
     try:
-      current_time = time.time()
+      current_time = now().timestamp()
 
       # Non-blocking CPU measurement
       cpu_usage = 0.0
@@ -50,15 +47,16 @@ async def schedule(c: Ingester) -> list[Task]:
         disk_io = psutil.disk_io_counters()
         current_disk_bytes = disk_io.read_bytes + disk_io.write_bytes
 
-        if hasattr(state, "_last_disk_bytes") and hasattr(
-            state, "_last_disk_time"):
-          time_delta = current_time - state._last_disk_time  # type: ignore[attr-defined]
+        last_disk_bytes = getattr(state, "_last_disk_bytes", None)
+        last_disk_time = getattr(state, "_last_disk_time", None)
+        if last_disk_bytes and last_disk_time:
+          time_delta = current_time - last_disk_time
           if time_delta > 0:
-            disk_bytes_delta = abs(current_disk_bytes - state._last_disk_bytes)
+            disk_bytes_delta = abs(current_disk_bytes - last_disk_bytes)
             disk_usage = disk_bytes_delta / time_delta  # bytes per second
 
-        state._last_disk_bytes = current_disk_bytes  # type: ignore[attr-defined]
-        state._last_disk_time = current_time  # type: ignore[attr-defined]
+        setattr(state, "_last_disk_bytes", current_disk_bytes)
+        setattr(state, "_last_disk_time", current_time)
       except Exception as e:
         log_error(f"Failed to get disk I/O: {e}")
 
@@ -66,7 +64,6 @@ async def schedule(c: Ingester) -> list[Task]:
       # Handle case where state.instance might be None
       instance = state.instance
       field_values = {
-          "ts": None,  # Will be set automatically by transform_and_store
           "instance_name": instance.name if instance else "",
           "ipv4": instance.ipv4 if instance else "",
           "ipv6": instance.ipv6 if instance else "",
@@ -82,12 +79,12 @@ async def schedule(c: Ingester) -> list[Task]:
           "isp": instance.isp if instance else "",
       }
 
-      for field in c.fields:
+      for field in ing.fields:
         if field.name in field_values and field_values[field.name] is not None:
           field.value = field_values[field.name]
 
       # Use standard store flow like all other ingesters
-      await transform_and_store(c)
+      await ing.post_ingest(response_data=field_values)
 
       if state.args.verbose:
         memory_mb = (float(field_values["memory_usage"]) / 1024 /
@@ -100,5 +97,5 @@ async def schedule(c: Ingester) -> list[Task]:
       log_error(f"Failed to collect instance vitals: {e}")
 
   # Register/schedule the ingester
-  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+  task = await scheduler.add_ingester(ing, fn=ingest, start=False)
   return [task] if task is not None else []

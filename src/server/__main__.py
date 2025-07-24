@@ -11,10 +11,10 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from chomp.src.utils import ArgParser  # noqa: E402
-from chomp.src import state  # noqa: E402
-from chomp.src.utils import log_info  # noqa: E402
-from chomp.src.server import start  # noqa: E402
+from src.utils import ArgParser  # noqa: E402
+from src import state  # noqa: E402
+from src.utils import log_info  # noqa: E402
+from src.server import start  # noqa: E402
 
 
 async def main():
@@ -90,7 +90,7 @@ async def main():
   })
 
   # Initialize state with parsed arguments
-  state.init(args_=ap.load_env())
+  await state.init(_args=ap.load_env())
   log_info(f"Server starting with arguments\n{ap.pretty()}")
 
   # Start the server

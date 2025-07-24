@@ -1,21 +1,21 @@
 [project]
 name = "chomp"
 version = "1.1.0"
-description = "Lightweight, multimodal ingester, start collecting web2/3 data in minutes"
+description = "Lightweight, multimodal ingester"
 authors = [
-    {name = "JakeTheSlug", email = "jake@astrolab.fi"},
+    {name = "JakeTheSlug", email = "jake@btr.supply"},
 ]
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = "==3.11.*"
+requires-python = ">=3.12"
 
 # Core dependencies - always required
 dependencies = [
-    "redis==5.2.0",
-    "python-dotenv==1.0.1",
+    "redis==6.2.0",
+    "python-dotenv==1.1.1",
     "pyyaml>=6.0.2",
-    "yamale==5.2.1",
-    "aiocron==1.8",
+    "yamale==6.0.0",
+    "aiocron==1.8", # v2 uses cronsim as replacement for croniter, breaks sec compatibility
     "fastapi>=0.115.5",
     "uvicorn[standard]>=0.32.1",
     "python-multipart>=0.0.6",
@@ -29,14 +29,21 @@ dependencies = [
     "types-python-dateutil>=2.9.0.20250516",
     "diff-match-patch>=20230430",
     "psutil>=5.9.0",
+    "pyjwt>=2.8.0",
+    "blake3>=0.4.1",
+    "types-pyyaml>=6.0.12.20250516",
+    "websockets>=15.0.1",
+    "asyncpg>=0.29.0",
+    "taospy>=2.8.1",
+    "pytest>=8.4.1",
 ]
 
 # Optional dependencies for specific adapters and ingesters
 #
 # USAGE PATTERNS:
-# - Individual components: pip install chomp[evm,web2]
-# - Common combinations: pip install chomp[default,all-adapters]
-# - Everything: pip install chomp[all]
+# - Individual components: uv add chomp[evm,web2] or pip install chomp[evm,web2]
+# - Common combinations: uv add chomp[default,all-adapters] or pip install chomp[default,all-adapters]
+# - Everything: uv add chomp[all] or pip install chomp[all]
 #
 # GROUPS:
 # - Database adapters: Individual database support (tdengine, clickhouse, etc.)
@@ -45,7 +52,7 @@ dependencies = [
 [project.optional-dependencies]
 
 # Database adapters
-tdengine = ["taospy==2.7.16"]
+tdengine = ["taospy==2.8.1"]
 timescale = ["asyncpg>=0.29.0"]
 clickhouse = ["asynch>=0.2.0"]
 duckdb = ["duckdb>=0.9.0"]
@@ -54,7 +61,6 @@ influxdb = ["influxdb-client>=1.38.0"]
 kx = ["pykx>=2.4.0"]
 sqlite = ["aiosqlite>=0.19.0"]
 questdb = []  # Uses httpx which is already in core
-opentsdb = []  # Uses httpx which is already in core
 victoriametrics = []  # Uses httpx which is already in core
 
 # Web2 ingesters
@@ -71,11 +77,10 @@ scraper = [
 
 # Web3 ingesters
 evm = [
-    "web3==6.20.3",
-    "multicall==0.9.0",
-    "eth-utils>=2.0.0",
-    "eth-account>=0.9.0",
-    "hexbytes>=0.3.0"
+    "web3==7.12.0",
+    "eth-utils>=5.3.0",
+    "eth-account>=0.13.7",
+    "hexbytes>=1.3.1"
 ]
 svm = ["solana>=0.36.2", "solders>=0.23.0"]
 sui = []  # Uses httpx which is already in core
@@ -84,22 +89,20 @@ ton = []  # Uses httpx which is already in core
 
 # Common combinations
 default = [
-    "taospy==2.7.16",          # Default adapter - TDengine
+    "taospy==2.8.1",          # Default adapter - TDengine
     "beautifulsoup4>=4.12.3",  # Web2 scraping
     "lxml>=5.3.0",
-    "playwright>=1.49.0",
-    "web3==6.20.3",            # EVM support
-    "multicall==0.9.0",
-    "eth-utils>=2.0.0",
-    "eth-account>=0.9.0",
-    "hexbytes>=0.3.0",
+    "web3==7.12.0",            # EVM support
+    "eth-utils>=5.3.0",
+    "eth-account>=0.13.7",
+    "hexbytes>=1.3.1",
     "solana>=0.36.2",          # SVM support
     "solders>=0.23.0"
 ]
 
 # All database adapters
 all-adapters = [
-    "taospy==2.7.16",         # tdengine
+    "taospy==2.8.1",         # tdengine
     "asyncpg>=0.29.0",        # timescale
     "asynch>=0.2.0",          # clickhouse
     "duckdb>=0.9.0",          # duckdb
@@ -114,18 +117,17 @@ all-ingesters = [
     "beautifulsoup4>=4.12.3", # web2
     "lxml>=5.3.0",
     "playwright>=1.49.0",
-    "web3==6.20.3",           # evm
-    "multicall==0.9.0",
-    "eth-utils>=2.0.0",
-    "eth-account>=0.9.0",
-    "hexbytes>=0.3.0",
+    "web3==7.12.0",           # evm
+    "eth-utils>=5.3.0",
+    "eth-account>=0.13.7",
+    "hexbytes>=1.3.1",
     "solana>=0.36.2",         # svm
     "solders>=0.23.0"
 ]
 
 # Everything
 all = [
-    "taospy==2.7.16",         # all adapters
+    "taospy==2.8.1",         # all adapters
     "asyncpg>=0.29.0",
     "asynch>=0.2.0",
     "duckdb>=0.9.0",
@@ -136,11 +138,10 @@ all = [
     "beautifulsoup4>=4.12.3", # all ingesters
     "lxml>=5.3.0",
     "playwright>=1.49.0",
-    "web3==6.20.3",
-    "multicall==0.9.0",
-    "eth-utils>=2.0.0",
-    "eth-account>=0.9.0",
-    "hexbytes>=0.3.0",
+    "web3==7.12.0",
+    "eth-utils>=5.3.0",
+    "eth-account>=0.13.7",
+    "hexbytes>=1.3.1",
     "solana>=0.36.2",
     "solders>=0.23.0"
 ]
@@ -155,10 +156,11 @@ dev = [
     "pytest-asyncio>=0.25.0",
     "pre-commit>=4.0.0",
     "coverage>=7.8.2",
+    "coverage-badge>=1.1.0",
 ]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 mypy_path = "."
 packages = ["src"]
 explicit_package_bases = true

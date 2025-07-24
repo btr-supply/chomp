@@ -1,204 +1,182 @@
+"""
+Unified runtime state management for Chomp.
+Handles PIDs, UID, configuration, instance names, and other runtime variables in a single, elegant interface.
+"""
+
+import json
+import secrets
 from pathlib import Path
-import re
-import time
-from asyncio import iscoroutinefunction, new_event_loop
-from importlib import metadata, resources
-import tomli
-from typing import Coroutine, Optional, Any
-from functools import wraps
+from typing import Any, Awaitable, Dict, Iterable, List, Optional, Union
+from .types import T
 
-from .format import log_error, log_warn
+# Runtime file path relative to project root
+RUNTIME_FILE = Path(__file__).parent.parent.parent / ".runtime"
 
 
-class PackageMeta:
+class RuntimeState:
+  """Singleton runtime state manager."""
 
-  def __init__(self, package="chomp"):
+  _instance = None
+  _data = None
+
+  def __new__(cls):
+    if cls._instance is None:
+      cls._instance = super().__new__(cls)
+    return cls._instance
+
+  def __init__(self):
+    if self._data is None:
+      self._load()
+
+  def _load(self) -> None:
+    """Load runtime data from file."""
+    if RUNTIME_FILE.exists():
+      try:
+        with open(RUNTIME_FILE, 'r') as f:
+          self._data = json.load(f)
+      except (json.JSONDecodeError, IOError):
+        self._data = {}
+    else:
+      self._data = {}
+
+  def _save(self) -> None:
+    """Save runtime data to file."""
     try:
-      dist = metadata.distribution(package)
-      self._set_metadata(dist.metadata)
-      self.root = resources.files(package)
-    except Exception:
-      print(f"Package {package} not resolved, searching for pyproject.toml...")
-      self._parse_pyproject_toml()
+      RUNTIME_FILE.parent.mkdir(parents=True, exist_ok=True)
+      with open(RUNTIME_FILE, 'w') as f:
+        json.dump(self._data, f, indent=2)
+    except IOError:
+      pass  # Fail silently for non-critical operations
 
-  def _set_metadata(self, meta):
-    self.name = meta.get("Name", "Unknown")
-    self.version = meta.get("Version", "0.0.0")
-    self.major_version, self.minor_version, self.patch_version = self.version.split(
-        ".")
-    self.description = meta.get("Summary", "No description available")
-    self.authors = meta.get_all("Author", ["Unknown"])
+  # Configuration management
+  def set_config(self,
+                 mode: str = "dev",
+                 deployment: str = "local",
+                 api: str = "api") -> None:
+    """Set runtime configuration."""
+    self._data.update({"MODE": mode, "DEPLOYMENT": deployment, "API": api})
+    self._save()
 
-  def _parse_pyproject_toml(self):
-    pyproject_path = Path(__file__).parent.parent.parent / "pyproject.toml"
-    # Set root to the project directory (parent of pyproject.toml)
-    self.root = pyproject_path.parent
+  def get_config(self) -> Dict[str, str]:
+    """Get runtime configuration with defaults."""
+    return {
+        "MODE": self._data.get("MODE", "dev"),
+        "DEPLOYMENT": self._data.get("DEPLOYMENT", "local"),
+        "API": self._data.get("API", "api")
+    }
 
-    if pyproject_path.exists():
-      with pyproject_path.open("rb") as f:
-        project_data = tomli.load(f).get("project", {})
-        self.name = project_data.get("name", "Unknown")
-        self.version = project_data.get("version", "0.0.0")
-        self.major_version, self.minor_version, self.patch_version = self.version.split(
-            ".")
-        self.description = project_data.get("description",
-                                            "No description available")
-        self.authors = [
-            author.get("name", "Unknown")
-            for author in project_data.get("authors", [])
-        ]
+  # UID management
+  def get_uid(self) -> str:
+    """Get instance UID, generating if needed."""
+    if "uid" not in self._data:
+      self._data["uid"] = secrets.token_hex(16)
+      self._save()
+    return self._data["uid"]
+
+  def set_uid(self, uid: str) -> None:
+    """Set instance UID."""
+    self._data["uid"] = uid
+    self._save()
+
+  # Instance name management
+  def get_instance_name(self) -> Optional[str]:
+    """Get stored instance name."""
+    return self._data.get("instance_name")
+
+  def set_instance_name(self, name: str) -> None:
+    """Set instance name."""
+    self._data["instance_name"] = name
+    self._save()
+
+  def get_or_generate_instance_name_sync(self) -> str:
+    """Synchronous version that falls back to simple generation if needed."""
+    name = self.get_instance_name()
+    if not name:
+      # Simple fallback for synchronous contexts
+      uid = self.get_uid()
+      name = f"instance-{uid[:8]}"
+      self.set_instance_name(name)
+    return name
+
+  # PID management
+  def add_pid(self, pid: int, is_api: bool = False) -> None:
+    """Add a process ID."""
+    if is_api:
+      self._data["api_pid"] = pid
     else:
-      print("pyproject.toml not found, using fallback values...")
-      self._set_metadata({})
-      # Still set the root to current directory as fallback
-      self.root = Path(__file__).parent.parent.parent
+      pids = self._data.get("pids", [])
+      if pid not in pids:
+        pids.append(pid)
+        self._data["pids"] = pids
+    self._save()
+
+  def get_pids(self) -> Dict[str, Union[int, List[int]]]:
+    """Get all PIDs."""
+    return {
+        "api_pid": self._data.get("api_pid"),
+        "pids": self._data.get("pids", [])
+    }
+
+  def clear_pids(self) -> None:
+    """Clear all PIDs."""
+    self._data.pop("api_pid", None)
+    self._data.pop("pids", None)
+    self._save()
+
+  # Generic key-value operations
+  def get(self, key: str, default: Any = None) -> Any:
+    """Get any value by key."""
+    return self._data.get(key, default)
+
+  def set(self, key: str, value: Any) -> None:
+    """Set any key-value pair."""
+    self._data[key] = value
+    self._save()
+
+  def clear(self) -> None:
+    """Clear all runtime data."""
+    self._data = {}
+    if RUNTIME_FILE.exists():
+      RUNTIME_FILE.unlink()
+
+  def get_instance_info(self) -> Dict[str, str]:
+    """Get complete instance information."""
+    return {
+        "uid": self.get_uid(),
+        "name": self.get_or_generate_instance_name_sync(),
+        "mode": self.get_config()["MODE"],
+        "deployment": self.get_config()["DEPLOYMENT"]
+    }
 
 
-def run_async_in_thread(fn: Coroutine):
-  loop = new_event_loop()
-  try:
-    return loop.run_until_complete(fn)
-  except Exception as e:
-    log_error(f"Failed to run async function in thread: {e}")
-    loop.close()
+# Global instance
+runtime = RuntimeState()
 
 
-def submit_to_threadpool(executor, fn, *args, **kwargs):
-  if iscoroutinefunction(fn):
-    return executor.submit(run_async_in_thread, fn(*args, **kwargs))
-  return executor.submit(fn, *args, **kwargs)
+# Convenience functions for backward compatibility
+def get_instance_uid() -> str:
+  """Get instance UID."""
+  return runtime.get_uid()
 
 
-def select_nested(selector: Optional[str], data: dict) -> Any:
-
-  # invalid selectors
-  if selector and not isinstance(selector, str):
-    log_error("Invalid selector. Please use a valid path string")
-    return None
-
-  if not selector or [".", "root"].count(selector.lower()) > 0:
-    return data
-
-  # optional starting dot and "root" keyword (case-insensitive)
-  if selector.startswith("."):
-    selector = selector[1:]
-
-  current: Any = data  # base access
-  segment_pattern = re.compile(
-      r'([^.\[\]]+)(?:\[(\d+)\])?'
-  )  # match selector segments eg. ".key" or ".key[index]"
-
-  # loop through segments
-  for match in segment_pattern.finditer(selector):
-    key, index = match.groups()
-    if key and key.isnumeric() and not index:
-      key, index = None, key  # Keep as string for now
-    # dict access
-    if key and isinstance(current, dict):
-      current = current.get(key)
-    if not current:
-      return log_warn(f"Key not found in dict: {key}")
-    # list access
-    if index is not None:
-      if current is None:
-        return log_error("Cannot access index on None value")
-      index_int = int(index)
-      if not isinstance(current, list) or index_int >= len(current):
-        return log_error(f"Index out of range in dict.{key}: {index}")
-      current = current[index_int]
-  return current
+def generate_instance_uid() -> str:
+  """Generate new instance UID."""
+  uid = secrets.token_hex(16)
+  runtime.set_uid(uid)
+  return uid
 
 
-def merge_replace_empty(dest: dict, src: dict) -> dict:
-  """Merge src into dest, replacing empty arrays/objects in dest with values from src."""
-  for key, value in src.items():
-    if isinstance(value, dict) and isinstance(dest.get(key), dict):
-      # Recursively merge dictionaries
-      dest[key] = merge_replace_empty(dest.get(key, {}), value)
-    elif isinstance(value, list) and isinstance(dest.get(key), list):
-      # Replace empty lists in dest with src's value
-      dest[key] = value if not dest[key] else dest[key]
-    else:
-      # Replace empty values in dest with src's value
-      if dest.get(key) in [None, [], {}, ""]:
-        dest[key] = value
-  return dest
+def raise_if_exception(obj: Any) -> None:
+  if isinstance(obj, Exception):
+    raise obj
 
 
-def _cache_decorator(ttl=None, maxsize=128, is_async=False):
-
-  def decorator(func):
-    cache_data: dict[Any, tuple[Any, float]] = {}
-    access_order: list[Any] = []
-
-    @wraps(func)
-    async def async_wrapper(*args, **kwargs):
-      key = (args, frozenset(kwargs.items()))
-      now = time.time()
-
-      if key in cache_data:
-        value, timestamp = cache_data[key]
-        if ttl is None or now - timestamp < ttl:
-          # LRU update
-          access_order.remove(key)
-          access_order.append(key)
-          return value
-
-      # Cache miss
-      result = await func(*args, **kwargs)
-      cache_data[key] = (result, now)
-
-      # Update LRU
-      if key in access_order:
-        access_order.remove(key)
-      access_order.append(key)
-
-      # Evict oldest if needed
-      while len(cache_data) > maxsize:
-        oldest_key = access_order.pop(0)
-        cache_data.pop(oldest_key, None)
-
-      return result
-
-    @wraps(func)
-    def sync_wrapper(*args, **kwargs):
-      key = (args, frozenset(kwargs.items()))
-      now = time.time()
-
-      if key in cache_data:
-        value, timestamp = cache_data[key]
-        if ttl is None or now - timestamp < ttl:
-          # LRU update
-          access_order.remove(key)
-          access_order.append(key)
-          return value
-
-      # Cache miss
-      result = func(*args, **kwargs)
-      cache_data[key] = (result, now)
-
-      # Update LRU
-      if key in access_order:
-        access_order.remove(key)
-      access_order.append(key)
-
-      # Evict oldest if needed
-      while len(cache_data) > maxsize:
-        oldest_key = access_order.pop(0)
-        cache_data.pop(oldest_key, None)
-
-      return result
-
-    return async_wrapper if is_async else sync_wrapper
-
-  return decorator
+def raise_if_exception_in(iterable: Iterable[Any]) -> None:
+  for obj in iterable:
+    raise_if_exception(obj)
 
 
-def cache(ttl=None, maxsize=128):
-  """Sync cache decorator with TTL and LRU support"""
-  return _cache_decorator(ttl=ttl, maxsize=maxsize, is_async=False)
-
-
-def async_cache(ttl=None, maxsize=128):
-  """Async cache decorator with TTL and LRU support"""
-  return _cache_decorator(ttl=ttl, maxsize=maxsize, is_async=True)
+async def gather(coroutines: Iterable[Awaitable[T]]) -> List[T]:
+  results = await gather(*coroutines, return_exceptions=True)
+  raise_if_exception_in(results)
+  return results  # type: ignore [return-value]

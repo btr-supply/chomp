@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import Mock, AsyncMock, patch
 
 from src.ingesters.sui_caller import schedule, parse_generic, max_batch_size
-from src.model import Ingester, ResourceField
+from src.models import ing, ResourceField
 from src.adapters.sui_rpc import SuiRpcClient
 
 
@@ -13,7 +13,7 @@ class TestSuiCaller:
   @pytest.fixture
   def mock_ingester(self):
     """Create a mock ingester for testing."""
-    mock = Mock(spec=Ingester)
+    mock = Mock(spec=ing)
     mock.name = "test_sui_caller"
     mock.data_by_field = {}
 
@@ -101,7 +101,7 @@ class TestSuiCaller:
   async def test_ingest_multiple_objects_batching(self, mock_sui_client):
     """Test batching of multiple objects when exceeding batch size."""
     # Create ingester with many fields to test batching
-    mock = Mock(spec=Ingester)
+    mock = Mock(spec=ing)
     mock.name = "test_batching"
     mock.data_by_field = {}
 
@@ -318,7 +318,7 @@ class TestSuiCaller:
   @pytest.mark.asyncio
   async def test_ingest_field_without_target(self, mock_sui_client):
     """Test handling fields that don't have targets."""
-    mock = Mock(spec=Ingester)
+    mock = Mock(spec=ing)
     mock.name = "test_no_target"
     mock.data_by_field = {}
 
@@ -373,7 +373,7 @@ class TestSuiCaller:
   @pytest.mark.asyncio
   async def test_ingest_unique_object_deduplication(self, mock_sui_client):
     """Test deduplication of unique object IDs."""
-    mock = Mock(spec=Ingester)
+    mock = Mock(spec=ing)
     mock.name = "test_dedup"
     mock.data_by_field = {}
 

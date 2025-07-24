@@ -1,19 +1,15 @@
 from concurrent.futures import ThreadPoolExecutor
 import yamale
-from os import cpu_count, environ as env, path
+from os import environ as env, path
 from redis.asyncio import Redis, ConnectionPool
 from httpx import Request, Response
 from httpx import AsyncBaseTransport
-from typing import Any
+import web3
+from typing import Any, Optional, Callable
 
-from .model import Config, Tsdb
-from .utils import log_error, log_info, is_iterable, PackageMeta
+from .utils import log_error, log_info, log_warn, is_iterable, PackageMeta
 from .adapters.sui_rpc import SuiRpcClient
 from .adapters.svm_rpc import SvmRpcClient
-from .deps import safe_import
-
-# Safe import optional dependencies
-web3_module = safe_import('web3')
 
 args: Any
 thread_pool: ThreadPoolExecutor
@@ -21,48 +17,59 @@ meta = PackageMeta(package="chomp")
 
 
 class ThreadPoolProxy:
+  """
+  Simplified ThreadPoolExecutor proxy for legacy compatibility
+  """
 
-  def __init__(self):
-    self._thread_pool = None
+  def __init__(self, max_workers: Optional[int] = None):
+    self._thread_pool: Optional[ThreadPoolExecutor] = None
+    self._max_workers = max_workers
 
   @property
   def thread_pool(self) -> ThreadPoolExecutor:
-    if not self._thread_pool:
-      self._thread_pool = ThreadPoolExecutor(
-          max_workers=cpu_count() if args.threaded else 2)
+    if self._thread_pool is None:
+      max_workers = self._max_workers or int(env.get("THREAD_POOL_SIZE", "4"))
+      self._thread_pool = ThreadPoolExecutor(max_workers=max_workers,
+                                             thread_name_prefix="chomp-worker")
+      log_info(f"Initialized thread pool with {max_workers} workers")
     return self._thread_pool
 
-  def __getattr__(self, name):
-    return getattr(self.thread_pool, name)
+  def submit(self, fn: Callable, *args, **kwargs):
+    return self.thread_pool.submit(fn, *args, **kwargs)
+
+  def map(self,
+          func: Callable,
+          *iterables,
+          timeout: Optional[float] = None,
+          chunksize: int = 1):
+    return self.thread_pool.map(func,
+                                *iterables,
+                                timeout=timeout,
+                                chunksize=chunksize)
+
+  def shutdown(self, wait: bool = True, cancel_futures: bool = False):
+    if self._thread_pool:
+      return self.thread_pool.shutdown(wait=wait,
+                                       cancel_futures=cancel_futures)
 
 
 class NoCLTransport(AsyncBaseTransport):
 
   async def handle_async_request(self, request: Request) -> Response:
     # rm Content-Length header if present
-    for h in ["content-length", "Content-Length", "Content-length"]:
-      if h in request.headers:
-        del request.headers[h]
-    request = Request(
-        method=request.method,
-        url=request.url,
-        headers=request.headers,
-        content=request.content,
-        stream=request.stream,
-    )
+    if "Content-Length" in request.headers:
+      del request.headers["Content-Length"]
     return await super().handle_async_request(request)
 
 
 class Web3Proxy:
 
-  def __init__(self):
-    self._by_chain = {}
+  def __init__(self, rotate_always=True):
     self._next_index_by_chain = {}
     self._rpcs_by_chain = {}
+    self.rotate_always = rotate_always
 
-  def rpcs(self,
-           chain_id: str | int,
-           load_all=False) -> dict[str | int, list[str]]:
+  def rpcs(self, chain_id: str | int, load_all=False) -> list[str]:
     if load_all and not self._rpcs_by_chain:
       self._rpcs_by_chain.update({
           k[:-10]: v.split(",")
@@ -73,100 +80,61 @@ class Web3Proxy:
       env_key = f"HTTP_RPCS_{chain_id}".upper()
       rpc_env = env.get(env_key)
       if not rpc_env:
-        raise ValueError(
-            f"Missing RPC endpoints for chain {chain_id} ({env_key} environment variable not found)"
-        )
+        raise ValueError(f"Missing RPC endpoints for chain {chain_id}")
       self._rpcs_by_chain[chain_id] = rpc_env.split(",")
     return self._rpcs_by_chain[chain_id]
 
+  def _rotate_to_next_rpc(self, chain_id: str | int) -> None:
+    """Rotate to the next RPC in the list"""
+    rpcs = self.rpcs(chain_id)
+    if len(rpcs) > 1:
+      current_index = self._next_index_by_chain.get(chain_id, 0)
+      self._next_index_by_chain[chain_id] = (current_index + 1) % len(rpcs)
+
   async def client(self, chain_id: str | int, roll=True) -> Any:
+    # Initialize or rotate RPC index
+    if chain_id not in self._next_index_by_chain:
+      self._next_index_by_chain[chain_id] = 0
+    elif roll and self.rotate_always:
+      self._rotate_to_next_rpc(chain_id)
+
+    rpcs = self.rpcs(chain_id)
     is_evm = isinstance(chain_id, int)
 
-    async def connect(rpc_url: str) -> Any:
-      try:
-        if is_evm:
-          if web3_module is None:
-            raise ImportError(
-                "Missing optional dependency 'web3'. Install with 'pip install web3' or 'pip install chomp[evm]'"
-            )
-          EvmClient = web3_module.Web3
-          c = EvmClient(EvmClient.HTTPProvider(rpc_url))
-        elif chain_id == "sui":
-          c = SuiRpcClient(rpc_url)
-        elif chain_id == "solana":
-          c = SvmRpcClient(rpc_url)
-        else:
-          raise ValueError(f"Unsupported chain: {chain_id}")
-        connected = await is_connected(c)
-        if connected:
-          log_info(f"Connected to chain {chain_id} using rpc {rpc_url}")
-          return c
-        else:
-          raise Exception("Connection failure")
-      except Exception as e:
-        log_error(
-            f"Could not connect to chain {chain_id} using rpc {rpc_url}: {e}")
-        return None
-
-    async def is_connected(c: Any) -> bool:
-      try:
-        if is_evm:
-          result = c.is_connected()
-          if hasattr(result, '__await__'):
-            return await result
-          return bool(result)
-        else:  # any of non evm rpc clients
-          return await c.is_connected()
-      except Exception:
-        return False
-
-    # Initialize chain clients list if not exists
-    if chain_id not in self._by_chain:
-      self._by_chain[chain_id] = []
-      self._next_index_by_chain[chain_id] = 0
-      index = 0
-    else:
-      index = self._next_index_by_chain[chain_id]
-      if roll:
-        index = (index + 1) % len(self.rpcs(chain_id))
-        self._next_index_by_chain[chain_id] = index
-
-    clients = self._by_chain[chain_id]
-
-    if index < len(clients):
-      c = clients[index]
-      if await is_connected(c):
-        return c
-
-    # Need to connect to a new RPC or roll to next one
-    rpcs = self.rpcs(chain_id)
-    if not rpcs:
-      raise ValueError(f"Missing RPC endpoints for chain {chain_id}")
-
-    # Try each RPC until we get a valid connection
-    max_attempts = len(rpcs)
-    attempts = 0
-
-    while attempts < max_attempts:
+    # Try each RPC until one works
+    for _ in range(len(rpcs)):
       current_index = self._next_index_by_chain[chain_id]
       rpc_url = f"https://{rpcs[current_index]}"
 
-      c = await connect(rpc_url)
-      if c is not None:
-        # Store the successful connection
-        if current_index >= len(clients):
-          self._by_chain[chain_id].append(c)
+      try:
+        from . import state
+
+        # Create client based on chain type
+        if is_evm:
+          client = web3.Web3(web3.Web3.HTTPProvider(rpc_url))
+          if not client.is_connected():
+            raise Exception("Connection failed")
+        elif chain_id == "sui":
+          client = SuiRpcClient(rpc_url,
+                                timeout=float(state.args.ingestion_timeout))
+          if not await client.is_connected():
+            raise Exception("Connection failed")
+        elif chain_id == "solana":
+          client = SvmRpcClient(rpc_url,
+                                timeout=float(state.args.ingestion_timeout))
+          if not await client.is_connected():
+            raise Exception("Connection failed")
         else:
-          self._by_chain[chain_id][current_index] = c
-        return c
+          raise ValueError(f"Unsupported chain: {chain_id}")
 
-      # Try next RPC
-      self._next_index_by_chain[chain_id] = (current_index + 1) % len(rpcs)
-      attempts += 1
+        log_info(f"Connected to chain {chain_id} using RPC {rpc_url}")
+        return client
 
-    raise Exception(
-        f"Failed to connect to any RPC for chain {chain_id} after trying {max_attempts} endpoints"
-    )
+      except Exception as e:
+        log_warn(f"RPC {rpc_url} failed for chain {chain_id}: {e}")
+        self._next_index_by_chain[chain_id] = (current_index + 1) % len(rpcs)
+
+    raise Exception(f"All RPCs failed for chain {chain_id}")
 
 
 class TsdbProxy:
@@ -175,13 +143,13 @@ class TsdbProxy:
     self._tsdb = None
 
   @property
-  def tsdb(self) -> Tsdb:
+  def tsdb(self):
     if not self._tsdb:
       raise ValueError("TSDB_ADAPTER Adapter found")
     # get_loop().run_until_complete(self._tsdb.ensure_connected())
     return self._tsdb
 
-  def set_adapter(self, db: Tsdb):
+  def set_adapter(self, db):
     self._tsdb = db
 
   def __getattr__(self, name):
@@ -248,18 +216,19 @@ class RedisProxy:
     return getattr(self.redis, name)
 
 
-class ConfigProxy:
+class IngesterConfigProxy:
 
   def __init__(self, _args):
     global args
     args = _args
     self._config = None
     self._ingester_configs = _args.ingester_configs  # Store the value to avoid proxy recursion
+    self._instance = None  # Will be set by state.init()
 
   @staticmethod
-  def load_config(INGESTER_CONFIGS: str) -> Config:
+  def load_config(INGESTER_CONFIGS: str, instance: Optional[Any] = None):
 
-    schema_path = meta.root / 'src' / 'config-schema.yml'
+    schema_path = meta.root / 'src' / 'ingester-config-schema.yml'
     schema = yamale.make_schema(str(schema_path))
 
     # Handle comma-delimited list of config files
@@ -354,14 +323,16 @@ class ConfigProxy:
       log_error(msg)
       exit(1)
 
-    return Config.from_dict(merged_config_data)
+    from .models.configs import IngesterConfig
+    return IngesterConfig.from_dict(merged_config_data, instance)
 
   @property
-  def config(self) -> Config:
+  def config(self):
     if not self._config:
       workdir = env.get('WORKDIR', '')
       self._config = self.load_config(
-          path.abspath(path.join(workdir, self._ingester_configs)))
+          path.abspath(path.join(workdir, self._ingester_configs)),
+          self._instance)
     return self._config
 
   def __getattr__(self, name):
@@ -370,5 +341,68 @@ class ConfigProxy:
       # Load config without going through __getattr__ again
       workdir = env.get('WORKDIR', '')
       self._config = self.load_config(
-          path.abspath(path.join(workdir, self._ingester_configs)))
+          path.abspath(path.join(workdir, self._ingester_configs)),
+          self._instance)
+    return getattr(self._config, name)
+
+
+class ServerConfigProxy:
+
+  def __init__(self, _args):
+    global args
+    args = _args
+    self._config = None
+    # Use server_config argument or environment variable or default
+    self._server_config_file = getattr(
+        _args, 'server_config', env.get('SERVER_CONFIG',
+                                        './server-config.yml'))
+
+  @staticmethod
+  def load_config(config_file_path: str):
+    """Load and validate admin configuration"""
+    schema_path = meta.root / 'src' / 'server-config-schema.yml'
+    schema = yamale.make_schema(str(schema_path))
+
+    workdir = env.get('WORKDIR', '')
+    abs_path = path.abspath(path.join(workdir, config_file_path))
+
+    # Create default config if file doesn't exist
+    if not path.exists(abs_path):
+      log_warn(f"Server config file not found: {abs_path}, using defaults")
+      from .models.configs import ServerConfig
+      return ServerConfig()
+
+    try:
+      config_data = yamale.make_data(abs_path)[0]
+      config_data = config_data[0] if is_iterable(config_data) else config_data
+
+      # Validate the config
+      yamale.validate(schema, [(config_data, config_file_path)])
+
+      from .models.configs import ServerConfig
+      return ServerConfig.from_dict(config_data)
+    except yamale.YamaleError as e:
+      msg = ""
+      for result in e.results:
+        msg += f"Error validating {result.data} with schema {result.schema}\n"
+        for error in result.errors:
+          msg += f" - {error}\n"
+      log_error(msg)
+      exit(1)
+    except Exception as e:
+      log_error(f"Failed to load server config: {e}")
+      # Return default config on any error
+      from .models.configs import ServerConfig
+      return ServerConfig()
+
+  @property
+  def config(self):
+    if not self._config:
+      self._config = self.load_config(self._server_config_file)
+    return self._config
+
+  def __getattr__(self, name):
+    # Delegate to the loaded config object
+    if not hasattr(self, '_config') or self._config is None:
+      self._config = self.load_config(self._server_config_file)
     return getattr(self._config, name)

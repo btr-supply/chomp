@@ -361,65 +361,56 @@ class TestUtilsSafeEval:
       pytest.skip("validation functions not implemented")
 
 
-class TestUtilsEstimators:
-  """Test utils.estimators module."""
+class TestAnalytics:
+  """Test analytics module."""
 
-  def test_estimators_imports(self):
-    """Test estimators module imports."""
+  def test_analytics_imports(self):
+    """Test analytics module imports."""
     try:
-      from src.utils import estimators
-      assert estimators is not None
+      from src import analytics
+      assert analytics is not None
     except ImportError:
-      pytest.skip("utils.estimators not available")
+      pytest.skip("analytics module not available")
 
-  def test_estimation_functions(self):
-    """Test estimation functions."""
+  def test_analytics_submodules(self):
+    """Test analytics submodules."""
     try:
-      from src.utils.estimators import estimate_memory, estimate_time, estimate_cost
+      from src.analytics import volatility, trend, momentum
+      assert volatility is not None
+      assert trend is not None
+      assert momentum is not None
+    except ImportError:
+      pytest.skip("analytics submodules not available")
 
-      # Test memory estimation
-      data_size = 1000
-      memory_est = estimate_memory(data_size)
-      assert memory_est > 0
+  def test_analytics_functions(self):
+    """Test basic analytics functions."""
+    try:
+      from src.analytics import sma, ema, std, roc
+      import polars as pl
 
-      # Test time estimation
-      time_est = estimate_time(data_size)
-      assert time_est > 0
+      # Test data
+      data = pl.Series([1.0, 2.0, 3.0, 4.0, 5.0])
 
-      # Test cost estimation
-      cost_est = estimate_cost(data_size)
-      assert cost_est >= 0
+      # Test trend functions
+      sma_result = sma(data, 3)
+      assert isinstance(sma_result, pl.Series)
+
+      ema_result = ema(data, 3)
+      assert isinstance(ema_result, pl.Series)
+
+      # Test volatility functions
+      std_result = std(data, 3)
+      assert isinstance(std_result, pl.Series)
+
+      # Test momentum functions
+      roc_result = roc(data, 1)
+      assert isinstance(roc_result, pl.Series)
 
     except ImportError:
-      pytest.skip("estimation functions not available")
+      pytest.skip("analytics functions not available")
     except Exception:
       # Functions might not be implemented yet
-      pytest.skip("estimation functions not implemented")
-
-  def test_prediction_functions(self):
-    """Test prediction functions."""
-    try:
-      from src.utils.estimators import predict_trend, forecast_value, analyze_pattern
-
-      data = [1, 2, 3, 4, 5]
-
-      # Test trend prediction
-      trend = predict_trend(data)
-      assert isinstance(trend, (str, float, int))
-
-      # Test value forecasting
-      forecast = forecast_value(data)
-      assert isinstance(forecast, (float, int))
-
-      # Test pattern analysis
-      pattern = analyze_pattern(data)
-      assert pattern is not None
-
-    except ImportError:
-      pytest.skip("prediction functions not available")
-    except Exception:
-      # Functions might not be implemented yet
-      pytest.skip("prediction functions not implemented")
+      pytest.skip("analytics functions not implemented")
 
 
 class TestUtilsArgparser:
@@ -481,8 +472,7 @@ class TestUtilsImports:
   def test_import_all_utils(self):
     """Test importing all available utils modules."""
     utils_modules = [
-        'argparser', 'date', 'estimators', 'format', 'maths', 'runtime',
-        'safe_eval', 'types'
+        'argparser', 'date', 'format', 'maths', 'runtime', 'safe_eval', 'types'
     ]
 
     imported_count = 0

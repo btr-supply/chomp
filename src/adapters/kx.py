@@ -2,11 +2,13 @@
 
 from datetime import datetime, timezone
 from os import environ as env
-from typing import Any
+from typing import Any, Optional
+
+import kx  # happy mypy
 
 from ..utils import log_error, log_info, log_warn, Interval, ago, now
-from ..model import Ingester, FieldType, Tsdb
-from ..deps import lazy_import
+from ..models.base import Tsdb, FieldType
+from ..models.ingesters import Ingester
 
 UTC = timezone.utc
 
@@ -73,26 +75,18 @@ class Kx(Tsdb):
   def __init__(self,
                host: str = "localhost",
                port: int = 5000,
-               db: str = "default",
-               user: str = "admin",
-               password: str = "pass"):
+               db: str = "chomp",
+               user: str = "chomp",
+               password: str = "chomp"):
     super().__init__(host, port, db, user, password)
-    self._pykx = None
-
-  @property
-  def pykx(self):
-    """Lazy load PyKX to avoid import errors if not installed."""
-    if self._pykx is None:
-      self._pykx = lazy_import("pykx", "pykx", "kx")
-    return self._pykx
 
   @classmethod
   async def connect(cls,
-                    host: str | None = None,
-                    port: int | None = None,
-                    db: str | None = None,
-                    user: str | None = None,
-                    password: str | None = None) -> "Kx":
+                    host: Optional[str] = None,
+                    port: Optional[int] = None,
+                    db: Optional[str] = None,
+                    user: Optional[str] = None,
+                    password: Optional[str] = None) -> "Kx":
     """Factory method to create and connect to kdb+ database."""
     self = cls(host=host or env.get("KX_HOST") or "localhost",
                port=int(port or env.get("KX_PORT") or 5000),
@@ -120,8 +114,6 @@ class Kx(Tsdb):
   async def _connect(self):
     """Establish connection to kdb+ database."""
     try:
-      # Use PyKX to establish connection
-      kx = self.pykx
 
       # Create connection with authentication if provided
       self.conn = kx.QConnection(
@@ -183,17 +175,21 @@ class Kx(Tsdb):
     log_info(f"KX kdb+ context switched to: {db}")
     self.db = db
 
-  async def create_table(self, c: Ingester, name: str = ""):
+  async def create_table(self, ing: Ingester, name: str = ""):
     """Create a table in kdb+ for the ingester data."""
-    table_name = name or c.name
-    persistent_fields = [field for field in c.fields if not field.transient]
+    table_name = name or ing.name
+    persistent_fields = [field for field in ing.fields if not field.transient]
 
     try:
-      # Build table schema
-      columns = ["ts:timestamp$()"]  # timestamp column
+      # Build table schema from ingester fields (including ts field)
+      columns = []
       for field in persistent_fields:
         kx_type = TYPES.get(field.type, "symbol")
         columns.append(f"{field.name}:`{kx_type}$()")
+
+      if not columns:
+        # Fallback for ingesters with no persistent fields
+        columns = ["value:`symbol$()"]
 
       # Create table with proper schema
       table_def = f"{table_name}:([] {'; '.join(columns)})"
@@ -205,28 +201,35 @@ class Kx(Tsdb):
       log_error(f"Failed to create KX table {table_name}", e)
       raise
 
-  async def insert(self, c: Ingester, table: str = ""):
+  async def insert(self, ing: Ingester, table: str = ""):
     """Insert single row of data into kdb+ table."""
-    table_name = table or c.name
-    persistent_fields = [field for field in c.fields if not field.transient]
+    table_name = table or ing.name
+    persistent_fields = [field for field in ing.fields if not field.transient]
 
     try:
-      # Prepare timestamp
-      ts = c.last_ingested or now()
-      ts_ns = int(ts.timestamp() * 1_000_000_000)  # nanoseconds since epoch
-
-      # Prepare values
-      values: list[str] = [str(ts_ns)]
+      # Prepare values from ingester fields (including ts field value)
+      values: list[str] = []
       for field in persistent_fields:
         value = field.value
         # Convert Python values to kdb+ compatible format
-        if field.type in ["string", "binary", "varbinary"]:
+        if field.type == "timestamp":
+          # Handle timestamp field (ts)
+          if isinstance(value, datetime):
+            ts_ns = int(value.timestamp() *
+                        1_000_000_000)  # nanoseconds since epoch
+            values.append(str(ts_ns))
+          else:
+            values.append("0N")  # kdb+ null for invalid timestamp
+        elif field.type in ["string", "binary", "varbinary"]:
           value = f"`{value}" if value else "`"
+          values.append(str(value))
         elif field.type == "bool":
           value = "1b" if value else "0b"
+          values.append(str(value))
         elif value is None:
-          value = "0N"  # kdb+ null
-        values.append(str(value))
+          values.append("0N")  # kdb+ null
+        else:
+          values.append(str(value))
 
       # Insert data
       insert_stmt = f"`{table_name} insert ({';'.join(map(str, values))})"
@@ -237,11 +240,11 @@ class Kx(Tsdb):
       raise
 
   async def insert_many(self,
-                        c: Ingester,
+                        ing: Ingester,
                         values: list[tuple],
                         table: str = ""):
     """Insert multiple rows of data into kdb+ table."""
-    table_name = table or c.name
+    table_name = table or ing.name
 
     if not values:
       return
@@ -250,11 +253,11 @@ class Kx(Tsdb):
       # Convert values to kdb+ format and insert in batch
       for value_tuple in values:
         # Create temporary ingester with these values
-        temp_c = c
-        for i, field in enumerate([f for f in c.fields if not f.transient]):
+        temp_ing = ing
+        for i, field in enumerate([f for f in ing.fields if not f.transient]):
           if i < len(value_tuple):
             field.value = value_tuple[i]
-        await self.insert(temp_c, table_name)
+        await self.insert(temp_ing, table_name)
 
     except Exception as e:
       log_error(f"Failed to insert batch data into KX table {table_name}", e)
@@ -262,8 +265,8 @@ class Kx(Tsdb):
 
   async def fetch(self,
                   table: str,
-                  from_date: datetime | None = None,
-                  to_date: datetime | None = None,
+                  from_date: Optional[datetime] = None,
+                  to_date: Optional[datetime] = None,
                   aggregation_interval: Interval = "m5",
                   columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     """Fetch data from kdb+ table with optional aggregation."""
@@ -313,8 +316,8 @@ class Kx(Tsdb):
   async def fetch_batch(
       self,
       tables: list[str],
-      from_date: datetime | None = None,
-      to_date: datetime | None = None,
+      from_date: Optional[datetime] = None,
+      to_date: Optional[datetime] = None,
       aggregation_interval: Interval = "m5",
       columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     """Fetch data from multiple kdb+ tables."""
@@ -373,3 +376,37 @@ class Kx(Tsdb):
       return "1b" if value else "0b"
     else:
       return str(value)
+
+  async def fetch_batch_by_ids(self, table: str,
+                               uids: list[str]) -> list[tuple]:
+    """Fetch multiple records by their UIDs in a single kdb+ query for efficiency"""
+    try:
+      if not uids:
+        return []
+
+      # Build kdb+ query for multiple UIDs
+      uid_list = "`" + "`".join(uids)  # Convert to kdb+ symbol list format
+      query_stmt = f"select from {table} where uid in ({uid_list})"
+
+      result = await self._execute(query_stmt)
+      if hasattr(result, 'py'):
+        # Convert kdb+ result to Python list of tuples
+        data = result.py()
+        if isinstance(data, dict):
+          # If result is a dictionary (typical kdb+ table format), convert to tuples
+          columns = list(data.keys())
+          if columns:
+            rows = []
+            num_rows = len(data[columns[0]]) if columns[0] in data else 0
+            for i in range(num_rows):
+              row = tuple(data[col][i] for col in columns)
+              rows.append(row)
+            return rows
+        elif isinstance(data, list):
+          return data
+
+      return []
+    except Exception as e:
+      log_error(
+          f"Failed to fetch batch records by IDs from KX table {table}: {e}")
+      return []

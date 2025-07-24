@@ -1,51 +1,27 @@
 from asyncio import gather, run, sleep
-from typing import Type
+import secrets
+from typing import Type, Optional
 from pathlib import Path
 
 from src.utils import (
     log_info,
     log_warn,
     log_error,
-    log_debug,
     ArgParser,
-    generate_hash,
     prettify,
 )
 from src import state
-from src.model import Config, Tsdb, TsdbAdapter
+from src.models import IngesterConfig, Tsdb, TsdbAdapter
 
 
-def get_adapter_class(adapter: TsdbAdapter) -> Type[Tsdb] | None:
+def get_adapter_class(adapter: TsdbAdapter) -> Optional[Type[Tsdb]]:
   """
     Dynamically load database adapter classes, only including those that can be imported.
     This allows the system to work with different database dependencies without breaking.
     """
-  from src.utils import safe_import
+  from src.adapters import get_adapter
 
-  # Mapping of adapter names to their module paths and class names
-  adapter_mapping = {
-      "tdengine": ("src.adapters.tdengine", "Taos"),
-      "sqlite": ("src.adapters.sqlite", "SQLite"),
-      "clickhouse": ("src.adapters.clickhouse", "ClickHouse"),
-      "duckdb": ("src.adapters.duckdb", "DuckDB"),
-      "timescale": ("src.adapters.timescale", "TimescaleDb"),
-      "opentsdb": ("src.adapters.opentsdb", "OpenTsdb"),
-      "questdb": ("src.adapters.questdb", "QuestDb"),
-      "mongodb": ("src.adapters.mongodb", "MongoDb"),
-      "influxdb": ("src.adapters.influxdb", "InfluxDb"),
-      "victoriametrics": ("src.adapters.victoriametrics", "VictoriaMetrics"),
-      "kx": ("src.adapters.kx", "Kx"),
-  }
-
-  # Build implementations dict dynamically, only including available adapters
-  implementations: dict[TsdbAdapter, Type[Tsdb]] = {}
-  for name, (module_path, class_name) in adapter_mapping.items():
-    adapter_class = safe_import(module_path, class_name)
-    if adapter_class is not None:
-      implementations[name] = adapter_class  # type: ignore[assignment]
-
-  requested_adapter = adapter.lower()  # type: ignore[assignment]
-  return implementations.get(requested_adapter)
+  return get_adapter(adapter)
 
 
 def get_available_adapters() -> list[str]:
@@ -53,65 +29,24 @@ def get_available_adapters() -> list[str]:
     Get a list of all available database adapters that can be imported.
     Useful for debugging and providing helpful error messages.
     """
-  from src.utils import safe_import
+  from src.adapters import get_adapter
 
-  adapter_mapping = {
-      "tdengine": ("src.adapters.tdengine", "Taos"),
-      "sqlite": ("src.adapters.sqlite", "SQLite"),
-      "clickhouse": ("src.adapters.clickhouse", "ClickHouse"),
-      "duckdb": ("src.adapters.duckdb", "DuckDB"),
-      "timescale": ("src.adapters.timescale", "TimescaleDb"),
-      "opentsdb": ("src.adapters.opentsdb", "OpenTsdb"),
-      "questdb": ("src.adapters.questdb", "QuestDb"),
-      "mongodb": ("src.adapters.mongodb", "MongoDb"),
-      "influxdb": ("src.adapters.influxdb", "InfluxDb"),
-      "victoriametrics": ("src.adapters.victoriametrics", "VictoriaMetrics"),
-      "kx": ("src.adapters.kx", "Kx"),
-  }
+  adapter_names = [
+      "tdengine", "sqlite", "clickhouse", "duckdb", "timescale", "questdb",
+      "mongodb", "influxdb", "victoriametrics", "kx"
+  ]
 
   available = []
-  for name, (module_path, class_name) in adapter_mapping.items():
-    if safe_import(module_path, class_name) is not None:
+  for name in adapter_names:
+    if get_adapter(name):
       available.append(name)
 
   return sorted(available)
 
 
-def create_instance_monitor():
-  """Create a system monitor ingester for collecting instance vitals every 30 seconds."""
-  from src.model import Ingester, ResourceField
-  from src import state
-
-  # Use instance name to ensure unique table per instance
-  instance_name = (state.instance.name if hasattr(state, "instance")
-                   and state.instance else "chomp_instance")
-  monitor_name = f"{instance_name}_monitor"
-
-  return Ingester(
-      name=monitor_name,
-      resource_type="timeseries",
-      ingester_type="processor",  # Use valid IngesterType
-      interval="s30",  # 30 second interval
-      fields=[
-          ResourceField(name="ts", type="timestamp"),
-          ResourceField(name="instance_name", type="string"),
-          ResourceField(name="resources_count", type="int32"),
-          ResourceField(name="cpu_usage", type="float64"),
-          ResourceField(name="memory_usage", type="float64"),
-          ResourceField(name="disk_usage", type="float64"),
-          # Geolocation fields (transient - cached but not stored in time series)
-          ResourceField(name="coordinates", type="string", transient=True),
-          ResourceField(name="timezone", type="string", transient=True),
-          ResourceField(name="country_code", type="string", transient=True),
-          ResourceField(name="location", type="string", transient=True),
-          ResourceField(name="isp", type="string", transient=True),
-      ],
-  )
-
-
-async def start_ingester(config: Config):
+async def start_ingester(config: IngesterConfig):
   # ingester specific imports
-  from src.cache import is_task_claimed, ping as redis_ping
+  from src.cache import is_task_claimed, ping as redis_ping, register_ingester, register_instance
   from src.actions import schedule, scheduler
 
   # Validate Redis connection before proceeding
@@ -134,20 +69,39 @@ async def start_ingester(config: Config):
         "No ingesters found in configuration! Check your configuration files.")
     return
 
-  log_info(f"Loaded {len(ingesters)} ingester configurations")
-  if state.args.verbose:
-    for ingester in ingesters:
-      log_debug(
-          f"  - {ingester.name} ({ingester.ingester_type}, {ingester.interval}, {len(ingester.fields)} fields)"
-      )
+  log_info(f"Loaded {len(ingesters)} ingester configurations: " + ", ".join([
+      f"{ingester.name} ({ingester.ingester_type}, {ingester.interval}, {len(ingester.fields)} fields)"
+      for ingester in ingesters
+  ]))
+
+  # Register all ingesters with full configurations
+  log_info("Registering ingesters in resource registry...")
+  registration_tasks = [register_ingester(ing) for ing in ingesters]
+  registration_results = await gather(*registration_tasks,
+                                      return_exceptions=True)
+  successful_registrations = sum(1 for r in registration_results if r is True)
+  log_info(
+      f"Successfully registered {successful_registrations}/{len(ingesters)} ingesters: {', '.join([ing.name for ing in ingesters])}"
+  )
+
+  # Register this instance
+  log_info("Registering instance...")
+  instance_registered = await register_instance(state.instance)
+  if instance_registered:
+    log_info(f"✅ Instance {state.instance.name} registered successfully")
+  else:
+    log_warn(f"⚠️ Failed to register instance {state.instance.name}")
 
   # Instance initialization is handled in state.init() during startup
 
   # Add system monitor ingester if monitored flag is set
   if state.args.monitored:
-    monitor_ingester = create_instance_monitor()
+    from src.models import InstanceMonitor
+    monitor_ingester = InstanceMonitor(state.instance)
     ingesters.append(monitor_ingester)
-    log_info("✅ System monitor ingester added to schedule")
+    # Register the monitor ingester too
+    await register_ingester(monitor_ingester)
+    log_info("✅ System monitor ingester added to schedule and registered")
 
   # late import to avoid circular dependency
   from src.cache import ensure_claim_task
@@ -170,17 +124,17 @@ async def start_ingester(config: Config):
 
     table_data = []
     claims = 0
-    for c in ingesters:
-      if c in in_range:
+    for ing in ingesters:
+      if ing in in_range:
         claims += 1
       claim_str = f"({claims}/{state.args.max_jobs})"
       table_data.append([
-          c.name[:21].ljust(24, ".") if len(c.name) > 24 else c.name,
-          c.ingester_type,
-          c.interval,
-          len(c.fields),
-          "yes 🟢" if c in unclaimed else "no 🔴",
-          f"yes 🟢 {claim_str}" if c in in_range else "no 🔴",
+          ing.name[:21].ljust(24, ".") if len(ing.name) > 24 else ing.name,
+          ing.ingester_type,
+          ing.interval,
+          len(ing.fields),
+          "yes 🟢" if ing in unclaimed else "no 🔴",
+          f"yes 🟢 {claim_str}" if ing in in_range else "no 🔴",
       ])
 
     log_info(
@@ -189,16 +143,16 @@ async def start_ingester(config: Config):
 
     # claim tasks before scheduling - handle failures gracefully
     successfully_claimed = []
-    for c in in_range:
+    for ing in in_range:
       try:
-        await ensure_claim_task(c)
-        successfully_claimed.append(c)
-        log_info(f"Successfully claimed task: {c.name}")
+        await ensure_claim_task(ing)
+        successfully_claimed.append(ing)
+        log_info(f"Successfully claimed task: {ing.name}")
       except ValueError as e:
-        log_warn(f"Failed to claim task {c.name}: {e}")
+        log_warn(f"Failed to claim task {ing.name}: {e}")
         continue
       except Exception as e:
-        log_error(f"Unexpected error claiming task {c.name}: {e}")
+        log_error(f"Unexpected error claiming task {ing.name}: {e}")
         continue
 
     if successfully_claimed:
@@ -232,8 +186,8 @@ async def start_ingester(config: Config):
     ]
     if all_tasks:
       await gather(*all_tasks)
-    else:
-      log_warn("No task scheduled")
+    # NB: Individual schedulers use deferred start pattern (start=False)
+    # so immediate tasks may be empty even when scheduling is successful
   except Exception as e:
     log_error(f"Error during task scheduling: {e}")
     return
@@ -247,9 +201,19 @@ async def start_ingester(config: Config):
   await gather(*cron_monitors)  # type: ignore
 
 
-async def start_server(config: Config):
+async def start_server():
   # server specific imports
   from src.server import start
+  from src.cache import register_instance
+
+  # Register this server instance
+  log_info("Registering server instance...")
+  instance_registered = await register_instance(state.instance)
+  if instance_registered:
+    log_info(
+        f"✅ Server instance {state.instance.name} registered successfully")
+  else:
+    log_warn(f"⚠️ Failed to register server instance {state.instance.name}")
 
   # Instance initialization is handled in state.init() during startup
 
@@ -314,9 +278,10 @@ async def main(ap: ArgParser):
 
   # start server or ingester
   try:
-    config = state.config  # ConfigProxy acts as the config object directly
-    await (start_server(config)
-           if state.args.server else start_ingester(config))
+    if state.args.server:
+      await start_server()
+    else:
+      await start_ingester(state.ingester_config)
   except KeyboardInterrupt:
     log_info("Shutting down...")
   finally:
@@ -347,7 +312,7 @@ if __name__ == "__main__":
           (
               ("-i", "--proc_id"),
               str,
-              f"chomp-{generate_hash(length=8)}",
+              f"chomp-{secrets.token_urlsafe(8)}",
               None,
               "Unique instance identifier",
           ),
@@ -364,6 +329,13 @@ if __name__ == "__main__":
               2,
               None,
               "Min sleep time between retries, in seconds",
+          ),
+          (
+              ("-it", "--ingestion_timeout"),
+              int,
+              3,
+              None,
+              "RPC/HTTP request timeout for data ingestion, in seconds",
           ),
           (
               ("-t", "--threaded"),
@@ -405,9 +377,9 @@ if __name__ == "__main__":
           (
               ("-j", "--max_jobs"),
               int,
-              15,
+              6,
               None,
-              "Max ingester jobs to run concurrently",
+              "Max concurrent resources ingested by this instance",
           ),
           (
               ("-c", "--ingester_configs"),
@@ -425,21 +397,12 @@ if __name__ == "__main__":
               "store_true",
               "Run as server (ingester by default)",
           ),
-          (("-sh", "--host"), str, "127.0.0.1", None, "FastAPI server host"),
-          (("-sp", "--port"), int, 40004, None, "FastAPI server port"),
           (
-              ("-wpi", "--ws_ping_interval"),
-              int,
-              30,
+              ("-sc", "--server_config"),
+              str,
+              "./server-config.yml",
               None,
-              "Websocket server ping interval",
-          ),
-          (
-              ("-wpt", "--ws_ping_timeout"),
-              int,
-              20,
-              None,
-              "Websocket server ping timeout",
+              "Server configuration YAML file",
           ),
           (
               ("-pi", "--ping"),

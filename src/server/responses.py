@@ -1,12 +1,12 @@
 import re
 from uuid import uuid4
-from typing import Awaitable, Tuple, Any, TypeVar
+from typing import Awaitable, Tuple, Any
 from functools import lru_cache
 from fastapi import Response
 from fastapi.exceptions import RequestValidationError, ValidationException, HTTPException, WebSocketException
 import orjson
 from ..utils import log_error
-from ..model import DataFormat
+from ..models import DataFormat
 
 ORJSON_OPTIONS = (orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_SERIALIZE_DATACLASS
                   | orjson.OPT_SERIALIZE_UUID | orjson.OPT_SERIALIZE_NUMPY)
@@ -92,15 +92,15 @@ class ApiError(HTTPException):
                trace_id=None):
 
     status_code = status_code or _get_error_code(error_msg)
-    error_msg = error_msg or "Bad Request"
+    self.trace_id = trace_id or uuid4()
+    self.headers = headers or {}
+    self.headers["Trace-ID"] = str(self.trace_id)
+    error_msg = (error_msg or "Bad Request") + f"\nTrace: {trace_id})"
     detail = error_msg
     if status_code >= 500:
       detail = "An unexpected error occurred. Please try again later. If the issue persists, please contact the team."
     self.status_code = status_code
     self.detail = detail
-    self.trace_id = trace_id or uuid4()
-    self.headers = headers or {}
-    self.headers["Trace-ID"] = str(self.trace_id)
     log_error(f"Trace [{self.trace_id}]: {error_msg}")
     super().__init__(status_code=status_code, detail=detail)
 
@@ -115,9 +115,6 @@ class ApiError(HTTPException):
 
   def __str__(self) -> str:
     return self.to_response().body.decode("utf-8")
-
-
-T = TypeVar('T')
 
 
 async def handle_service_error(

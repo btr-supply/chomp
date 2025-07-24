@@ -7,7 +7,7 @@ import os
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.deps import lazy_import, safe_import
+from chomp.src.utils.deps import lazy_import, safe_import
 
 
 class TestDepsModule:

@@ -1,10 +1,9 @@
 from asyncio import Task
 from web3 import Web3
 
-from ..model import Ingester
-from ..utils import log_debug, log_error, log_info, split_chain_addr
-from ..actions import transform_and_store, scheduler
-from ..cache import ensure_claim_task
+from ..models.ingesters import Ingester
+from ..utils import log_error, log_info, log_debug, split_chain_addr
+from ..actions import scheduler
 from .. import state
 
 
@@ -55,7 +54,7 @@ def reorder_decoded_params(decoded: list, indexed: list[bool]) -> list:
   return reordered
 
 
-async def schedule(c: Ingester) -> list[Task]:
+async def schedule(ing: Ingester) -> list[Task]:
 
   contracts: set[str] = set()
   data_by_event: dict[str, dict] = {}
@@ -66,7 +65,7 @@ async def schedule(c: Ingester) -> list[Task]:
   filter_index_by_event: dict[str, int] = {}
   last_block_by_contract: dict[str, int] = {}
 
-  for field in c.fields:
+  for field in ing.fields:
     contracts.add(field.target)
     events_by_contract.setdefault(field.target, set()).add(field.selector)
 
@@ -78,23 +77,26 @@ async def schedule(c: Ingester) -> list[Task]:
     for event in events_by_contract[contract].copy(
     ):  # copy to avoid modifying while iterating
       event_name, param_types, indexed = parse_event_signature(event)
-      index_types, non_index_types = [], []
       event_id = f"{contract}:{event}"
 
       event_hash = Web3.keccak(text=event.replace('indexed ', '')).hex()
       event_hashes[event_id] = event_hash
       event_hashes[event_hash] = event_id
 
-      for i, is_indexed in enumerate(indexed):
-        index_types.append(
-            param_types[i]) if is_indexed else non_index_types.append(
-                param_types[i])
-      index_first_types_by_event[event_id] = list(
-          index_types) + non_index_types
+      # Separate indexed and non-indexed types
+      index_types = [
+          param_types[i] for i, is_indexed in enumerate(indexed) if is_indexed
+      ]
+      non_index_types = [
+          param_types[i] for i, is_indexed in enumerate(indexed)
+          if not is_indexed
+      ]
+      index_first_types_by_event[event_id] = index_types + non_index_types
 
       events_by_contract.setdefault(contract, set()).add(event_id)
       data_by_event.setdefault(event_id, {})
 
+      # Build filter
       filter_by_contract.setdefault(
           contract, {
               "fromBlock": "latest",
@@ -113,10 +115,7 @@ async def schedule(c: Ingester) -> list[Task]:
     chain_id, addr = split_chain_addr(contract)
     client = await state.web3.client(chain_id)
     f = filter_by_contract[contract]
-    retry_count = 0
-    output = None
 
-    # Type check: only EVM clients have eth attribute
     if not hasattr(client, 'eth'):
       log_error(f"Non-EVM client for chain {chain_id}, cannot poll events")
       return
@@ -124,56 +123,55 @@ async def schedule(c: Ingester) -> list[Task]:
     current_block = client.eth.block_number
     last_block_by_contract.setdefault(contract, current_block)
     prev_block = last_block_by_contract[contract]
-    while not output and retry_count < state.args.max_retries:
+
+    for retry_count in range(state.args.max_retries):
       if state.args.verbose:
         log_debug(f"Polling for {contract} events...")
+
       start_block = prev_block
       end_block = current_block
       f.update({"fromBlock": hex(start_block), "toBlock": hex(end_block)})
+
       if start_block >= end_block:
         log_info(
-            f"No new blocks for {contract}, skipping event polling for {c.interval}"
+            f"No new blocks for {contract}, skipping event polling for {ing.interval}"
         )
         break
+
       try:
         logs = client.eth.get_logs(f)
         for log_entry in logs:
           event_id = event_hashes[log_entry["topics"][0].hex()]
-          # Ensure we have a Web3 client for decoding
-          if hasattr(client, 'eth'):
-            decoded_event = decode_log_data(
-                client, log_entry, index_first_types_by_event[event_id],
-                indexed)
-            if state.args.verbose:
-              log_debug(
-                  f"Block: {log_entry['blockNumber']} | Event: {decoded_event}"
-              )
+          decoded_event = decode_log_data(client, log_entry,
+                                          index_first_types_by_event[event_id],
+                                          indexed)
+          if state.args.verbose:
+            log_debug(
+                f"Block: {log_entry['blockNumber']} | Event: {decoded_event}")
         start_block = end_block + 1
+        break
       except Exception as error:
-        log_error(f"Failed to poll event logs for contract {c}: {error}")
-        client = await state.web3.client(chain_id, roll=True)
-        retry_count += 1
+        log_error(
+            f"Failed to poll event logs for contract {contract}: {error}")
+        # RPC rotation is handled automatically by Web3Proxy
 
-  async def ingest(c: Ingester):
-    await ensure_claim_task(c)
+  async def ingest(ing: Ingester):
+    await ing.pre_ingest()
 
-    future_by_contract = {}
     tp = state.thread_pool
-    for contract in contracts:
-      future_by_contract[contract] = tp.submit(poll_events, contract)
+    future_by_contract = {
+        contract: tp.submit(poll_events, contract)
+        for contract in contracts
+    }
 
-    for field in c.fields:
+    for field in ing.fields:
       try:
-        field.value = future_by_contract[field.target].result(timeout=3)
-        c.data_by_field[field.name] = field.value
+        field.value = future_by_contract[field.target].result(
+            timeout=state.args.ingestion_timeout)
       except Exception as e:
         log_error(f"Failed to poll events for {field.target}: {e}")
 
-    if state.args.verbose:
-      log_debug(f"Ingested {c.name} -> {c.data_by_field}")
+    await ing.post_ingest()
 
-    await transform_and_store(c)
-
-  # globally register/schedule the ingester
-  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+  task = await scheduler.add_ingester(ing, fn=ingest, start=False)
   return [task] if task is not None else []

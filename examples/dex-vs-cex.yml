@@ -1,9 +1,61 @@
-# Test configuration for monitoring
-http_api:
-  - name: TestAPI
-    target: "https://httpbin.org/json"
-    interval: "s30"
+# Test configuration CEX vs DEX
+
+vars:
+  _1: &cex_base { type: float64, interval: s10, resource_type: timeseries, tags: ["CEX", "Order Book", "CLOB"] }
+  _2: &uni_v3_base { selector: "slot0()((uint160,int24,uint16,uint16,uint16,uint8,bool))", tags: ["DEX", "Uniswap", "v3", "CLMM"]}
+  _3: &curve_stable_base { selector: "get_dy(int128,int128,uint256)((uint256))", tags: ["DEX", "Curve", "Stable", "CFMM"]}
+
+# CEXs
+http_api: []
+  # - name: BinanceFeeds
+  #   <<: *cex_base
+  #   target: https://api.binance.com/api/v3/ticker/price
+  #   pre_transformer: |
+  #     def t(ticker_data: dict):
+  #       prices = {}
+  #       for item in ticker_data:
+  #         prices[item['symbol']] = float(item.get('price') or 0)
+  #       return prices
+  #   transformers: ["{self} * {USDT}", "round4"] # rebase to USDC
+  #   fields:
+  #     # stables
+  #     - {name: USDC, transformers: ["1", "round6"]} # denomination
+  #     - {name: USDT, selector: .USDCUSDT, transformers: ["1 / {self}", "round6"]}
+  #     # flagships
+  #     - {name: BTC, selector: .BTCUSDT}
+  #     - {name: ETH, selector: .ETHUSDT}
+
+  # - name: CoinbaseFeeds
+  #   <<: *cex_base
+  #   target: https://api.coinbase.com/v2/exchange-rates?currency=USD
+  #   pre_transformer: |
+  #     def t(rate_data: dict):
+  #       usd_rates = rate_data['data']['rates']
+  #       inverted = {symbol: 1 / float(price) for symbol, price in usd_rates.items()}
+  #       return inverted
+  #   transformers: ["{self} * {USDC}", "round4"] # rebase to USDC
+  #   fields:
+  #     # stables
+  #     - {name: USDC, selector: .USDC, transformers: ["1 / {self}", "round6"]} # denomination
+  #     - {name: USDT, selector: .USDT, transformers: ["{self} * {USDC}", "round6"]}
+  #     # flagships
+  #     - {name: BTC, selector: .BTC}
+  #     - {name: ETH, selector: .ETH}
+
+# Ethereum DEXs
+evm_caller:
+  - name: EthereumFeeds
+    interval: s10
+    resource_type: timeseries
+    type: float64
     fields:
-      - name: "test_value"
-        selector: ".slideshow.slides[0].title"
-        type: "string"
+      # stables
+      - {name: USDC, transformers: ["1", "round6"]}
+      - {name: USDT, target: "1:0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7", <<: *curve_stable_base, params: [2,1,1_000_000], transformers: ["{self}[0] / 1e6", "round6"]}
+      # flagships
+      - {name: ETH.1, target: "1:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640", <<: *uni_v3_base, transformers: ["2 ** 192 / {self}[0] ** 2 * 1e12", "round4"], transient: true}
+      - {name: ETH.2, target: "1:0x4e68ccd3e89f51c3074ca5072bbac773960dfa36", <<: *uni_v3_base, transformers: ["{self}[0] ** 2 / 2 ** 192 * 1e12 * {USDT}", "round4"], transient: true}
+      - {name: WBTC.1, target: "1:0x4585fe77225b41b697c938b018e2ac67ac5a20c0", <<: *uni_v3_base, transformers: ["{self}[0] ** 2 / 2 ** 192 / 1e10 * {ETH.1}", "round4"], transient: true}
+      - {name: WBTC.2, target: "1:0xcbcdf9626bc03e24f779434178a73a0b4bad62ed", <<: *uni_v3_base, transformers: ["{self}[0] ** 2 / 2 ** 192 / 1e10 * {ETH.1}", "round4"], transient: true}
+      - {name: ETH, tags: ["DEX", "Index"], transformers: ["({ETH.1}+{ETH.2})/2", "round4"]}
+      - {name: BTC, tags: ["DEX", "Index"], transformers: ["({WBTC.1}+{WBTC.2})/2", "round4"]}

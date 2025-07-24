@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 # Add src to path for imports
 sys.path.insert(0, path.join(path.dirname(__file__), '..'))
 
-from src.deps import safe_import
+from chomp.src.utils.deps import safe_import
 
 # Check if ClickHouse dependencies are available
 asynch = safe_import("asynch")
@@ -17,7 +17,7 @@ CLICKHOUSE_AVAILABLE = asynch is not None
 # Only import if dependencies are available
 if CLICKHOUSE_AVAILABLE:
   from src.adapters.clickhouse import ClickHouse, TYPES, INTERVALS, PRECISION  # noqa: E402
-  from src.model import Ingester  # noqa: E402
+  from src.models import Ingester  # noqa: E402
 
 
 @pytest.mark.skipif(not CLICKHOUSE_AVAILABLE,
@@ -52,7 +52,7 @@ class TestClickHouseAdapter:
 
   def test_inheritance(self):
     """Test ClickHouse inherits from Tsdb."""
-    from src.model import Tsdb
+    from src.models import Tsdb
     assert issubclass(ClickHouse, Tsdb)
 
   @pytest.mark.asyncio

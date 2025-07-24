@@ -8,7 +8,7 @@ from os import environ as env, path
 # Add src to path for imports
 sys.path.insert(0, path.join(path.dirname(__file__), '..'))
 
-from src.deps import safe_import
+from chomp.src.utils.deps import safe_import
 
 # Check if TDengine dependencies are available
 taos = safe_import("taos")
@@ -17,7 +17,7 @@ DB_AVAILABLE = taos is not None
 # Only import if dependencies are available
 if DB_AVAILABLE:
   from src.adapters.tdengine import Taos, TYPES, INTERVALS, PRECISION, TIMEZONE
-  from src.model import Ingester
+  from src.models import Ingester
 
 
 @pytest.mark.skipif(not DB_AVAILABLE,

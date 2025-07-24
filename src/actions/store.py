@@ -1,137 +1,84 @@
 from datetime import datetime, timezone
-import orjson
 from typing import Optional
 
-from ..utils.date import floor_utc, now
-from ..utils.format import log_debug
+from ..utils import floor_utc, now, log_debug
 from .. import state
-from ..model import Ingester, ResourceField
+from ..models.ingesters import Ingester, TimeSeriesIngester, UpdateIngester
 from ..cache import cache, pub
-from ..actions.transform import transform_all
-from ..server.responses import ORJSON_OPTIONS
+# Removed import to avoid circular dependency - imported locally where needed
 
 UTC = timezone.utc
 
-MONITOR_TABLE_SUFFIX = "_monitor"
 
+async def store(ing: Ingester,
+                table: str = "",
+                publish: bool = True,
+                jsonify: bool = False,
+                monitor: bool = True):
+  """Store ingester data to database, cache, and optionally publish"""
+  # Cache ALL field values (including transient ones)
+  all_field_values = ing.get_field_values()
 
-def create_monitor(ingester: Ingester) -> Ingester:
-  """Create a monitor ingester for storing monitoring data"""
-  return Ingester(
-      name=f"{ingester.name}{MONITOR_TABLE_SUFFIX}",
-      resource_type="timeseries",  # Use valid ResourceType
-      interval=ingester.interval,
-      fields=[
-          ResourceField(name="instance_uid", type="string"),
-          ResourceField(name="field_count", type="int32"),
-          ResourceField(name="latency_ms", type="float64"),
-          ResourceField(name="payload_bytes", type="int64"),
-          ResourceField(name="status", type="string"),
-      ],
-      tags=ingester.tags,
-      target=""  # Correct parameter name
-  )
-
-
-async def store(c: Ingester,
-                table="",
-                publish=True,
-                jsonify=False,
-                monitor=True) -> list | None:
-  # Cache the data (cache() handles pickled vs non-pickled automatically)
-  await cache(c.name, c.values_dict(), pickled=not jsonify)
-
-  # Publish if requested
+  # Cache and publish all fields (including transient for Redis)
+  await cache(ing.name, all_field_values, pickled=not jsonify)
   if publish:
-    json_data = orjson.dumps(c.values_dict(),
-                             default=str,
-                             option=ORJSON_OPTIONS)
-    await pub(c.name, json_data.decode())
+    await pub(ing.name, all_field_values)
 
-  # Insert to time series database if not a simple value type
-  result = None
-  if c.resource_type != "value":
-    result = await state.tsdb.insert(c, table)
+  # Insert to database based on ingester type using type-based dispatch
+  if isinstance(ing, UpdateIngester):
+    result = await state.tsdb.upsert(ing, table, ing.uid)
+  elif isinstance(ing, TimeSeriesIngester) or getattr(ing, 'resource_type',
+                                                      None) == "timeseries":
+    result = await state.tsdb.insert(ing, table)
+  else:
+    # Handle update type with fallback UID
+    uid = getattr(ing, 'uid', ing.name)
+    result = await state.tsdb.upsert(ing, table, uid)
 
-    # Store monitor data if ingester has a monitor with vitals
-    if monitor and hasattr(c, 'monitor') and c.monitor is not None:
-      # Check if monitor has collected vitals from a recent request
-      if hasattr(c.monitor, 'vitals'):
-        vitals = c.monitor.vitals
-
-        # Create resource monitor ingester with unique name per resource
-        resource_monitor_name = f"{c.name}_monitor"
-
-        # Use a dict to cache resource monitor ingesters per resource
-        if not hasattr(state, 'resource_monitor_ingesters'):
-          state.resource_monitor_ingesters = {}  # type: ignore[attr-defined]
-
-        if resource_monitor_name not in state.resource_monitor_ingesters:  # type: ignore[attr-defined]
-          state.resource_monitor_ingesters[
-              resource_monitor_name] = Ingester(  # type: ignore[attr-defined]
-                  name=resource_monitor_name,
-                  resource_type="timeseries",
-                  fields=[
-                      ResourceField(name="ts", type="timestamp"),
-                      ResourceField(name="instance_name", type="string"),
-                      ResourceField(name="field_count", type="int32"),
-                      ResourceField(name="latency_ms", type="float64"),
-                      ResourceField(name="response_bytes", type="int64"),
-                      ResourceField(name="status_code", type="int32"),
-                  ])
-
-        # Update field values with vitals data
-        request_ingester = state.resource_monitor_ingesters[
-            resource_monitor_name]  # type: ignore[attr-defined]
-        request_ingester.fields[0].value = now()  # timestamp
-        request_ingester.fields[1].value = c.name  # use ingester name
-        request_ingester.fields[2].value = len(
-            [f for f in c.fields if not f.transient])
-        request_ingester.fields[3].value = vitals.latency_ms
-        request_ingester.fields[4].value = vitals.response_bytes
-        request_ingester.fields[5].value = vitals.status_code or 0
-        request_ingester.last_ingested = now()
-
-        # Store using standard flow (cache + time series)
-        await store(request_ingester,
-                    table=resource_monitor_name,
-                    monitor=False)
-
-        # Clear the vitals after storing
-        delattr(c.monitor, 'vitals')
+  # Store monitor data if available
+  monitor_ing = getattr(ing, 'monitor', None)
+  if monitor and monitor_ing:
+    # Set the monitor ingester timestamp to match the main ingester
+    monitor_ing.last_ingested = ing.last_ingested
+    await state.tsdb.insert(monitor_ing, f"{ing.name}.monitor")
 
   if state.args.verbose:
-    log_debug(f"Ingested and stored {c.name}-{c.interval}")
+    log_debug(f"Ingested and stored {ing.name}:{ing.interval}")
   return result
 
 
-async def store_batch(c: Ingester,
+async def store_batch(ing: Ingester,
                       values: list,
                       from_date: datetime,
                       to_date: Optional[datetime],
                       aggregation_interval=None) -> dict:
   if not to_date:
-    to_date = datetime.now(UTC)
-  if c.resource_type == "value":
+    to_date = now()
+  if isinstance(ing, UpdateIngester):
     raise ValueError(
-        "Cannot store batch for inplace value ingesters (series data required)"
+        "Cannot store batch for UpdateIngester (use individual upserts for update data)"
     )
-  ok = await state.tsdb.insert_many(c, values, from_date, to_date,
+  ok = await state.tsdb.insert_many(ing, values, from_date, to_date,
                                     aggregation_interval)
   if state.args.verbose:
     log_debug(
-        f"Ingested and stored {len(values)} values for {c.name}-{c.interval} [{from_date} -> {to_date}]"
+        f"Ingested and stored {len(values)} values for {ing.name}-{ing.interval} [{from_date} -> {to_date}]"
     )
   return ok
 
 
-async def transform_and_store(c: Ingester,
+async def transform_and_store(ing: Ingester,
                               table="",
                               publish=True,
                               jsonify=False,
                               monitor=True):
-  if await transform_all(c) > 0:
-    c.last_ingested = floor_utc(c.interval)
-    await store(c, table, publish, jsonify, monitor)
-  else:
-    log_debug(f"No new values for {c.name}")
+  """Transform all fields and store if any values were transformed"""
+  from ..actions.transform import transform_all
+
+  if await transform_all(ing) > 0:
+    ing.last_ingested = floor_utc(ing.interval)
+    await store(ing, table, publish, jsonify, monitor)
+    return True
+  elif state.args.verbose:
+    log_debug(f"No new values for {ing.name}")
+  return False

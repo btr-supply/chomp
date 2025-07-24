@@ -3,8 +3,12 @@ from os import environ as env
 from typing import Any
 
 from ..utils import log_error, log_info, log_warn, log_debug, Interval
-from ..model import Ingester, FieldType
+from ..models.base import FieldType
+from ..models.ingesters import Ingester
+from .. import state
 from .sql import SqlAdapter
+
+import taos  # happy mypy
 
 # TDengine data type mapping
 TYPES: dict[FieldType, str] = {
@@ -73,20 +77,6 @@ class Taos(SqlAdapter):
                user: str = "rw",
                password: str = "pass"):
     super().__init__(host, port, db, user, password)
-    self._DB_module = None
-
-  @property
-  def DB_module(self):
-    """Lazy load TDengine module to avoid import errors if not installed."""
-    if self._DB_module is None:
-      try:
-        import taos
-        self._DB_module = taos
-      except ImportError as e:
-        raise ImportError(
-            "TDengine Python client (taospy) is required for TDengine adapter. Install with: pip install taospy"
-        ) from e
-    return self._DB_module
 
   @property
   def timestamp_column_type(self) -> str:
@@ -99,34 +89,36 @@ class Taos(SqlAdapter):
                     db: str | None = None,
                     user: str | None = None,
                     password: str | None = None) -> "Taos":
-    # Debug: Print environment variables being used
-    actual_host = host or env.get("DB_HOST") or "localhost"
-    actual_port = int(port or env.get("DB_PORT") or 40002)
-    actual_db = db or env.get("DB_NAME") or "default"
-    actual_user = user or env.get("DB_RW_USER") or "rw"
-    actual_password = password or env.get("DB_RW_PASS") or "pass"
+    # Use logging instead of print statements
+    actual_host = cls._get_config_value(host, "DB_HOST", "localhost")
+    actual_port = cls._get_port_value(port, "DB_PORT", 40002)
+    actual_db = cls._get_config_value(db, "DB_NAME", "default")
+    actual_user = cls._get_config_value(user, "DB_RW_USER", "rw")
+    actual_password = cls._get_config_value(password, "DB_RW_PASS", "pass")
 
-    print("🔍 TDengine Connect Debug:")
-    print(f"  Environment DB_HOST: {env.get('DB_HOST')}")
-    print(f"  Environment DB_PORT: {env.get('DB_PORT')}")
-    print(f"  Environment DB_NAME: {env.get('DB_NAME')}")
-    print(f"  Environment DB_RW_USER: {env.get('DB_RW_USER')}")
-    print(
-        f"  Actual values: {actual_user}@{actual_host}:{actual_port}/{actual_db}"
-    )
+    log_debug(f"""TDengine Connect Debug:
+  Environment DB_HOST: {env.get('DB_HOST')}
+  Environment DB_PORT: {env.get('DB_PORT')}
+  Environment DB_NAME: {env.get('DB_NAME')}
+  Environment DB_RW_USER: {env.get('DB_RW_USER')}
+  Actual values: {actual_user}@{actual_host}:{actual_port}/{actual_db}""")
 
-    self = cls(host=actual_host,
-               port=actual_port,
-               db=actual_db,
-               user=actual_user,
-               password=actual_password)
+    # Use **kwargs approach for cleaner constructor call
+    params = {
+        'host': actual_host,
+        'port': actual_port,
+        'db': actual_db,
+        'user': actual_user,
+        'password': actual_password
+    }
+
+    self = cls(**params)
     await self.ensure_connected()
     return self
 
   async def _connect(self):
     """TDengine-specific connection."""
     try:
-      taos = self.DB_module
       self.conn = taos.connect(host=self.host,
                                port=self.port,
                                database=self.db,
@@ -143,7 +135,6 @@ class Taos(SqlAdapter):
             f"Database '{self.db}' does not exist on {self.host}:{self.port}, creating it now..."
         )
         # Connect without database to create it
-        taos = self.DB_module
         self.conn = taos.connect(host=self.host,
                                  port=self.port,
                                  user=self.user,
@@ -166,16 +157,22 @@ class Taos(SqlAdapter):
   async def _close_connection(self):
     """TDengine-specific connection closing."""
     if self.cursor:
-      self.cursor.close()
+      try:
+        self.cursor.close()
+      except Exception:
+        pass  # Ignore close errors
     if self.conn:
-      self.conn.close()
+      try:
+        self.conn.close()
+      except Exception:
+        pass  # Ignore close errors
     self.conn = None
     self.cursor = None
 
   async def _execute(self, query: str, params: tuple = ()):
-    """Execute TDengine query."""
+    """Execute TDengine query with safer parameter handling."""
     # TDengine doesn't support parameterized queries the same way
-    # For now, we'll use simple string formatting (not ideal for production)
+    # Use safer parameter substitution
     if params:
       formatted_query = query
       for param in params:
@@ -184,14 +181,18 @@ class Taos(SqlAdapter):
           formatted_query = formatted_query.replace(
               "?", self._format_timestamp(param), 1)
         elif isinstance(param, str):
-          formatted_query = formatted_query.replace("?", f"'{param}'", 1)
+          # Escape single quotes to prevent SQL injection
+          escaped_param = param.replace("'", "''")
+          formatted_query = formatted_query.replace("?", f"'{escaped_param}'",
+                                                    1)
+        elif param is None:
+          formatted_query = formatted_query.replace("?", "NULL", 1)
         else:
           formatted_query = formatted_query.replace("?", str(param), 1)
     else:
       formatted_query = query
 
     # Only log debug messages when verbose flag is enabled
-    from .. import state
     if state.args.verbose:
       log_debug(f"TDengine executing: {formatted_query[:200]}..."
                 )  # Just show first 200 chars
@@ -205,17 +206,17 @@ class Taos(SqlAdapter):
     result = self.cursor.fetchall()
 
     # Debug: Log the structure to understand the issue
-    from .. import state
-    if state.args.verbose:
-      log_debug(f"TDengine _fetch result type: {type(result)}")
+    if state.args.verbose and result:
+      debug_info = [f"TDengine _fetch result type: {type(result)}"]
+      debug_info.append(f"TDengine _fetch result length: {len(result)}")
       if result:
-        log_debug(f"TDengine _fetch result length: {len(result)}")
-        log_debug(f"TDengine _fetch first row type: {type(result[0])}")
-        log_debug(f"TDengine _fetch first row content: {result[0]}")
+        debug_info.append(f"TDengine _fetch first row type: {type(result[0])}")
+        debug_info.append(f"TDengine _fetch first row content: {result[0]}")
         if hasattr(result[0], '__len__') and len(result[0]) > 0:
-          log_debug(
+          debug_info.append(
               f"TDengine _fetch first row first element type: {type(result[0][0])}"
           )
+      log_debug("\n".join(debug_info))
 
     return result
 
@@ -229,8 +230,13 @@ class Taos(SqlAdapter):
     return f"`{identifier}`"
 
   def _format_timestamp(self, timestamp: datetime) -> str:
-    """Format timestamp for TDengine - remove timezone suffix."""
+    """Format timestamp for TDengine with timezone handling."""
     # TDengine doesn't handle ISO 8601 timezone suffixes well
+    # Convert to UTC if timezone-aware, then format
+    if timestamp.tzinfo is not None:
+      utc_tuple = timestamp.utctimetuple()
+      timestamp = datetime(*utc_tuple[:6])
+
     # Use format: 'YYYY-MM-DD HH:MM:SS.mmm'
     return f"'{timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}'"
 
@@ -238,39 +244,48 @@ class Taos(SqlAdapter):
                       name: str,
                       options: dict = {},
                       force: bool = False):
-    """TDengine-specific database creation."""
+    """TDengine-specific database creation with improved retry logic."""
     from asyncio import sleep
 
     base = "CREATE DATABASE IF NOT EXISTS" if not force else "CREATE DATABASE"
     max_retries = 10
 
-    for i in range(max_retries):
+    # Database creation with retry
+    for attempt in range(max_retries):
       try:
         self.cursor.execute(
             f"{base} {name} PRECISION '{PRECISION}' BUFFER 256 KEEP 3650d;"
         )  # 10 years max archiving
         break
       except Exception as e:
-        log_warn(
-            f"Retrying to create database {name} in {i}/{max_retries} ({e})..."
-        )
-        await sleep(1)
-
-    if i < max_retries - 1:
-      log_info(f"Created database {name} with time precision {PRECISION}")
-
-      # Readiness check
-      for i in range(max_retries):
-        try:
-          self.cursor.execute(f"USE {name};")
-          log_info(f"Database {name} is now ready.")
-          return
-        except Exception as e:
+        if attempt < max_retries - 1:
           log_warn(
-              f"Retrying to use database {name} in {i}/{max_retries} ({e})...")
+              f"Retrying to create database {name} attempt {attempt + 1}/{max_retries}: {e}"
+          )
           await sleep(1)
+        else:
+          raise ValueError(
+              f"Failed to create database {name} after {max_retries} attempts: {e}"
+          )
 
-    raise ValueError(f"Database {name} readiness check failed.")
+    log_info(f"Created database {name} with time precision {PRECISION}")
+
+    # Readiness check with retry
+    for attempt in range(max_retries):
+      try:
+        self.cursor.execute(f"USE {name};")
+        log_info(f"Database {name} is now ready.")
+        return
+      except Exception as e:
+        if attempt < max_retries - 1:
+          log_warn(
+              f"Retrying to use database {name} attempt {attempt + 1}/{max_retries}: {e}"
+          )
+          await sleep(1)
+        else:
+          raise ValueError(
+              f"Database {name} readiness check failed after {max_retries} attempts: {e}"
+          )
 
   async def use_db(self, db: str):
     """TDengine-specific database switching."""
@@ -282,12 +297,17 @@ class Taos(SqlAdapter):
   def _build_create_table_sql(self, c: Ingester, table_name: str) -> str:
     """TDengine-specific CREATE TABLE syntax."""
     persistent_fields = [field for field in c.fields if not field.transient]
-    fields = ", ".join(
-        [f"`{field.name}` {TYPES[field.type]}" for field in persistent_fields])
+
+    if not persistent_fields:
+      # Fallback for ingesters with no persistent fields
+      fields = "`value` nchar"
+    else:
+      fields = ", ".join([
+          f"`{field.name}` {TYPES[field.type]}" for field in persistent_fields
+      ])
 
     return f"""
     CREATE TABLE IF NOT EXISTS {self.db}.`{table_name}` (
-      ts timestamp,
       {fields}
     );
     """
@@ -319,7 +339,7 @@ class Taos(SqlAdapter):
     """TDengine-specific column information query."""
     try:
       result = await self._fetch(f"DESCRIBE {self.db}.`{table}`")
-      return [row[0] for row in result if row[0] != "ts"]
+      return [row[0] for row in result]
     except Exception:
       return []
 

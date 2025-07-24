@@ -1,6 +1,7 @@
 import orjson
-import httpx
-from typing import Optional, Any
+from typing import Any, Optional
+
+from ..utils.http import post
 
 
 class JsonRpcClient:
@@ -14,21 +15,25 @@ class JsonRpcClient:
     self.headers = headers or {"Content-Type": "application/json"}
     self.timeout = timeout
     self.jsonrpc_version = jsonrpc_version
-    self._client: Optional[httpx.AsyncClient] = None
-    self.connect()
+    self.user: Optional[str] = None
+    self.password: Optional[str] = None
+
+  def set_auth(self, user: str, password: str) -> None:
+    """Set authentication credentials."""
+    self.user = user
+    self.password = password
 
   def connect(self) -> None:
-    if not self._client:
-      self._client = httpx.AsyncClient(timeout=self.timeout)
+    # Connection is handled automatically by singleton HTTP client
+    pass
 
   async def disconnect(self) -> None:
-    if self._client:
-      await self._client.aclose()
-      self._client = None
+    # Singleton client is managed globally
+    pass
 
   async def reconnect(self) -> None:
-    await self.disconnect()
-    self.connect()
+    # No need to reconnect with singleton
+    pass
 
   async def ping(self) -> bool:
     try:
@@ -38,8 +43,6 @@ class JsonRpcClient:
       return False
 
   async def is_connected(self) -> bool:
-    if not self._client:
-      return False
     return await self.ping()
 
   async def call(self,
@@ -47,11 +50,6 @@ class JsonRpcClient:
                  params: Optional[Any] = None,
                  request_id: int = 1,
                  ensure_connected=True) -> Any:
-    if ensure_connected and not await self.is_connected():
-      self.connect()
-      if not await self.is_connected():
-        raise Exception("Failed to establish connection")
-
     payload = {
         "jsonrpc": self.jsonrpc_version,
         "method": method,
@@ -65,12 +63,13 @@ class JsonRpcClient:
                                 | orjson.OPT_SERIALIZE_DATACLASS)
     headers = self.headers.copy()
     headers["Content-Length"] = str(len(json_payload))
+
     try:
-      if self._client is None:
-        raise Exception("Client not connected")
-      response = await self._client.post(self.endpoint,
-                                         content=json_payload,
-                                         headers=headers)
+      response = await post(self.endpoint,
+                            content=json_payload,
+                            headers=headers,
+                            user=self.user,
+                            password=self.password)
       response.raise_for_status()  # Raise an error for HTTP-level issues
       data = response.json()
     except Exception as e:

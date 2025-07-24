@@ -96,6 +96,9 @@ env.py
 .env
 .env.*
 !.env.example
+server-config.yml
+server-config.*.yml
+!server-config.example.yml
 .venv
 env/
 venv/
@@ -104,8 +107,7 @@ env.bak/
 venv.bak/
 
 # Celery stuff
-celerybeat-schedule
-celerybeat.pid
+celerybeat*
 
 # Chomp runtime files
 .pid
@@ -155,4 +157,7 @@ bs.py # Assuming this is a temporary script, if not, remove from here
 *dump.txt
 
 # Chomp-specific temporary and generated files
-uid
+.runtime
+
+# nested repo
+ui

@@ -3,12 +3,13 @@ import pytest
 import sys
 import os
 from unittest.mock import Mock, patch, AsyncMock
-from datetime import datetime, timezone
+from datetime import datetime
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.deps import safe_import
+from chomp.src.utils.deps import safe_import
+from src.utils.date import now
 
 # Check if MongoDB dependencies are available
 motor = safe_import("motor")
@@ -31,7 +32,7 @@ class TestMongoDBAdapter:
     mock.name = "test_ingester"
     mock.interval = "m5"
     mock.tags = ["tag1", "tag2"]
-    mock.last_ingested = datetime.now(timezone.utc)
+    mock.last_ingested = now()
 
     # Mock fields
     mock_field1 = Mock()
@@ -637,8 +638,7 @@ class TestMongoDBAdapter:
     mock_database.__getitem__.return_value = mock_collection
     adapter.database = mock_database
 
-    test_values = [(datetime.now(timezone.utc), 100, "value1"),
-                   (datetime.now(timezone.utc), 200, "value2")]
+    test_values = [(now(), 100, "value1"), (now(), 200, "value2")]
 
     with patch.object(adapter, 'ensure_connected'):
       await adapter.insert_many(mock_ingester, test_values)
@@ -688,7 +688,7 @@ class TestMongoDBAdapter:
     mock_database.__getitem__.return_value = mock_collection
     adapter.database = mock_database
 
-    test_values = [(datetime.now(timezone.utc), 100, "value1")]
+    test_values = [(now(), 100, "value1")]
 
     with patch.object(adapter, 'ensure_connected'), \
          patch.object(adapter, 'create_table') as mock_create_table, \
@@ -789,16 +789,15 @@ class TestMongoDBAdapter:
     mock_database = Mock()
     mock_collection = Mock()
     mock_cursor = Mock()
-    mock_cursor.to_list = AsyncMock(
-        return_value=[{
-            "ts": datetime.now(timezone.utc),
-            "field1": 100,
-            "field2": "value1"
-        }, {
-            "ts": datetime.now(timezone.utc),
-            "field1": 200,
-            "field2": "value2"
-        }])
+    mock_cursor.to_list = AsyncMock(return_value=[{
+        "ts": now(),
+        "field1": 100,
+        "field2": "value1"
+    }, {
+        "ts": now(),
+        "field1": 200,
+        "field2": "value2"
+    }])
     mock_collection.aggregate.return_value = mock_cursor
     mock_database.__getitem__.return_value = mock_collection
     adapter.database = mock_database
@@ -806,8 +805,8 @@ class TestMongoDBAdapter:
     with patch.object(adapter, 'ensure_connected'), \
          patch('src.adapters.mongodb.now') as mock_now, \
          patch('src.adapters.mongodb.ago') as mock_ago:
-      mock_now.return_value = datetime.now(timezone.utc)
-      mock_ago.return_value = datetime.now(timezone.utc)
+      mock_now.return_value = now()
+      mock_ago.return_value = now()
 
       columns, data = await adapter.fetch("test_table",
                                           columns=["field1", "field2"])
@@ -837,8 +836,8 @@ class TestMongoDBAdapter:
     with patch.object(adapter, 'ensure_connected'), \
          patch('src.adapters.mongodb.now') as mock_now, \
          patch('src.adapters.mongodb.ago') as mock_ago:
-      mock_now.return_value = datetime.now(timezone.utc)
-      mock_ago.return_value = datetime.now(timezone.utc)
+      mock_now.return_value = now()
+      mock_ago.return_value = now()
 
       columns, data = await adapter.fetch("test_table")
 
@@ -864,8 +863,8 @@ class TestMongoDBAdapter:
          patch('src.adapters.mongodb.now') as mock_now, \
          patch('src.adapters.mongodb.ago') as mock_ago, \
          patch('src.adapters.mongodb.log_error') as mock_log_error:
-      mock_now.return_value = datetime.now(timezone.utc)
-      mock_ago.return_value = datetime.now(timezone.utc)
+      mock_now.return_value = now()
+      mock_ago.return_value = now()
 
       with pytest.raises(Exception, match="Fetch error"):
         await adapter.fetch("test_table")
@@ -883,12 +882,9 @@ class TestMongoDBAdapter:
 
     with patch.object(adapter, 'fetch') as mock_fetch, \
          patch('asyncio.gather') as mock_gather:
-      mock_fetch.return_value = (["ts", "field1"],
-                                 [(datetime.now(timezone.utc), 100)])
-      mock_gather.return_value = [
-          (["ts", "field1"], [(datetime.now(timezone.utc), 100)]),
-          (["ts", "field1"], [(datetime.now(timezone.utc), 200)])
-      ]
+      mock_fetch.return_value = (["ts", "field1"], [(now(), 100)])
+      mock_gather.return_value = [(["ts", "field1"], [(now(), 100)]),
+                                  (["ts", "field1"], [(now(), 200)])]
 
       columns, data = await adapter.fetch_batch(["table1", "table2"])
 
@@ -897,7 +893,7 @@ class TestMongoDBAdapter:
 
   def test_mongodb_inheritance(self):
     """Test that MongoDb inherits from Tsdb."""
-    from src.model import Tsdb
+    from src.models import Tsdb
 
     adapter = MongoDb(host="localhost",
                       port=27017,

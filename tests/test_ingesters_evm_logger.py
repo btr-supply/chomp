@@ -7,7 +7,7 @@ import os
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.deps import safe_import
+from chomp.src.utils.deps import safe_import
 
 # Check if EVM dependencies are available
 web3 = safe_import("web3")
@@ -17,7 +17,7 @@ EVM_AVAILABLE = web3 is not None
 if EVM_AVAILABLE:
   from src.ingesters.evm_logger import (parse_event_signature, decode_log_data,
                                         reorder_decoded_params, schedule)
-  from src.model import Ingester, ResourceField
+  from src.models import Ingester, ResourceField
 
 
 @pytest.mark.skipif(not EVM_AVAILABLE,

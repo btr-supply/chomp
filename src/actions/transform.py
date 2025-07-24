@@ -2,64 +2,80 @@ import re
 import string
 import orjson
 from hashlib import sha256, md5
+from blake3 import blake3
 import numpy as np
 from asyncio import TimeoutError as FutureTimeoutError
-from typing import Callable, Any, Dict
+from typing import Callable, Any
+from dataclasses import dataclass
 
 from .. import state
-from ..model import Ingester, ResourceField
-from ..utils import safe_eval, interval_to_delta, log_debug, log_error
+from ..models.base import SYS_FIELDS, ResourceField
+from ..models.ingesters import Ingester
+from ..utils import now, safe_eval, interval_to_delta, log_debug, log_error
+from ..utils.decorators import cache as _cache
+from ..utils.format import safe_str, split_words
+# from ..utils.mitch import (
+#   mitch_ticker_id_transformer,
+#   mitch_tickers_transformer,
+#   mitch_trades_transformer,
+#   mitch_orders_transformer
+# )
 from ..server.responses import ORJSON_OPTIONS
 from ..actions.load import load
 from ..cache import get_cache
 
+
 BASE_TRANSFORMERS: dict[str, Callable] = {
     "lower":
-    lambda r, self: str(self).lower(),
+    lambda r, self: safe_str(self).lower(),
     "upper":
-    lambda r, self: str(self).upper(),
+    lambda r, self: safe_str(self).upper(),
     "capitalize":
-    lambda r, self: str(self).capitalize(),
+    lambda r, self: safe_str(self).capitalize(),
     "title":
-    lambda r, self: str(self).title(),
+    lambda r, self: safe_str(self).title(),
     "int":
     lambda r, self: int(self),
     "float":
     lambda r, self: float(self),
     "str":
-    lambda r, self: str(self),
+    lambda r, self: safe_str(self),
     "bool":
     lambda r, self: bool(self),
     "to_json":
     lambda r, self: orjson.dumps(self, option=ORJSON_OPTIONS).decode(),
     "to_snake":
-    lambda r, self: "_".join(self.lower().split(" ")),
+    lambda r, self: "_".join(split_words(self)),
     "to_kebab":
-    lambda r, self: "-".join(self.lower().split(" ")),
+    lambda r, self: "-".join(split_words(self)),
     "slugify":
-    lambda r, self: "-".join(self.lower().split(" ")),
+    lambda r, self: "-".join(split_words(self)),
     "to_camel":
-    lambda r, self: "".join([i.capitalize() for i in self.split(" ")]),
+    lambda r, self: "".join([i.capitalize() for i in split_words(self)]),
     "to_pascal":
-    lambda r, self: "".join([i.capitalize() for i in self.split(" ")]),
+    lambda r, self: "".join([i.capitalize() for i in split_words(self)]),
     "strip":
-    lambda r, self: str(self).strip(),
+    lambda r, self: safe_str(self).strip(),
     "shorten_address":
-    lambda r, self: f"{self[:6]}...{self[-4:]}",  # shorten evm address
+    lambda r, self: f"{self[:6]}...{self[-4:]}"
+    if len(safe_str(self)) > 10 else safe_str(self),
     "remove_punctuation":
-    lambda r, self: self.translate(str.maketrans('', '', string.punctuation)),
+    lambda r, self: safe_str(self).translate(
+        str.maketrans('', '', string.punctuation)),
     "reverse":
-    lambda r, self: str(self)[::-1],
+    lambda r, self: safe_str(self)[::-1],
     "bin":
-    lambda r, self: bin(int(self))[2:],  # int to binary
+    lambda r, self: bin(int(self))[2:],
     "hex":
-    lambda r, self: hex(int(self))[2:],  # int to hex
+    lambda r, self: hex(int(self))[2:],
     "sha256digest":
-    lambda r, self: sha256(str(self).encode()).hexdigest(),
+    lambda r, self: sha256(safe_str(self).encode()).hexdigest(),
     "md5digest":
-    lambda r, self: md5(str(self).encode()).hexdigest(),
+    lambda r, self: md5(safe_str(self).encode()).hexdigest(),
+    "blake3digest":
+    lambda r, self: blake3(safe_str(self).encode()).hexdigest(),
     "round":
-    lambda r, self: round(float(self)),  # TODO: genericize to roundN
+    lambda r, self: round(float(self)),
     "round2":
     lambda r, self: round(float(self), 2),
     "round4":
@@ -70,6 +86,15 @@ BASE_TRANSFORMERS: dict[str, Callable] = {
     lambda r, self: round(float(self), 8),
     "round10":
     lambda r, self: round(float(self), 10),
+    # MITCH transformers
+    # "mitch_ticker_id":
+    # mitch_ticker_id_transformer,
+    # "mitch_tickers":
+    # mitch_tickers_transformer,
+    # "mitch_trades":
+    # mitch_trades_transformer,
+    # "mitch_orders":
+    # mitch_orders_transformer,
 }
 
 SERIES_TRANSFORMERS: dict[str, Callable] = {
@@ -84,10 +109,91 @@ SERIES_TRANSFORMERS: dict[str, Callable] = {
     "prod": lambda r, series: np.prod(series)
 }
 
-# Cache for storing cached data to avoid multiple Redis calls per transformation
-_cached_data_cache: Dict[str, Any] = {}
+
+@dataclass
+class CompiledTransformer:
+  """Represents a pre-compiled transformation function."""
+  raw: str
+  # The compiled function expects a dict of all required values and the field's own value.
+  steps: Callable[[dict[str, Any], Any], Any]
+  field_references: set[str]
+  dotted_references: set[
+      str]  # References with dots that may be local or cached
+  series_steps: list[tuple[
+      str, str, str, str]]  # (placeholder, target, function, lookback)
+  has_self_reference: bool
 
 
+@_cache(ttl=3600, maxsize=1024)
+def compile_transformer(transformer: str) -> CompiledTransformer:
+  """Compiles a transformer string into a callable function."""
+
+  # 1. Handle simple cases first (base transformers and literals)
+  if not re.search(r'\{.+\}', transformer):
+    base_transformer_func = BASE_TRANSFORMERS.get(transformer)
+    if base_transformer_func:
+      compiled_func = lambda data, field_value: base_transformer_func(
+          None, field_value)
+      has_self = True
+    else:
+      try:
+        literal_value = float(transformer)
+        compiled_func = lambda data, field_value: literal_value
+        has_self = False
+      except ValueError:
+        compiled_func = lambda data, field_value: transformer
+        has_self = False
+
+    return CompiledTransformer(raw=transformer,
+                               steps=compiled_func,
+                               field_references=set(),
+                               dotted_references=set(),
+                               series_steps=[],
+                               has_self_reference=has_self)
+
+  # 2. Parse complex transformers
+  field_refs, dotted_refs, series_steps = set(), set(), []
+  has_self = '{self}' in transformer
+  for i, ref in enumerate(re.findall(r'\{([^}]+)\}', transformer)):
+    if '::' in ref:
+      target, func_lookback = ref.split('::', 1)
+      match = re.match(r'(.+?)\((.+?)\)', func_lookback)
+      if match:
+        func, lookback = match.groups()
+        series_steps.append((f"__series_{i}__", target.strip(), func.strip(),
+                           lookback.strip()))
+    elif '.' in ref:
+      dotted_refs.add(ref)
+    elif ref != 'self':
+      field_refs.add(ref)
+
+  # 3. Build lambda string
+  lambda_body = transformer
+  if has_self:
+    lambda_body = lambda_body.replace('{self}', 'field_value')
+  for ref in field_refs | dotted_refs:
+    lambda_body = lambda_body.replace(f'{{{ref}}}', f"data['{ref}']")
+  for placeholder, target, func, lookback in series_steps:
+    lambda_body = lambda_body.replace(f'{{{target}::{func}({lookback})}}',
+                                      f"data['{placeholder}']")
+
+  # 4. Compile and return
+  try:
+    compiled_func = safe_eval(f"lambda data, field_value: {lambda_body}",
+                              lambda_check=True)
+  except Exception as e:
+    log_error(f"Failed to compile transformer '{transformer}': {e}")
+    compiled_func = lambda data, field_value: field_value
+
+  return CompiledTransformer(raw=transformer,
+                             steps=compiled_func,
+                             field_references=field_refs,
+                             dotted_references=dotted_refs,
+                             series_steps=series_steps,
+                             has_self_reference=has_self)
+
+
+@_cache(ttl=300, maxsize=256)
 async def get_cached_field_value(ingester_name: str,
                                  field_name: str,
                                  index: int = 0):
@@ -97,38 +203,72 @@ async def get_cached_field_value(ingester_name: str,
   For 'idx' field: Returns the entire idx dict or a specific field within idx
   For other fields: Returns the direct field value
   """
-  cache_key_name = f"{ingester_name}"
-
-  # Check local cache first
-  if cache_key_name in _cached_data_cache:
-    cached_data = _cached_data_cache[cache_key_name]
-  else:
-    # Fetch from Redis
-    cached_data = await get_cache(cache_key_name, pickled=True)
-    if cached_data:
-      _cached_data_cache[cache_key_name] = cached_data
-
+  cached_data = await get_cache(ingester_name, pickled=True)
   if not cached_data:
     log_error(f"No cached data found for {ingester_name}")
     return None
 
-  # Handle 'idx' field access
+  # Handle field access with unified logic
   if field_name == "idx":
-    if "idx" in cached_data:
-      return cached_data["idx"]
-    else:
+    result = cached_data.get("idx")
+    if not result and state.args.verbose:
       log_debug(
           f"No 'idx' field found in cached data for {ingester_name}, may not have been generated yet"
       )
-      return None
+    return result
 
   # Handle regular field access
-  if field_name in cached_data:
-    return cached_data[field_name]
-  else:
+  result = cached_data.get(field_name)
+  if result is None:
     log_error(
         f"Field {field_name} not found in cached data for {ingester_name}")
-    return None
+  return result
+
+
+async def get_cached_field_values_batch(
+    dotted_refs: set[str]) -> dict[str, Any]:
+  """
+  Batch retrieve cached field values from Redis for optimal performance.
+
+  Args:
+    dotted_refs: Set of dotted references like {"BinanceFeeds.USDT", "AVAX.idx"}
+
+  Returns:
+    Dict mapping dotted references to their field values
+  """
+  from ..cache import get_cache_batch
+
+  ref_map = {ref: parse_cached_reference(ref) for ref in dotted_refs}
+  ingester_names = {ingester for ingester, _ in ref_map.values() if ingester}
+
+  if not ingester_names:
+    return {}
+
+  cached_data_batch = await get_cache_batch(list(ingester_names), pickled=True)
+
+  results = {}
+  for ref, (ingester_name, field_name) in ref_map.items():
+    if not ingester_name:
+      log_error(f"Invalid dotted reference format: {ref}")
+      continue
+
+    ingester_data = cached_data_batch.get(ingester_name)
+    if not ingester_data:
+      log_error(f"No cached data found for ingester {ingester_name}")
+      results[ref] = None
+      continue
+
+    field_value = ingester_data.get(field_name)
+
+    if field_name == "idx" and not field_value and state.args.verbose:
+      log_debug(f"No 'idx' field found in cached data for {ingester_name}")
+    elif field_value is None:
+      log_error(
+          f"Field '{field_name}' not found in cached data for {ingester_name}")
+
+    results[ref] = field_value
+
+  return results
 
 
 def parse_cached_reference(ref_str: str):
@@ -147,154 +287,97 @@ def parse_cached_reference(ref_str: str):
   return ingester_name, field_name
 
 
-async def process_cached_references(c: Ingester, transformer: str):
-  """
-  Process cached field references like {AVAX.idx} and replace them with values
-  """
-  # Find all field references in the transformer
-  cached_refs = re.findall(r'\{([^}]+)\}', transformer)
-
-  for ref in cached_refs:
-    # Skip if it's a series transformer (contains '::')
-    if '::' in ref:
-      continue
-
-    # Skip if it's 'self' reference
-    if ref == 'self':
-      continue
-
-    # Skip if it's already a known field in current ingester
-    if ref in c.data_by_field:
-      continue
-
-    # Parse the reference
-    ingester_name, field_name = parse_cached_reference(ref)
-
-    # Determine if this is a cached reference
-    is_cached_reference = False
-
-    if field_name == 'idx':
-      # Always a cached reference
-      is_cached_reference = True
-    elif ingester_name and ingester_name != c.name:
-      # Cross-ingester reference
-      is_cached_reference = True
-    elif ingester_name is None and field_name not in c.data_by_field:
-      # Could be a cached reference from same ingester
-      is_cached_reference = True
-
-    if is_cached_reference:
-      target_ingester = ingester_name or c.name
-      value = await get_cached_field_value(target_ingester, field_name)
-
-      if value is not None:
-        transformer = transformer.replace('{' + ref + '}', str(value))
-      else:
-        log_error(f"Could not resolve cached reference: {ref}")
-
-  return transformer
-
-
-# TODO: optimize
-async def apply_transformer(c: Ingester, field: ResourceField,
+async def apply_transformer(ing: "Ingester", field: ResourceField,
                             transformer: str) -> Any:
+  """Applies a transformer to a field, using pre-compiled functions."""
   if not transformer:
     return field.value
 
-  # Clear cache at the start of each transformation to ensure fresh data
-  global _cached_data_cache
-  _cached_data_cache.clear()
+  compiled_transformer = compile_transformer(transformer)
 
-  # Process cached references first
-  transformer = await process_cached_references(c, transformer)
+  if field.value is None and compiled_transformer.has_self_reference:
+    return None
 
-  # Checks if single word and does not contain injected variables ('{' or '}')
-  if bool(re.fullmatch(r"[^\s{}]+", transformer)):
-    # If transformer is numeric, return numeric evaluation
-    try:
-      return float(transformer)
-    except ValueError:
-      base_transformer = BASE_TRANSFORMERS.get(transformer)
-      if base_transformer:
-        return base_transformer(c, field.value)
-      return field.value
+  data = {}
 
-  # If transformer contains a series op "::", replace with the result of the series transformer
-  if "{" in transformer:
-    # step 0: extract the series transformers that starts with '{' and ends with '}', and contain '::'
-    search = re.search(r"\{(.+?)\}", transformer)
-    if search:
-      for group in search.groups():
-        if "::" in group:
-          # step 1: identify the target series, word between '{' and '::'
-          search = re.search(r"\{(.+?)::", transformer)
-          target = search.group(1) if search else None
-          # step 2: identify the transformer, word between '::' and '('
-          search = re.search(r"::(.+?)\(", transformer)
-          fn = search.group(1) if search else None
-          # step 3: identify the lookback, word between '(' and ')'
-          search = re.search(r"\((.+?)\)", transformer)
-          lookback = search.group(1) if search else None
-          # step 4: check integrity of the transformer
-          if not target or not fn or not lookback:
-            raise ValueError(f"Invalid transformer: {transformer}")
-          # step 5: translate the lookback timeframe into a timedelta
-          from_date = interval_to_delta(lookback, backwards=True)
-          # step 6: make sure that target is either self (field) or other resource field
-          if target == "self":
-            target_field = field
-          else:
-            # filter the resource field that match the target
-            target_field = next((f for f in c.fields if f.name == target),
-                                None)  # type: ignore[arg-type]
-            if target_field is None:
-              raise ValueError(f"Invalid transformer target: {target}")
-          # step 7: extract the series from the target field
-          from datetime import datetime, timezone
-          from_datetime = datetime.now(
-              timezone.utc) + from_date if from_date else datetime.now(
-                  timezone.utc)
-          series = await load(c, from_datetime, None)
-          # step 8: apply the series transformer
-          series_transformer = SERIES_TRANSFORMERS.get(fn)
-          if series_transformer:
-            res = series_transformer(c, series)
-            # step 9: inject the result in the transformer for recursive evaluation
-            transformer = transformer.replace('{' + group + '}', str(res))
+  # 1. Local field references
+  for ref in compiled_transformer.field_references:
+    if (local_field := ing.get_field(ref)) is not None:
+      data[ref] = local_field.value
+    else:
+      log_error(
+          f"Field '{ref}' not found in ingester '{ing.name}' for transformer '{transformer}'"
+      )
 
-  # Replace field references with their values
-  expr = transformer
-  # Replace self first
-  expr = expr.replace("{self}", str(field.value))
+  # 2. Dotted references (local or cached)
+  if compiled_transformer.dotted_references:
+    local_refs = {
+        ref
+        for ref in compiled_transformer.dotted_references
+        if ing.get_field(ref) is not None
+    }
+    cache_refs = compiled_transformer.dotted_references - local_refs
 
-  # Replace other field references
-  for fname, fvalue in c.data_by_field.items():
-    expr = expr.replace("{" + fname + "}", str(fvalue))
+    for ref in local_refs:
+      data[ref] = ing.get_field(ref).value
 
-  # Evaluate the resulting expression
-  return safe_eval(expr)
+    if cache_refs:
+      cached_values = await get_cached_field_values_batch(cache_refs)
+      for ref, value in cached_values.items():
+        if value is not None:
+          data[ref] = value
+        else:
+          log_error(
+              f"Could not resolve dotted reference '{ref}' from cache for transformer '{transformer}'"
+          )
+          return None
+
+  # 3. Series operations
+  if compiled_transformer.series_steps:
+    # This part can be further optimized with gather if multiple series ops are common
+    for placeholder, target, func, lookback in compiled_transformer.series_steps:
+      from_date = interval_to_delta(lookback, backwards=True)
+      from_datetime = now() + from_date if from_date else now()
+      series = await load(ing, from_datetime, None)
+
+      if (series_func := SERIES_TRANSFORMERS.get(func)) is not None:
+        data[placeholder] = series_func(ing, series)
+      else:
+        log_error(f"Unknown series transformer function: {func}")
+        return None
+
+  # 4. Execute
+  try:
+    return compiled_transformer.steps(data, field.value)
+  except Exception as e:
+    log_error(f"Error executing compiled transformer for '{transformer}': {e}")
+    return field.value
 
 
-async def transform(c: Ingester, f: ResourceField) -> Any:
-  for t in f.transformers or []:
-    f.value = await apply_transformer(c, f, t)
-  c.data_by_field[f.name] = f.value
+async def transform(ing: Ingester, f: ResourceField) -> Any:
+  for t in f.transformers or []:  # sequential transformer chain
+    f.value = await apply_transformer(ing, f, t)
   return f.value
 
 
-async def transform_all(c: Ingester) -> int:
+async def transform_all(ing: Ingester) -> int:
+  """Transform all fields in the ingester"""
+  # Cache clearing now handled automatically by @_cache decorator
   count = 0
-  for field in c.fields:
+  for field in ing.fields:  # sequential field transformation ()
+    # Skip transformation for protected technical fields
+    if field.name in SYS_FIELDS:
+      count += 1
+      continue
+
     try:
-      await transform(c, field)
+      await transform(ing, field)
       count += 1
     except (FutureTimeoutError, Exception) as e:
-      log_error(
-          f"{c.name}.{field.name} transformer error: {str(e)}, check {c.ingester_type} output and transformer chain"
-      )
+      field.value = None
+      log_error(f"{ing.name}.{field.name} transformer error: {str(e)}")
 
   if state.args.verbose:
-    log_debug(
-        f"Transformed {c.name} -> {orjson.dumps(dict(sorted(c.data_by_field.items())), option=ORJSON_OPTIONS).decode()}"
-    )
+    log_debug(f"Transformed {ing.name} -> {ing.get_field_values()}")
+
   return count

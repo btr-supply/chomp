@@ -1,88 +1,51 @@
 #!/bin/bash
 set -euo pipefail
 
-# Get the directory of this script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHOMP_DIR="$(dirname "$SCRIPT_DIR")"
-
-# Parse arguments
-SCOPE="${1:-chomp}"  # "chomp" or "all" (root+chomp)
+SCOPE="${1:-chomp}"
 
 echo "Formatting Python files with yapf..."
 
-format_files() {
-  local search_path="$1"
-  local exclude_patterns="$2"
-  local label="$3"
+format_python_files() {
+  local base_dir="$1"
+  local use_git="${2:-true}"
 
-  echo "Formatting $label Python files..."
+  cd "$base_dir"
 
-    local find_cmd="find $search_path -name '*.py' -type f"
-
-  # Add exclude patterns
-  if [ -n "$exclude_patterns" ]; then
-    IFS=',' read -ra EXCLUDES <<< "$exclude_patterns"
-    for exclude in "${EXCLUDES[@]}"; do
-      find_cmd="$find_cmd -not -path '$exclude'"
+  if [ "$use_git" = true ] && git rev-parse --git-dir >/dev/null 2>&1; then
+    # Format git modified files
+    { git diff --name-only --diff-filter=ACMR; git diff --name-only --cached --diff-filter=ACMR; } | \
+    sort -u | grep '\.py$' | while read -r f; do
+      [ -f "$f" ] && uv run yapf -i "$f" >/dev/null 2>&1 && echo "✅ $f" || echo "❌ $f"
+    done
+  else
+    # Format all Python files (excluding common dirs)
+    find . -name '*.py' -type f \
+      -not -path './.venv/*' \
+      -not -path './__pycache__/*' \
+      -not -path './.pytest_cache/*' \
+      -not -path './.mypy_cache/*' \
+      -not -path './.ruff_cache/*' \
+      -not -path './.*' | while read -r f; do
+      uv run yapf -i "$f" >/dev/null 2>&1 && echo "✅ $f" || echo "❌ $f"
     done
   fi
-
-  local total=0
-  eval "$find_cmd" | while read -r f; do
-    # Skip files with corrupted extensions or weird names
-    if [[ "$f" =~ \.py[a-z]+\.py$ ]] || [[ "$f" =~ \.py/.+\.py$ ]]; then
-      continue
-    fi
-
-    if [ -f "$f" ] && [[ "$f" =~ \.py$ ]]; then
-      if uv run yapf -i "$f" >/dev/null 2>&1; then
-        echo "✅ $f"
-        total=$((total+1))
-      else
-        echo "❌ $f"
-      fi
-    fi
-  done
 }
 
 case "$SCOPE" in
   "all")
-    # Format root files (excluding chomp and common cache dirs)
-    cd "$CHOMP_DIR/.."
-    format_files "." "./chomp/*,./.venv/*,./__pycache__/*,./.pytest_cache/*,./.mypy_cache/*,./.ruff_cache/*,./.*" "root"
-
-    # Format chomp files
-    cd "$CHOMP_DIR"
-    format_files "." "./.venv/*,./__pycache__/*,./.pytest_cache/*,./.mypy_cache/*,./.ruff_cache/*,./.*" "chomp"
+    echo "Formatting root files..."
+    format_python_files "$CHOMP_DIR/.."
+    echo "Formatting chomp files..."
+    format_python_files "$CHOMP_DIR"
     ;;
-
   "chomp")
-    # Format only chomp files (staged for git if in git context)
-    cd "$CHOMP_DIR"
-
-    # Check if we're in a git repository and have staged files
-    if git rev-parse --git-dir >/dev/null 2>&1; then
-      echo "Formatting staged Python files in chomp..."
-      git diff --name-only --cached --diff-filter=ACMR | while read -r f; do
-        if [[ $f == *.py && -f "$f" ]]; then
-          if uv run yapf -i "$f" >/dev/null 2>&1; then
-            echo "✅ $f"
-            git add "$f"
-          else
-            echo "❌ $f"
-          fi
-        fi
-      done
-    else
-      # No git or no staged files, format all chomp files
-      format_files "." "./.venv/*,./__pycache__/*,./.pytest_cache/*,./.mypy_cache/*,./.ruff_cache/*,./.*" "chomp"
-    fi
+    echo "Formatting chomp files..."
+    format_python_files "$CHOMP_DIR"
     ;;
-
   *)
     echo "Usage: $0 [all|chomp]"
-    echo "  all   - Format root + chomp files"
-    echo "  chomp - Format chomp files only (staged if in git)"
     exit 1
     ;;
 esac

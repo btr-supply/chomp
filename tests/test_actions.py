@@ -1,6 +1,6 @@
 """Tests for actions modules."""
 import pytest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 import sys
 import os
 from datetime import datetime, timezone
@@ -8,109 +8,102 @@ from datetime import datetime, timezone
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.actions.load import load, load_one
+from src.actions.load import load_resource
 
 
 class TestActionsLoad:
   """Test actions.load module functions."""
 
   @pytest.mark.asyncio
-  async def test_load_success(self):
-    """Test successful data loading."""
-    from datetime import datetime, timezone
-    import src.state as state
+  async def test_load_resource_single_uid(self):
+    """Test loading a single resource by UID."""
+    with patch('src.actions.load.state') as mock_state:
+      mock_state.tsdb.fetch_by_id = AsyncMock(return_value={
+          "uid": "test123",
+          "value": 100
+      })
 
-    mock_ingester = Mock()
-    mock_ingester.resource_type = "timeseries"
-    mock_ingester.interval = "5m"
-    mock_ingester.name = "test_ingester"
+      result = await load_resource("test_table", uid="test123")
 
-    from_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    to_date = datetime(2024, 1, 2, tzinfo=timezone.utc)
-
-    mock_tsdb = Mock()
-    mock_tsdb.fetch = AsyncMock(return_value=[{"ts": from_date, "value": 100}])
-    state.tsdb = mock_tsdb
-
-    result = await load(mock_ingester, from_date, to_date)
-    assert result == [{"ts": from_date, "value": 100}]
-    mock_tsdb.fetch.assert_called_once()
+      assert result == {"uid": "test123", "value": 100}
+      mock_state.tsdb.fetch_by_id.assert_called_once_with(
+          "test_table", "test123")
 
   @pytest.mark.asyncio
-  async def test_load_value_type(self):
-    """Test loading value type resource."""
-    mock_ingester = Mock()
-    mock_ingester.resource_type = "value"
-    mock_ingester.id = "test_id"
+  async def test_load_resource_multiple_uids(self):
+    """Test loading multiple resources by UIDs."""
+    with patch('src.actions.load.state') as mock_state:
+      mock_state.tsdb.fetch_batch_by_ids = AsyncMock(return_value=[{
+          "uid": "test1",
+          "value": 100
+      }, {
+          "uid": "test2",
+          "value": 200
+      }])
 
-    from_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
+      result = await load_resource("test_table", uids=["test1", "test2"])
 
-    with patch('src.actions.load.load_one',
-               return_value="cached_value") as mock_load_one:
-      result = await load(mock_ingester, from_date, None)
-      assert result == "cached_value"
-      mock_load_one.assert_called_once_with(mock_ingester)
-
-  @pytest.mark.asyncio
-  async def test_load_one_success(self):
-    """Test successful single value loading."""
-    mock_ingester = Mock()
-    mock_ingester.id = "test_id"
-    mock_ingester.load_values.return_value = "loaded_values"
-
-    with patch('src.actions.load.get_cache',
-               return_value="cached_data") as mock_cache:
-      result = await load_one(mock_ingester)
-      assert result == "loaded_values"
-      mock_cache.assert_called_once_with("test_id")
-      mock_ingester.load_values.assert_called_once_with("cached_data")
+      assert len(result) == 2
+      assert result[0]["uid"] == "test1"
+      mock_state.tsdb.fetch_batch_by_ids.assert_called_once_with(
+          "test_table", ["test1", "test2"])
 
   @pytest.mark.asyncio
-  async def test_load_with_default_to_date(self):
-    """Test loading with default to_date."""
-    import src.state as state
+  async def test_load_resource_by_time_range(self):
+    """Test time series data loading by time range."""
+    with patch('src.actions.load.state') as mock_state:
+      from_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
+      to_date = datetime(2024, 1, 2, tzinfo=timezone.utc)
 
-    mock_ingester = Mock()
-    mock_ingester.resource_type = "timeseries"
-    mock_ingester.interval = "1h"
-    mock_ingester.name = "test_ingester"
+      mock_state.tsdb.fetch = AsyncMock(return_value=(["ts", "value"],
+                                                      [[from_date, 100]]))
 
-    from_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
+      result = await load_resource("test_table",
+                                   from_date=from_date,
+                                   to_date=to_date,
+                                   aggregation_interval="1h")
 
-    with patch('src.actions.load.datetime') as mock_datetime:
-      mock_now = datetime(2024, 1, 3, tzinfo=timezone.utc)
-      mock_datetime.now.return_value = mock_now
-
-      mock_tsdb = Mock()
-      mock_tsdb.fetch = AsyncMock(return_value=[])
-      state.tsdb = mock_tsdb
-
-      await load(mock_ingester, from_date, None)
-
-      # Verify that datetime.now was called to set to_date
-      mock_datetime.now.assert_called_once()
+      assert len(result) == 1
+      assert result[0]["ts"] == from_date
+      assert result[0]["value"] == 100
+      mock_state.tsdb.fetch.assert_called_once()
+      call_args = mock_state.tsdb.fetch.call_args[0]
+      assert call_args[0] == "test_table"
+      assert call_args[1] == from_date
+      assert call_args[2] == to_date
+      assert call_args[3] == "1h"
 
   @pytest.mark.asyncio
-  async def test_load_with_custom_aggregation(self):
-    """Test loading with custom aggregation interval."""
-    import src.state as state
+  async def test_load_resource_bulk_with_pagination(self):
+    """Test bulk loading with pagination."""
+    with patch('src.actions.load.state') as mock_state:
+      mock_state.tsdb.fetch_by_id = AsyncMock(return_value=None)
+      mock_state.tsdb.fetch = AsyncMock(
+          return_value=(["id", "value"], [[1, 100], [2, 200], [3, 300]]))
 
-    mock_ingester = Mock()
-    mock_ingester.resource_type = "timeseries"
-    mock_ingester.interval = "5m"
-    mock_ingester.name = "test_ingester"
+      result = await load_resource("test_table", limit=2, offset=1)
 
-    from_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    to_date = datetime(2024, 1, 2, tzinfo=timezone.utc)
+      assert len(result) == 2
+      assert result[0]["id"] == 2
+      assert result[1]["id"] == 3
+      mock_state.tsdb.fetch.assert_called_once()
 
-    mock_tsdb = Mock()
-    mock_tsdb.fetch = AsyncMock(return_value=[])
-    state.tsdb = mock_tsdb
+  @pytest.mark.asyncio
+  async def test_load_resource_not_found(self):
+    """Test that None is returned when a single resource is not found."""
+    with patch('src.actions.load.state') as mock_state:
+      mock_state.tsdb.fetch_by_id = AsyncMock(return_value=None)
+      result = await load_resource("test_table", uid="not_found")
+      assert result is None
 
-    await load(mock_ingester, from_date, to_date, aggregation_interval="1h")
-
-    mock_tsdb.fetch.assert_called_once_with("test_ingester", from_date,
-                                            to_date, "1h")
+  @pytest.mark.asyncio
+  async def test_load_resource_empty_list(self):
+    """Test that an empty list is returned for bulk queries with no results."""
+    with patch('src.actions.load.state') as mock_state:
+      mock_state.tsdb.fetch_batch_by_ids = AsyncMock(return_value=[])
+      result = await load_resource("test_table",
+                                   uids=["not_found_1", "not_found_2"])
+      assert result == []
 
 
 class TestActionsImports:
@@ -118,48 +111,13 @@ class TestActionsImports:
 
   def test_actions_load_imports(self):
     """Test that load module imports work."""
-    from src.actions.load import load, load_one
-    assert load is not None
-    assert load_one is not None
+    from src.actions.load import load_resource
+    assert load_resource is not None
 
-  def test_actions_schedule_imports(self):
-    """Test that schedule module imports work."""
-    try:
-      from src.actions import schedule
-      assert schedule is not None
-    except ImportError:
-      pytest.skip("actions.schedule not available")
+  def test_data_centric_patterns(self):
+    """Test that new data-centric patterns are available."""
+    from src.actions.load import load_resource
+    import inspect
 
-  def test_actions_store_imports(self):
-    """Test that store module imports work."""
-    try:
-      from src.actions import store
-      assert store is not None
-    except ImportError:
-      pytest.skip("actions.store not available")
-
-  def test_actions_transform_imports(self):
-    """Test that transform module imports work."""
-    try:
-      from src.actions import transform
-      assert transform is not None
-    except ImportError:
-      pytest.skip("actions.transform not available")
-
-  def test_actions_module_structure(self):
-    """Test actions module structure."""
-
-    # Check that actions module has expected submodules
-    expected_modules = ['load', 'schedule', 'store', 'transform']
-
-    available_modules = []
-    for module in expected_modules:
-      try:
-        imported = __import__(f'src.actions.{module}', fromlist=[module])
-        if imported:
-          available_modules.append(module)
-      except ImportError:
-        continue
-
-    # At least load module should be available
-    assert 'load' in available_modules
+    assert callable(load_resource)
+    assert inspect.iscoroutinefunction(load_resource)

@@ -1,30 +1,41 @@
-from typing import Optional, Callable, List, Tuple, Any, Union
+from typing import Callable, Any, Optional
 import polars as pl
 from datetime import datetime
 
-from ..model import DataFormat, ServiceResponse
-from ..utils import estimators as est, numeric_columns,\
-  Interval, fit_date_params
+from ..models import DataFormat
+from ..analytics.momentum import macd, close_dmi
+from ..utils import numeric_columns, Interval, fit_date_params, log_warn, log_error, safe_float
+from ..utils.decorators import service_method
 from .. import state
 from . import loader
 
+# Estimator lists for dynamic metric computation
+VOLATILITY_ESTIMATORS = ["std", "wstd", "ewstd", "close_atr", "mad"]
+TREND_ESTIMATORS = [
+    "sma", "smma", "wma", "ewma", "linreg", "polyreg", "theil_sen"
+]
+MOMENTUM_ESTIMATORS = [
+    "roc", "simple_mom", "close_rsi", "close_cci", "close_stochastic",
+    "zscore", "cumulative_returns", "vol_adjusted_momentum"
+]
 
-async def ensure_df(
-    resources: list[str],
-    fields: list[str],
-    from_date: datetime,
-    to_date: datetime,
-    interval: Interval = 'm5',
-    quote: Union[str, None] = None,
-    precision: int = 6,
-    df: Optional[pl.DataFrame] = None,
-    target_epochs: int = 1000) -> ServiceResponse[pl.DataFrame]:
+
+async def ensure_df(resources: list[str],
+                    fields: list[str],
+                    from_date: datetime,
+                    to_date: datetime,
+                    interval: Interval = 'm5',
+                    quote: Optional[str] = None,
+                    precision: int = 6,
+                    df: Optional[pl.DataFrame] = None,
+                    target_epochs: int = 1000) -> pl.DataFrame:
 
   if df is not None and not df.is_empty():
-    return "", df
+    return df
 
   if not fields:
-    return "No fields provided", pl.DataFrame()
+    log_warn("No fields provided to ensure_df")
+    raise ValueError("No fields provided")
 
   if df is None:
     # Fetch data with dynamic interval to get ~1000 points
@@ -32,383 +43,296 @@ async def ensure_df(
         from_date, to_date, interval, target_epochs)
     # Handle the quote parameter properly for get_history
     quote_param = quote if quote is not None else "USDC.idx"
-    err, result = await loader.get_history(resources, fields, from_date,
-                                           to_date, interval, quote_param,
-                                           precision, "polars")
-    if err:
-      return err, pl.DataFrame()
+    result = await loader.get_history(resources, fields, from_date, to_date,
+                                      interval, quote_param, precision,
+                                      "polars")
     # Ensure we have a DataFrame
     if not isinstance(result, pl.DataFrame):
-      return "Expected DataFrame from get_history", pl.DataFrame()
+      log_error("Expected DataFrame from get_history")
+      raise ValueError("Expected DataFrame from get_history")
     df = result
     # Check if df is empty
     if df.height == 0:
-      return "No data found", pl.DataFrame()
+      log_warn(f"No data found for resources {resources}")
+      raise ValueError("No data found")
 
-  return "", df
+  return df
 
 
 async def add_metrics(
-    resources: List[str], fields: List[str], from_date: datetime,
-    to_date: datetime, interval: Interval, periods: List[int],
-    quote: Union[str, None], precision: int, df: Optional[pl.DataFrame],
-    get_metrics: Callable[[pl.DataFrame, str, int], dict]
-) -> ServiceResponse[pl.DataFrame]:
+    resources: list[str], fields: list[str], from_date: datetime,
+    to_date: datetime, interval: Interval, periods: list[int],
+    quote: Optional[str], precision: int, df: Optional[pl.DataFrame],
+    get_metrics: Callable[[pl.DataFrame, str, int], dict]) -> pl.DataFrame:
   """Generic function to analyze series with specified metric function"""
 
-  # Ensure df is loaded
-  err, df = await ensure_df(resources, fields, from_date, to_date, interval,
-                            quote, precision, df)
-  if err:
-    return err, pl.DataFrame()
-
-  # Ensure df is not None after successful call
+  # Ensure df is loaded and validated
+  df = await ensure_df(resources, fields, from_date, to_date, interval, quote,
+                       precision, df)
   if df is None:
-    return "Failed to load DataFrame", pl.DataFrame()
+    raise ValueError("Failed to load DataFrame")
 
-  # Filter numeric columns
+  # Filter numeric columns efficiently
   numeric_fields = numeric_columns(df)
 
-  # Create new dataframe with original columns
-  result_df = df.clone()
-
-  def compute(resource: str, col: str,
-              period: int) -> Tuple[dict, Union[str, None]]:
-    try:
-      col = f"{resource}.{col}" if len(resources) > 1 else col
-      metrics = get_metrics(df, col, period)
-      return metrics, None
-    except KeyError:
-      return {}, f"Required column '{col}' not found in resource {resource}"
-
+  # Parallel computation with thread pool
   tp = state.thread_pool
-  futures = []
-  for resource in resources:
-    for col in numeric_fields:
-      for period in periods:
-        futures.append(tp.submit(compute, resource, col, period))
+  futures = [
+      tp.submit(
+          lambda r, c, p: (f"{r}.{c}" if len(resources) > 1 else c,
+                           get_metrics(df, f"{r}.{c}"
+                                       if len(resources) > 1 else c, p)),
+          resource, col, period) for resource in resources
+      for col in numeric_fields for period in periods
+  ]
 
-  # Collect results and handle errors
+  # Collect all metrics efficiently
+  all_columns: list[pl.Expr] = []
   for future in futures:
-    metrics, error = future.result()
-    if error:
-      return error, pl.DataFrame()
-    # Add each metric series as a new column
-    for metric_name, metric_series in metrics.items():
-      # Convert metric_series to a properly named polars Series
-      if isinstance(metric_series, pl.Series):
-        named_series = metric_series.alias(metric_name)
-      elif isinstance(metric_series, pl.Expr):
-        # For Expr objects, we need to evaluate them first
-        named_series = df.select(metric_series.alias(metric_name)).to_series()
-      else:
-        named_series = pl.Series(name=metric_name, values=metric_series)
+    try:
+      col_name, metrics = future.result()
+      for metric_name, metric_series in metrics.items():
+        # Convert everything to Expr since with_columns expects Expr
+        if isinstance(metric_series, pl.Series):
+          # Convert Series to Expr by creating a literal
+          all_columns.append(pl.lit(metric_series).alias(metric_name))
+        elif isinstance(metric_series, pl.Expr):
+          all_columns.append(metric_series.alias(metric_name))
+        else:
+          all_columns.append(pl.lit(metric_series).alias(metric_name))
+    except KeyError as e:
+      log_error(f"Column not found: {e}")
+      continue
 
-      # Add the series as a new column
-      result_df = result_df.with_columns(named_series)
-
-  return "", result_df
+  # Add all new columns at once (more efficient than iterative)
+  return df.with_columns(all_columns) if all_columns else df
 
 
-async def get_volatility(
-    resources: List[str],
-    fields: List[str],
-    from_date: datetime,
-    to_date: datetime,
-    interval: Interval,
-    periods: List[int] = [20],
-    quote: Union[str, None] = None,
-    precision: int = 6,
-    format: DataFormat = "json:row",
-    df: Optional[pl.DataFrame] = None) -> ServiceResponse[Any]:
+@service_method("compute volatility metrics")
+async def get_volatility(resources: list[str],
+                         fields: list[str],
+                         from_date: datetime,
+                         to_date: datetime,
+                         interval: Interval,
+                         periods: list[int] = [20],
+                         quote: Optional[str] = None,
+                         precision: int = 6,
+                         format: DataFormat = "json:row",
+                         df: Optional[pl.DataFrame] = None) -> Any:
   """Calculate various volatility metrics for given fields"""
 
   def compute(df: pl.DataFrame, col: str, period: int) -> dict:
     last = df[col]
-    return {
-        f"{col}:std.{period}": est.std(last, period),
-        f"{col}:wstd.{period}": est.wstd(last, period),
-        f"{col}:ewstd.{period}": est.ewstd(last, period),
-        f"{col}:mad.{period}": est.mad(last, period),
-        f"{col}:close_atr.{period}": est.close_atr(last, period)
-    }
+    metrics = {}
+    for estimator_name in VOLATILITY_ESTIMATORS:
+      estimator_func = globals()[estimator_name]
+      metrics[f"{col}:{estimator_name}.{period}"] = estimator_func(
+          last, period=period)
+    return metrics
 
-  err, df = await add_metrics(resources, fields, from_date, to_date, interval,
-                              periods, quote, precision, df, compute)
-  if err:
-    return err, None
-
-  if df is None:
-    return "Failed to compute volatility metrics", None
-
-  err_fmt, result = loader.format_table(df,
-                                        from_format="polars",
-                                        to_format=format)
-  if err_fmt:
-    return err_fmt, None
-
-  return "", result
+  df = await add_metrics(resources, fields, from_date, to_date, interval,
+                         periods, quote, precision, df, compute)
+  return loader.format_table(df, from_format="polars", to_format=format)
 
 
+@service_method("compute trend metrics")
 async def get_trend(resources: list[str],
                     fields: list[str],
                     from_date: datetime,
                     to_date: datetime,
                     interval: Interval,
                     periods: list[int] = [20],
-                    quote: Union[str, None] = None,
+                    quote: Optional[str] = None,
                     precision: int = 6,
                     format: DataFormat = "json:row",
-                    df: Optional[pl.DataFrame] = None) -> ServiceResponse[Any]:
+                    df: Optional[pl.DataFrame] = None) -> Any:
   """Calculate various trend metrics for given fields"""
 
   def compute(df: pl.DataFrame, col: str, period: int) -> dict:
     last = df[col]
+    metrics = {}
+    for estimator_name in TREND_ESTIMATORS:
+      estimator_func = globals()[estimator_name]
+      metrics[f"{col}:{estimator_name}.{period}"] = estimator_func(
+          last, period=period)
+    return metrics
 
-    # Calculate basic trend indicators
-    trend_metrics = {
-        f"{col}:sma.{period}": est.sma(last, period),
-        f"{col}:smma.{period}": est.smma(last, period),
-        f"{col}:wma.{period}": est.wma(last, period),
-        f"{col}:ewma.{period}": est.ewma(last, period),
-        f"{col}:linreg.{period}": est.linreg(last, period),
-        f"{col}:polyreg.{period}": est.polyreg(last, period),
-        f"{col}:theil_sen.{period}": est.theil_sen(last, period),
-    }
-
-    # Calculate close-price based directional movement
-    # plus_di, minus_di, dmi = est.close_dmi(price, period)
-    # trend_metrics.update({
-    #   # f"{col}:plus_di.{period}": plus_di,
-    #   # f"{col}:minus_di.{period}": minus_di,
-    #   f"{col}:close_dmi.{period}": dmi
-    # })
-
-    return trend_metrics
-
-  err, df = await add_metrics(resources, fields, from_date, to_date, interval,
-                              periods, quote, precision, df, compute)
-  if err:
-    return err, None
-
-  if df is None:
-    return "Failed to compute trend metrics", None
-
-  err_fmt, result = loader.format_table(df,
-                                        from_format="polars",
-                                        to_format=format)
-  if err_fmt:
-    return err_fmt, None
-
-  return "", result
+  df = await add_metrics(resources, fields, from_date, to_date, interval,
+                         periods, quote, precision, df, compute)
+  return loader.format_table(df, from_format="polars", to_format=format)
 
 
-async def get_momentum(
-    resources: List[str],
-    fields: List[str],
-    from_date: datetime,
-    to_date: datetime,
-    interval: Interval,
-    periods: List[int] = [20],
-    quote: Union[str, None] = None,
-    precision: int = 6,
-    format: DataFormat = "json:row",
-    df: Optional[pl.DataFrame] = None) -> ServiceResponse[Any]:
+@service_method("compute momentum metrics")
+async def get_momentum(resources: list[str],
+                       fields: list[str],
+                       from_date: datetime,
+                       to_date: datetime,
+                       interval: Interval,
+                       periods: list[int] = [20],
+                       quote: Optional[str] = None,
+                       precision: int = 6,
+                       format: DataFormat = "json:row",
+                       df: Optional[pl.DataFrame] = None) -> Any:
   """Calculate various momentum metrics for given fields"""
 
   def compute(df: pl.DataFrame, col: str, period: int) -> dict:
     last = df[col]
-    return {
-        f"{col}:roc.{period}": est.roc(last, period),
-        f"{col}:simple_mom.{period}": est.simple_mom(last, period),
-        f"{col}:macd_line.{period}": est.macd(last)[0],
-        f"{col}:macd_signal.{period}": est.macd(last)[1],
-        f"{col}:macd_histogram.{period}": est.macd(last)[2],
-        f"{col}:rsi.{period}": est.rsi(last, period),
-        f"{col}:stoch_k.{period}": est.close_stochastic(last, period),
-        f"{col}:zscore.{period}": est.zscore(last, period),
-        f"{col}:vol_adj_mom.{period}": est.vol_adjusted_momentum(last, period),
-    }
+    metrics = {}
 
-  err, df = await add_metrics(resources, fields, from_date, to_date, interval,
-                              periods, quote, precision, df, compute)
-  if err:
-    return err, None
+    # Single-return estimators
+    for estimator_name in MOMENTUM_ESTIMATORS:
+      estimator_func = globals()[estimator_name]
+      if estimator_name == "cumulative_returns":
+        metrics[f"{col}:{estimator_name}"] = estimator_func(last)
+      else:
+        metrics[f"{col}:{estimator_name}.{period}"] = estimator_func(
+            last, period=period)
 
-  if df is None:
-    return "Failed to compute momentum metrics", None
+    # Tuple-return estimators
+    macd_line, signal_line, macd_hist = macd(last)
+    metrics[f"{col}:macd"] = macd_line
+    metrics[f"{col}:macd_signal"] = signal_line
+    metrics[f"{col}:macd_hist"] = macd_hist
 
-  err_fmt, result = loader.format_table(df,
-                                        from_format="polars",
-                                        to_format=format)
-  if err_fmt:
-    return err_fmt, None
+    plus_di, minus_di, adx = close_dmi(last, period=period)
+    metrics[f"{col}:plus_di.{period}"] = plus_di
+    metrics[f"{col}:minus_di.{period}"] = minus_di
+    metrics[f"{col}:adx.{period}"] = adx
 
-  return "", result
+    return metrics
+
+  df = await add_metrics(resources, fields, from_date, to_date, interval,
+                         periods, quote, precision, df, compute)
+  return loader.format_table(df, from_format="polars", to_format=format)
 
 
+@service_method("compute all metrics")
 async def get_all(resources: list[str],
                   fields: list[str],
                   from_date: datetime,
                   to_date: datetime,
                   interval: Interval,
                   periods: list[int] = [20],
-                  quote: Union[str, None] = None,
+                  quote: Optional[str] = None,
                   precision: int = 6,
                   df: Optional[pl.DataFrame] = None,
-                  format: DataFormat = "json:row") -> ServiceResponse[Any]:
-  """Calculate all metrics for given fields"""
+                  format: DataFormat = "json:row") -> Any:
+  """Calculate all available metrics (volatility, trend, momentum)"""
 
-  try:
-    err, df = await get_volatility(resources, fields, from_date, to_date,
-                                   interval, periods, quote, precision,
-                                   "polars", df)
-    if err:
-      return err, None
+  # Define combined metrics function
+  def compute_all_metrics(df: pl.DataFrame, col: str, period: int) -> dict:
+    last = df[col]
+    all_metrics = {}
 
-    err, df = await get_trend(resources, fields, from_date, to_date, interval,
-                              periods, quote, precision, "polars", df)
-    if err:
-      return err, None
+    # Volatility metrics
+    for estimator_name in VOLATILITY_ESTIMATORS:
+      estimator_func = globals()[estimator_name]
+      all_metrics[f"{col}:{estimator_name}.{period}"] = estimator_func(
+          last, period=period)
 
-    err, df = await get_momentum(resources, fields, from_date, to_date,
-                                 interval, periods, quote, precision, "polars",
-                                 df)
-    if err:
-      return err, None
+    # Trend metrics
+    for estimator_name in TREND_ESTIMATORS:
+      estimator_func = globals()[estimator_name]
+      all_metrics[f"{col}:{estimator_name}.{period}"] = estimator_func(
+          last, period=period)
 
-  except Exception as e:
-    return f"Error computing metrics: {e}", None
+    # Momentum metrics (single)
+    for estimator_name in MOMENTUM_ESTIMATORS:
+      estimator_func = globals()[estimator_name]
+      if estimator_name == "cumulative_returns":
+        all_metrics[f"{col}:{estimator_name}"] = estimator_func(last)
+      else:
+        all_metrics[f"{col}:{estimator_name}.{period}"] = estimator_func(
+            last, period=period)
 
-  if df is None:
-    return "Failed to compute all metrics", None
+    # Momentum metrics (tuple)
+    macd_line, signal_line, macd_hist = macd(last)
+    all_metrics[f"{col}:macd"] = macd_line
+    all_metrics[f"{col}:macd_signal"] = signal_line
+    all_metrics[f"{col}:macd_hist"] = macd_hist
 
-  err_fmt, result = loader.format_table(df,
-                                        from_format="polars",
-                                        to_format=format)
-  if err_fmt:
-    return err_fmt, None
+    plus_di, minus_di, adx = close_dmi(last, period=period)
+    all_metrics[f"{col}:plus_di.{period}"] = plus_di
+    all_metrics[f"{col}:minus_di.{period}"] = minus_di
+    all_metrics[f"{col}:adx.{period}"] = adx
 
-  return "", result
+    return all_metrics
+
+  df = await add_metrics(resources, fields, from_date, to_date, interval,
+                         periods, quote, precision, df, compute_all_metrics)
+  return loader.format_table(df, from_format="polars", to_format=format)
 
 
-async def get_oprange(resources: List[str],
-                      fields: List[str],
+@service_method("compute operational range metrics")
+async def get_oprange(resources: list[str],
+                      fields: list[str],
                       from_date: datetime,
                       to_date: datetime,
                       precision: int = 6,
-                      quote: Union[str, None] = None,
-                      format: DataFormat = "json:row") -> ServiceResponse[Any]:
-  """Calculate optimized range analysis for trading/financial metrics"""
+                      quote: Optional[str] = None,
+                      format: DataFormat = "json:row") -> Any:
+  """Calculate operational range metrics"""
 
-  # Ensure df is loaded with a reasonable interval for range analysis
-  err, df = await ensure_df(resources, fields, from_date, to_date, "m5", quote,
-                            precision, None, 1000)
-  if err:
-    return err, pl.DataFrame()
+  # Fetch data without specific interval (use default)
+  df = await loader.get_history(
+      resources,
+      fields,
+      from_date,
+      to_date,
+      'm5',  # default interval
+      quote,
+      precision,
+      "polars")
 
-  if df is None:
-    return "Failed to load DataFrame for range analysis", pl.DataFrame()
+  if not isinstance(df, pl.DataFrame) or df.height == 0:
+    log_warn("No data available for operational range calculation")
+    raise ValueError("No data available for operational range calculation")
 
-  # Filter numeric columns
-  numeric_fields = numeric_columns(df)
-
-  # Create new dataframe with original columns
-  result_df = df.clone()
+  def _safe_subtract(a: Any, b: Any) -> Optional[float]:
+    """Safely subtract two values, handling None cases"""
+    if a is None or b is None:
+      return None
+    a_float = safe_float(a)
+    b_float = safe_float(b)
+    return a_float - b_float if a_float is not None and b_float is not None else None
 
   def compute_range_metrics(df: pl.DataFrame, col: str) -> dict:
-    """Compute optimized range metrics for a single column"""
-    last = df[col]
+    # Use polars for efficient operations
+    last = df[col].cast(pl.Float64, strict=False)
 
-    if last.is_empty():
-      return {}
+    # Compute statistics directly (simpler and more reliable)
+    min_val = last.min()
+    max_val = last.max()
+    q25 = last.quantile(0.25)
+    q75 = last.quantile(0.75)
+    median_val = last.median()
 
-    # Basic range metrics - ensure we're working with numeric values only
-    try:
-      # Get min/max as potentially mixed types
-      min_val_raw = last.min()
-      max_val_raw = last.max()
+    # Calculate range and IQR using safe arithmetic helper
+    range_val = _safe_subtract(max_val, min_val)
+    iqr_val = _safe_subtract(q75, q25)
 
-      # Type-safe conversion to numeric types only
-      min_val: Union[float, None] = None
-      max_val: Union[float, None] = None
+    return {
+        f"{col}:min": min_val,
+        f"{col}:max": max_val,
+        f"{col}:range": range_val,
+        f"{col}:iqr": iqr_val,
+        f"{col}:q1": q25,
+        f"{col}:q3": q75,
+        f"{col}:median": median_val
+    }
 
-      # Convert to float if numeric, otherwise None
-      if isinstance(min_val_raw, (int, float)):
-        min_val = float(min_val_raw)
-      if isinstance(max_val_raw, (int, float)):
-        max_val = float(max_val_raw)
+  # Get numeric columns
+  numeric_fields = numeric_columns(df)
+  result_df = df.clone()
 
-      # Type-safe range calculation
-      range_val: Union[float, None] = None
-      if min_val is not None and max_val is not None:
-        range_val = max_val - min_val
-
-      # Current position in range (0-1 scale)
-      current_raw = last.tail(1).item() if len(last) > 0 else None
-      current: Union[float, None] = None
-      if isinstance(current_raw, (int, float)):
-        current = float(current_raw)
-
-      # Type-safe range position calculation
-      range_position: Union[float, None] = None
-      if (current is not None and min_val is not None and range_val is not None
-          and range_val != 0):
-        range_position = (current - min_val) / range_val
-
-      # Average True Range (ATR) - 14 period default using the estimator function
-      # This avoids direct arithmetic operations on series
-      atr_14: Union[float, None] = None
-      try:
-        if len(last) >= 14:
-          atr_result = est.close_atr(last, 14)
-          if isinstance(atr_result, (int, float)):
-            atr_14 = float(atr_result)
-      except Exception:
-        atr_14 = None
-
-      return {
-          f"{col}:min": min_val,
-          f"{col}:max": max_val,
-          f"{col}:range": range_val,
-          f"{col}:range_position": range_position,
-          f"{col}:atr_14": atr_14,
-          f"{col}:current": current
-      }
-    except Exception:
-      # Return empty dict if any calculation fails
-      return {}
-
-  tp = state.thread_pool
-  futures = []
-
+  # Compute range metrics for each numeric column
   for resource in resources:
     for col in numeric_fields:
       col_name = f"{resource}.{col}" if len(resources) > 1 else col
-      futures.append(tp.submit(compute_range_metrics, df, col_name))
+      metrics = compute_range_metrics(df, col_name)
+      for metric_name, metric_value in metrics.items():
+        # Add scalar metrics as constant columns
+        result_df = result_df.with_columns(
+            pl.lit(metric_value).alias(metric_name))
 
-  # Collect results and handle errors
-  range_metrics = {}
-  for future in futures:
-    metrics = future.result()
-    range_metrics.update(metrics)
-
-  # Add metrics as scalar values to the result (last row approach)
-  if range_metrics:
-    # Create a single-row dataframe with the range metrics
-    metrics_row = {
-        **{
-            col: df[col].tail(1).item() if len(df[col]) > 0 else None
-            for col in df.columns
-        },
-        **range_metrics
-    }
-    result_df = pl.DataFrame([metrics_row])
-
-  err_fmt, result = loader.format_table(result_df,
-                                        from_format="polars",
-                                        to_format=format)
-  if err_fmt:
-    return err_fmt, pl.DataFrame()
-
-  return "", result
+  return loader.format_table(result_df, from_format="polars", to_format=format)

@@ -14,7 +14,7 @@ try:
                                    parse_resources, parse_fields,
                                    parse_resources_fields, get_schema,
                                    format_table, get_last_values, get_history)
-  from src.model import Scope
+  from src.models import Scope
   POLARS_AVAILABLE = True
 except ImportError:
   POLARS_AVAILABLE = False

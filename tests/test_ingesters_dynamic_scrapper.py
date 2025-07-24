@@ -7,7 +7,7 @@ import os
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.deps import safe_import
+from chomp.src.utils.deps import safe_import
 
 # Check if Playwright dependencies are available
 playwright = safe_import("playwright")
@@ -16,7 +16,7 @@ PLAYWRIGHT_AVAILABLE = playwright is not None
 # Only import if dependencies are available
 if PLAYWRIGHT_AVAILABLE:
   from src.ingesters.dynamic_scrapper import Puppet, update_page, schedule
-  from src.model import Ingester, ResourceField
+  from src.models import Ingester, ResourceField
 
 
 @pytest.mark.skipif(
@@ -28,7 +28,7 @@ class TestPuppet:
   def setup_method(self):
     """Set up test fixtures."""
     self.mock_field = Mock(spec=ResourceField)
-    self.mock_field.id = "test_field_id"
+    self.mock_field.target_id = "test_field_id"
     self.mock_field.target = "http://example.com"
     self.mock_field.actions = []
 
@@ -63,7 +63,7 @@ class TestPuppet:
     assert puppet.field == self.mock_field
     assert puppet.ingester == self.mock_ingester
     assert puppet.play == self.mock_playwright
-    assert Puppet.by_id[self.mock_field.id] == puppet
+    assert Puppet.by_id[self.mock_field.target_id] == puppet
 
   @pytest.mark.asyncio
   async def test_from_field_no_actions(self):
@@ -322,7 +322,7 @@ class TestPuppetActions:
   def setup_method(self):
     """Set up test fixtures."""
     self.mock_field = Mock(spec=ResourceField)
-    self.mock_field.id = "test_field_id"
+    self.mock_field.target_id = "test_field_id"
     self.mock_field.target = "http://example.com"
     self.mock_field.actions = []
 

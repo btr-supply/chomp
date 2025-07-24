@@ -1,13 +1,14 @@
-from typing import Optional, Union, Any
-from eth_utils import keccak
-from hexbytes import HexBytes
-from eth_account.messages import encode_defunct
-from eth_account import Account
-
+from typing import Union, Any, Optional
 from .jsonrpc import JsonRpcClient
+import eth_utils  # happy mypy
+import hexbytes  # happy mypy
+import eth_account  # happy mypy
 
 
 class EvmRpcClient(JsonRpcClient):
+
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
 
   async def get_block_number(self) -> int:
     return int(await self.call("eth_blockNumber"), 16)
@@ -25,7 +26,8 @@ class EvmRpcClient(JsonRpcClient):
                                  address: str,
                                  method: str,
                                  params: list[Any] = []) -> Any:
-    method_id = keccak(text=method)[:4]  # First 4 bytes of keccak hash
+
+    method_id = eth_utils.keccak(text=method)[:4]
     encoded_params = "".join([self._encode_param(param) for param in params])
     data = f"0x{method_id.hex()}{encoded_params}"
 
@@ -34,7 +36,7 @@ class EvmRpcClient(JsonRpcClient):
         "data": data,
     }
     result = await self.call("eth_call", [payload, "latest"])
-    return HexBytes(result)
+    return hexbytes.HexBytes(result)
 
   async def get_storage_at(self, address: str, slot: int) -> str:
     return await self.call("eth_getStorageAt", [address, hex(slot), "latest"])
@@ -50,13 +52,16 @@ class EvmRpcClient(JsonRpcClient):
       return param.encode("utf-8").hex().zfill(64)
     raise ValueError(f"Unsupported parameter type: {type(param)}")
 
+  @staticmethod
+  def _to_hex_if_int(value: Union[int, str]) -> str:
+    """Convert integer to hex, leave strings as is"""
+    return hex(value) if isinstance(value, int) else value
+
   async def get_block(self,
                       block_id: Union[int, str],
                       full_transactions: bool = False) -> dict:
-    return await self.call("eth_getBlockByNumber", [
-        hex(block_id) if isinstance(block_id, int) else block_id,
-        full_transactions
-    ])
+    return await self.call("eth_getBlockByNumber",
+                           [self._to_hex_if_int(block_id), full_transactions])
 
   async def get_transaction(self, tx_hash: str) -> Optional[dict]:
     return await self.call("eth_getTransactionByHash", [tx_hash])
@@ -72,15 +77,14 @@ class EvmRpcClient(JsonRpcClient):
                      to_block: Union[int, str] = "latest",
                      address: Optional[Union[str, list[str]]] = None,
                      topics: Optional[list[Any]] = None) -> list[dict]:
-    params = {
-        "fromBlock":
-        hex(from_block) if isinstance(from_block, int) else from_block,
-        "toBlock": hex(to_block) if isinstance(to_block, int) else to_block
+    params: dict[str, Any] = {
+        "fromBlock": self._to_hex_if_int(from_block),
+        "toBlock": self._to_hex_if_int(to_block)
     }
     if address is not None:
-      params["address"] = address  # type: ignore
+      params["address"] = address
     if topics is not None:
-      params["topics"] = topics  # type: ignore
+      params["topics"] = topics
     return await self.call("eth_getLogs", [params])
 
   async def get_transaction_count(self,
@@ -112,15 +116,14 @@ class EvmRpcClient(JsonRpcClient):
                           to_block: Union[int, str] = "latest",
                           address: Optional[Union[str, list[str]]] = None,
                           topics: Optional[list[Any]] = None) -> str:
-    params = {
-        "fromBlock":
-        hex(from_block) if isinstance(from_block, int) else from_block,
-        "toBlock": hex(to_block) if isinstance(to_block, int) else to_block
+    params: dict[str, Any] = {
+        "fromBlock": self._to_hex_if_int(from_block),
+        "toBlock": self._to_hex_if_int(to_block)
     }
     if address is not None:
-      params["address"] = address  # type: ignore
+      params["address"] = address
     if topics is not None:
-      params["topics"] = topics  # type: ignore
+      params["topics"] = topics
     return await self.call("eth_newFilter", [params])
 
   async def create_block_filter(self) -> str:
@@ -132,10 +135,11 @@ class EvmRpcClient(JsonRpcClient):
   async def verify_message(self, message: str, signature: str,
                            expected_address: str) -> bool:
     """Verify an Ethereum signed message"""
+
     try:
-      message_hash = encode_defunct(text=message)
-      recovered_address = Account.recover_message(message_hash,
-                                                  signature=signature)
+      message_hash = eth_account.messages.encode_defunct(text=message)
+      recovered_address = eth_account.Account.recover_message(
+          message_hash, signature=signature)
       return recovered_address.lower() == expected_address.lower()
     except Exception:
       return False
@@ -143,6 +147,7 @@ class EvmRpcClient(JsonRpcClient):
   def verify_signature(self, message_hash: str, signature: str,
                        expected_address: str) -> bool:
     """Verify a raw signature against a message hash"""
+
     try:
       # Remove '0x' prefix if present
       message_hash = message_hash.replace('0x', '')
@@ -153,7 +158,8 @@ class EvmRpcClient(JsonRpcClient):
       s = int(signature[64:128], 16)
       v = int(signature[128:], 16)
 
-      recovered_address = Account.recover_message(message_hash, vrs=(v, r, s))
+      recovered_address = eth_account.Account.recover_message(message_hash,
+                                                              vrs=(v, r, s))
       return recovered_address.lower() == expected_address.lower()
     except Exception:
       return False

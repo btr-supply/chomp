@@ -7,7 +7,7 @@ import os
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.deps import safe_import
+from chomp.src.utils.deps import safe_import
 
 # Check if EVM dependencies are available
 web3 = safe_import("web3")
@@ -17,7 +17,7 @@ EVM_AVAILABLE = all([web3 is not None, multicall is not None])
 # Only import if dependencies are available
 if EVM_AVAILABLE:
   from src.ingesters.evm_caller import parse_generic, schedule
-  from src.model import Ingester, ResourceField
+  from src.models import Ingester, ResourceField, Resource
 
 
 @pytest.mark.skipif(not EVM_AVAILABLE,
@@ -39,53 +39,89 @@ class TestEVMCaller:
     result = parse_generic(test_list)
     assert result == test_list
 
+  @pytest.fixture
+  def mock_state(self):
+    with patch('src.ingesters.evm_caller.state') as mock_state:
+      mock_state.web3.client = AsyncMock()
+      # Mock the new Multicall object that will be awaited
+      mock_multicall_instance = AsyncMock()
+      # The result of awaiting the multicall is a list of dictionaries
+      mock_multicall_instance.return_value = [{'total_supply:0': 1000000}]
+
+      # Patch the Multicall class to return our mock instance
+      with patch('src.ingesters.evm_caller.EvmMulticall',
+                 return_value=mock_multicall_instance) as mock_multicall_class:
+        yield mock_state, mock_multicall_class, mock_multicall_instance
+
   @pytest.mark.asyncio
-  async def test_schedule_basic_functionality(self):
-    """Test basic schedule functionality."""
-    # Create mock ingester
-    mock_ingester = Mock(spec=Ingester)
-    mock_ingester.name = "test_evm_caller"
-    mock_ingester.data_by_field = {}
-    mock_ingester.field_by_name = Mock(return_value={})
+  async def test_schedule(self, mock_state):
+    """Test the schedule function for a basic EVM caller ingester."""
+    mock_state_obj, _, _ = mock_state
 
-    # Create mock field
-    mock_field = Mock(spec=ResourceField)
-    mock_field.target = "0x1234567890123456789012345678901234567890:ETH"
-    mock_field.selector = "totalSupply()"
-    mock_field.params = []
-    mock_field.selector_outputs = ["uint256"]
-    mock_field.name = "total_supply"
-    mock_field.id = "test_field_id"
-    mock_field.chain_addr = Mock(
-        return_value=("ETH", "0x1234567890123456789012345678901234567890"))
+    ingester = Ingester(
+        name="test_evm_ingester",
+        type="evm_caller",
+        resources=[
+            Resource(
+                name="test_resource",
+                fields=[
+                    ResourceField(
+                        name="total_supply",
+                        target=
+                        "1:0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9",  # AAVE on ETH
+                        selector="totalSupply()(uint256)",
+                        selector_outputs=["uint256"])
+                ])
+        ])
 
-    mock_ingester.fields = [mock_field]
+    tasks = await schedule(ingester)
+    assert len(tasks) == 1
 
-    with patch('src.ingesters.evm_caller.ensure_claim_task', new_callable=AsyncMock), \
-         patch('src.ingesters.evm_caller.scheduler') as mock_scheduler, \
-         patch('src.ingesters.evm_caller.transform_and_store', new_callable=AsyncMock), \
-         patch('src.ingesters.evm_caller.state') as mock_state:
+    # Execute the task
+    await tasks[0]
 
-      mock_state.args.verbose = False
-      mock_state.args.max_retries = 3
-      mock_state.thread_pool = Mock()
+    # Verify that the web3 client was called for chain 1
+    mock_state_obj.web3.client.assert_called_with(1, roll=True)
 
-      # Mock web3 client
-      mock_client = Mock()
-      mock_client.eth.chain_id = 1  # Ethereum mainnet
-      mock_state.web3.client = AsyncMock(return_value=mock_client)
+    # Check that the ingester's field was updated
+    field = ingester.get_field("total_supply")
+    assert field.value == 1000000
 
-      # Mock multicall result
-      mock_multicall_result = {"total_supply:0": 1000000}
-      mock_state.thread_pool.submit.return_value.result.return_value = mock_multicall_result
+  @pytest.mark.asyncio
+  async def test_schedule_with_multicall_failure(self, mock_state):
+    """Test schedule handling multicall failures gracefully."""
+    mock_state_obj, _, mock_multicall_instance = mock_state
 
-      mock_task = Mock()
-      mock_scheduler.add_ingester = AsyncMock(return_value=mock_task)
+    # Configure the mock to simulate an exception
+    mock_multicall_instance.side_effect = Exception("Multicall failed")
 
-      result = await schedule(mock_ingester)
+    ingester = Ingester(
+        name="test_evm_failure",
+        type="evm_caller",
+        resources=[
+            Resource(
+                name="test_resource",
+                fields=[
+                    ResourceField(
+                        name="field1",
+                        target="1:0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9",
+                        selector="totalSupply()(uint256)",
+                        selector_outputs=["uint256"])
+                ])
+        ])
 
-      assert result == [mock_task]
-      mock_scheduler.add_ingester.assert_called_once()
+    tasks = await schedule(ingester)
+    assert len(tasks) == 1
+
+    # Execute the task
+    await tasks[0]
+
+    # The field value should not be set
+    field = ingester.get_field("field1")
+    assert field.value is None
+
+    # The post_ingest should still be called
+    ingester.post_ingest.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_schedule_multiple_chains(self):
@@ -152,53 +188,6 @@ class TestEVMCaller:
           }  # BSC result
       ]
       mock_state.thread_pool.submit.return_value.result.side_effect = mock_results
-
-      mock_task = Mock()
-      mock_scheduler.add_ingester = AsyncMock(return_value=mock_task)
-
-      result = await schedule(mock_ingester)
-
-      assert result == [mock_task]
-      mock_scheduler.add_ingester.assert_called_once()
-
-  @pytest.mark.asyncio
-  async def test_schedule_with_multicall_failure(self):
-    """Test schedule handling multicall failures gracefully."""
-    mock_ingester = Mock(spec=Ingester)
-    mock_ingester.name = "test_evm_caller"
-    mock_ingester.data_by_field = {}
-    mock_ingester.field_by_name = Mock(return_value={})
-
-    mock_field = Mock(spec=ResourceField)
-    mock_field.target = "0x1234567890123456789012345678901234567890:ETH"
-    mock_field.selector = "totalSupply()"
-    mock_field.params = []
-    mock_field.selector_outputs = ["uint256"]
-    mock_field.name = "total_supply"
-    mock_field.id = "test_field_id"
-    mock_field.chain_addr = Mock(
-        return_value=("ETH", "0x1234567890123456789012345678901234567890"))
-
-    mock_ingester.fields = [mock_field]
-
-    with patch('src.ingesters.evm_caller.ensure_claim_task', new_callable=AsyncMock), \
-         patch('src.ingesters.evm_caller.scheduler') as mock_scheduler, \
-         patch('src.ingesters.evm_caller.transform_and_store', new_callable=AsyncMock), \
-         patch('src.ingesters.evm_caller.state') as mock_state, \
-         patch('src.ingesters.evm_caller.log_error'):
-
-      mock_state.args.verbose = False
-      mock_state.args.max_retries = 1
-      mock_state.thread_pool = Mock()
-
-      mock_client = Mock()
-      mock_client.eth.chain_id = 1
-      mock_state.web3.client = AsyncMock(return_value=mock_client)
-
-      # Mock multicall failure
-      mock_state.thread_pool.submit.return_value.result.side_effect = [
-          Exception("Multicall failed")
-      ]
 
       mock_task = Mock()
       mock_scheduler.add_ingester = AsyncMock(return_value=mock_task)

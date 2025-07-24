@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.deps import safe_import
+from chomp.src.utils.deps import safe_import
 
 # Check if DuckDB dependencies are available
 duckdb = safe_import("duckdb")
@@ -387,7 +387,7 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_create_table(self):
     """Test creating table."""
-    from src.model import Ingester
+    from src.models import Ingester
 
     adapter = DuckDB(host="localhost",
                      port=0,
@@ -419,7 +419,7 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_create_table_error_handling(self):
     """Test create_table error handling."""
-    from src.model import Ingester
+    from src.models import Ingester
 
     adapter = DuckDB(host="localhost",
                      port=0,
@@ -491,7 +491,7 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_insert(self):
     """Test inserting data."""
-    from src.model import Ingester
+    from src.models import Ingester
 
     adapter = DuckDB(host="localhost",
                      port=0,
@@ -533,7 +533,7 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_error_handling(self):
     """Test insert error handling."""
-    from src.model import Ingester
+    from src.models import Ingester
 
     adapter = DuckDB(host="localhost",
                      port=0,
@@ -590,7 +590,7 @@ class TestDuckDBAdapter:
 
   def test_duckdb_inheritance(self):
     """Test that DuckDB inherits from Tsdb."""
-    from src.model import Tsdb
+    from src.models import Tsdb
     adapter = DuckDB(host="localhost",
                      port=0,
                      db=":memory:",
@@ -601,7 +601,7 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_table_not_exists(self):
     """Test insert when table doesn't exist."""
-    from src.model import Ingester
+    from src.models import Ingester
 
     adapter = DuckDB(host="localhost",
                      port=0,
@@ -637,7 +637,7 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_column_not_exists(self):
     """Test insert when column doesn't exist."""
-    from src.model import Ingester
+    from src.models import Ingester
 
     adapter = DuckDB(host="localhost",
                      port=0,
@@ -675,7 +675,7 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_many(self):
     """Test inserting multiple records."""
-    from src.model import Ingester
+    from src.models import Ingester
 
     adapter = DuckDB(host="localhost",
                      port=0,
@@ -702,7 +702,7 @@ class TestDuckDBAdapter:
 
       # Should call BEGIN TRANSACTION, INSERT for each value, then COMMIT
       assert mock_execute.call_count == 4  # BEGIN, INSERT, INSERT, COMMIT
-      call_args = [call[0][0] for call in mock_execute.call_args_list]
+      call_args = [call[0][0] for call in mock_execute.call__argslist]
       assert "BEGIN TRANSACTION" in call_args
       assert "COMMIT" in call_args
       assert any("INSERT INTO" in arg for arg in call_args)
@@ -710,7 +710,7 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_many_error(self):
     """Test insert_many error handling."""
-    from src.model import Ingester
+    from src.models import Ingester
 
     adapter = DuckDB(host="localhost",
                      port=0,
@@ -737,7 +737,7 @@ class TestDuckDBAdapter:
         await adapter.insert_many(ingester, values)
 
       # Should call ROLLBACK after error
-      call_args = [call[0][0] for call in mock_execute.call_args_list]
+      call_args = [call[0][0] for call in mock_execute.call__argslist]
       assert "ROLLBACK" in call_args
 
   @pytest.mark.asyncio
@@ -859,7 +859,7 @@ class TestDuckDBAdapter:
 
       # Should fallback to simple SELECT
       assert mock_execute.call_count == 2
-      fallback_sql = mock_execute.call_args_list[1][0][0]
+      fallback_sql = mock_execute.call__argslist[1][0][0]
       assert "time_bucket" not in fallback_sql
       assert 'SELECT "ts", "col1"' in fallback_sql
 
@@ -929,7 +929,7 @@ class TestDuckDBAdapter:
 
       # Should call fetch for each table with the same parameters
       assert mock_fetch.call_count == 2
-      for call in mock_fetch.call_args_list:
+      for call in mock_fetch.call__argslist:
         args, kwargs = call
         assert args[1] == from_date  # from_date
         assert args[2] == to_date  # to_date
@@ -954,7 +954,7 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_many_custom_table(self):
     """Test insert_many with custom table name."""
-    from src.model import Ingester
+    from src.models import Ingester
 
     adapter = DuckDB(host="localhost",
                      port=0,
@@ -973,7 +973,7 @@ class TestDuckDBAdapter:
 
       # Verify INSERT was called with custom table name
       insert_calls = [
-          call for call in mock_execute.call_args_list
+          call for call in mock_execute.call__argslist
           if call[0][0].startswith("INSERT")
       ]
       assert len(insert_calls) == 1
@@ -982,7 +982,7 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_create_table_custom_name(self):
     """Test create_table with custom table name."""
-    from src.model import Ingester
+    from src.models import Ingester
 
     adapter = DuckDB(host="localhost",
                      port=0,
@@ -1004,7 +1004,7 @@ class TestDuckDBAdapter:
   @pytest.mark.asyncio
   async def test_insert_custom_table(self):
     """Test insert with custom table name."""
-    from src.model import Ingester
+    from src.models import Ingester
 
     adapter = DuckDB(host="localhost",
                      port=0,

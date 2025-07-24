@@ -1,11 +1,11 @@
-"""Tests for src.model module."""
+"""Tests for src.models module."""
 import sys
 from pathlib import Path
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.model import ResourceField, Scope, Ingester
+from src.models import ResourceField, Scope, ing
 
 
 class TestResourceFieldModel:
@@ -69,10 +69,10 @@ class TestIngesterModel:
     """Test Ingester model creation."""
     field = ResourceField(name="price", selector="data.price")
 
-    ingester = Ingester(name="crypto_ingester",
-                        ingester_type="http_api",
-                        interval="5m",
-                        fields=[field])
+    ingester = ing(name="crypto_ingester",
+                   ingester_type="http_api",
+                   interval="5m",
+                   fields=[field])
 
     assert ingester.name == "crypto_ingester"
     assert ingester.ingester_type == "http_api"
@@ -85,18 +85,18 @@ class TestIngesterModel:
     valid_types = ["http_api", "ws_api", "evm_caller", "processor"]
 
     for ingester_type in valid_types:
-      ingester = Ingester(name=f"test_{ingester_type}",
-                          ingester_type=ingester_type,
-                          interval="1m",
-                          fields=[])
+      ingester = ing(name=f"test_{ingester_type}",
+                     ingester_type=ingester_type,
+                     interval="1m",
+                     fields=[])
       assert ingester.ingester_type == ingester_type
 
   def test_ingester_properties(self):
     """Test Ingester computed properties."""
-    ingester = Ingester(name="test",
-                        ingester_type="http_api",
-                        interval="m5",
-                        fields=[])
+    ingester = ing(name="test",
+                   ingester_type="http_api",
+                   interval="m5",
+                   fields=[])
 
     # Test interval_sec property
     assert ingester.interval_sec == 300  # 5 minutes = 300 seconds
@@ -108,10 +108,10 @@ class TestIngesterModel:
   def test_ingester_serialization(self):
     """Test Ingester serialization."""
     field = ResourceField(name="price", selector="data.price")
-    ingester = Ingester(name="test_ingester",
-                        ingester_type="http_api",
-                        interval="1h",
-                        fields=[field])
+    ingester = ing(name="test_ingester",
+                   ingester_type="http_api",
+                   interval="1h",
+                   fields=[field])
 
     ingester_dict = ingester.to_dict()
     assert ingester_dict["name"] == "test_ingester"
@@ -174,9 +174,9 @@ class TestModelMethods:
     field3 = ResourceField(name="field3",
                            selector="data.volume")  # This is also a dependency
 
-    ingester = Ingester(name="test",
-                        ingester_type="processor",
-                        fields=[field1, field2, field3])
+    ingester = ing(name="test",
+                   ingester_type="processor",
+                   fields=[field1, field2, field3])
 
     deps = ingester.dependencies()
     assert "SourceA" in deps

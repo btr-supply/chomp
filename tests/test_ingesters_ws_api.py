@@ -1,13 +1,19 @@
 """Tests for WebSocket API ingester."""
+import sys
+from pathlib import Path
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
 from collections import deque
 import orjson
 import websockets
-from datetime import datetime, timezone
 
 from src.ingesters.ws_api import schedule
-from src.model import Ingester, ResourceField
+from src.models import ing, ResourceField
+from src.utils.date import now
 
 
 class TestWebSocketIngester:
@@ -16,7 +22,7 @@ class TestWebSocketIngester:
   @pytest.fixture
   def mock_ingester(self):
     """Create a mock ingester for testing."""
-    mock = Mock(spec=Ingester)
+    mock = Mock(spec=ing)
     mock.name = "test_ws_ingester"
     mock.interval = "m5"
     mock.data_by_field = {}
@@ -221,7 +227,7 @@ class TestWebSocketIngester:
 
       mock_state.args.verbose = True
       mock_transform.return_value = 105.0
-      mock_floor.return_value = datetime.now(timezone.utc)
+      mock_floor.return_value = now()
 
       # Extract and test the ingest function
       # This requires significant refactoring of the original code to be easily testable

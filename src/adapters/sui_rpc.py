@@ -1,5 +1,5 @@
 from .jsonrpc import JsonRpcClient
-from typing import Optional, Union
+from typing import Union, Optional
 
 
 class SuiRpcClient(JsonRpcClient):

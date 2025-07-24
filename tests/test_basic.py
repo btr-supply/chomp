@@ -26,7 +26,7 @@ def test_import_core_modules():
   """Test that core modules can be imported."""
   # Test core modules
   import src.model
-  assert src.model is not None
+  assert src.models is not None
 
   import src.cache
   assert src.cache is not None
@@ -34,8 +34,8 @@ def test_import_core_modules():
   import src.state
   assert src.state is not None
 
-  import src.deps
-  assert src.deps is not None
+  import chomp.src.utils.deps
+  assert chomp.src.utils.deps is not None
 
   import src.proxies
   assert src.proxies is not None
@@ -43,13 +43,12 @@ def test_import_core_modules():
 
 def test_import_utils():
   """Test that utils modules can be imported."""
-  from src.utils import types, date, format, maths, estimators, safe_eval, runtime, argparser
+  from src.utils import types, date, format, maths, safe_eval, runtime, argparser
 
   assert types is not None
   assert date is not None
   assert format is not None
   assert maths is not None
-  assert estimators is not None
   assert safe_eval is not None
   assert runtime is not None
   assert argparser is not None
@@ -69,10 +68,11 @@ def test_import_services():
 def test_import_adapters():
   """Test that common adapters can be imported."""
   # Test adapters that don't require external dependencies
-  from src.adapters import jsonrpc, sql
+  from src.adapters.jsonrpc import JsonRpcClient
+  from src.adapters.sql import SqlAdapter
 
-  assert jsonrpc is not None
-  assert sql is not None
+  assert JsonRpcClient is not None
+  assert SqlAdapter is not None
 
 
 def test_import_server():

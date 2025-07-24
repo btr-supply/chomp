@@ -1,222 +1,178 @@
 """
-Purpose: Instance UID management and human-friendly naming
-Generates unique identifiers and names for ingester instances
+Instance UID and name management for Chomp.
+Provides unique identification for running instances.
 """
 
-import os
-import socket
-import hashlib
-import sys
 import random
-from pathlib import Path
-from typing import Optional
+import secrets
 from os import environ as env
+from pathlib import Path
+from typing import Dict, List, Optional, Union
 
-from .format import log_info, log_debug, log_error, log_warn
-
-UID_FILE = ".uid"
-
-# Roman numeral mapping for name suffixes
-ROMAN_NUMERALS = [
-    "",
-    "I",
-    "II",
-    "III",
-    "IV",
-    "V",
-    "VI",
-    "VII",
-    "VIII",
-    "IX",
-    "X",
-    "XI",
-    "XII",
-    "XIII",
-    "XIV",
-    "XV",
-    "XVI",
-    "XVII",
-    "XVIII",
-    "XIX",
-    "XX",
-    "XXI",
-    "XXII",
-    "XXIII",
-    "XXIV",
-    "XXV",
-    "XXVI",
-    "XXVII",
-    "XXVIII",
-    "XXIX",
-    "XXX",
-]
-
-
-def get_workdir_root() -> Path:
-  """Get the root working directory for the current process"""
-  workdir = env.get("WORKDIR", ".")
-  return Path(workdir).resolve()
-
-
-def generate_instance_uid() -> str:
-  """Generate a unique instance identifier based on launch command, config string, and hostname"""
-  try:
-    hostname = socket.gethostname()
-    launch_command = " ".join(sys.argv)
-
-    # Get config string from environment or arguments
-    config_string = env.get("INGESTER_CONFIGS", "")
-    if not config_string and len(sys.argv) > 1:
-      for i, arg in enumerate(sys.argv):
-        if arg in ["-c", "--ingester_configs"] and i + 1 < len(sys.argv):
-          config_string = sys.argv[i + 1]
-          break
-
-    # Create deterministic hash
-    uid_source = f"{hostname}|{launch_command}|{config_string}"
-    return hashlib.md5(uid_source.encode()).hexdigest()
-  except Exception:
-    # Fallback to basic hash
-    fallback = f"{socket.gethostname()}-{os.getpid()}"
-    return hashlib.md5(fallback.encode()).hexdigest()
+from .runtime import runtime
+from .format import log_debug, log_warn, log_info, log_error
 
 
 def get_instance_uid() -> str:
-  """Get the current instance UID (load from file or generate new)"""
-  uid_file_path = get_workdir_root() / UID_FILE
+  """Get the current instance UID."""
+  return runtime.get_uid()
 
-  try:
-    if uid_file_path.exists():
-      with open(uid_file_path, "r") as f:
-        uid = f.read().strip()
-        if uid:
-          log_debug(f"Loaded instance UID: {uid}")
-          return uid
-  except Exception as e:
-    log_debug(f"Failed to read UID file: {e}")
 
-  # Generate and save new UID
-  uid = generate_instance_uid()
-  try:
-    with open(uid_file_path, "w") as f:
-      f.write(uid)
-    log_info(f"Generated and saved instance UID: {uid}")
-  except Exception as e:
-    log_debug(f"Failed to save UID file: {e}")
-
+def generate_instance_uid() -> str:
+  """Generate a new instance UID."""
+  uid = secrets.token_hex(16)
+  runtime.set_uid(uid)
   return uid
 
 
-def load_uid_masks() -> Optional[list[str]]:
-  """Load the list of names from uid-masks file"""
+def get_instance_name() -> Optional[str]:
+  """Get the current instance name."""
+  return runtime.get_instance_name()
+
+
+def set_instance_name(name: str) -> None:
+  """Set the instance name."""
+  runtime.set_instance_name(name)
+
+
+def get_or_generate_instance_name() -> str:
+  """Get instance name, generating one if needed (synchronous version)."""
+  name = runtime.get_instance_name()
+  if not name:
+    # Try to use sophisticated generation, but fall back to simple if needed
+    try:
+      import asyncio
+      # Try to run the async version
+      name = asyncio.run(generate_instance_name())
+    except Exception:
+      # Fallback to simple generation
+      uid = runtime.get_uid()
+      name = f"instance-{uid[:8]}"
+    runtime.set_instance_name(name)
+  return name
+
+
+async def get_or_generate_instance_name_async() -> str:
+  """Get instance name, generating one if needed (async version)."""
+  name = runtime.get_instance_name()
+  if not name:
+    name = await generate_instance_name()
+    runtime.set_instance_name(name)
+  return name
+
+
+def get_instance_info() -> dict:
+  """Get complete instance information."""
+  return runtime.get_instance_info()
+
+
+def get_masked_uid(uid_masks_file: str = "uid-masks") -> str:
+  """
+    Get a masked version of the instance UID.
+
+    Args:
+        uid_masks_file: Path to the UID masks file
+
+    Returns:
+        Masked UID string
+    """
+  uid = get_instance_uid()
+
+  # Try to find the masks file in various locations
+  masks_paths: List[Path] = [
+      Path(uid_masks_file),
+      Path.cwd() / uid_masks_file,
+      Path(__file__).parent.parent.parent / uid_masks_file
+  ]
+
+  masks_file = None
+  for path in masks_paths:
+    if path.exists():
+      masks_file = path
+      break
+
+  if not masks_file:
+    # If no masks file found, return first 8 characters
+    return uid[:8]
+
+  try:
+    with open(masks_file, 'r') as f:
+      masks = [line.strip() for line in f if line.strip()]
+
+    if not masks:
+      return uid[:8]
+
+    # Use UID to select a mask deterministically
+    mask_index = int(uid[:8], 16) % len(masks)
+    return masks[mask_index]
+
+  except (IOError, ValueError):
+    # Fallback to truncated UID if masks file can't be read
+    return uid[:8]
+
+
+def load_uid_masks() -> Optional[Dict[str, Union[str, List[str]]]]:
+  """Load names from uid-masks file"""
   try:
     uid_masks_file = env.get("UID_MASKS_FILE", "uid-masks")
-
-    # Try multiple potential locations
     potential_paths = [
         Path(uid_masks_file),
         Path.cwd() / uid_masks_file,
-        Path(__file__).parent.parent.parent / uid_masks_file,
-        Path(__file__).parent.parent.parent / "uid-masks",
+        Path(__file__).parent.parent.parent / uid_masks_file
     ]
 
     for path in potential_paths:
       if path.exists():
         with open(path, "r", encoding="utf-8") as f:
           names = [line.strip() for line in f if line.strip()]
-        log_debug(f"Loaded {len(names)} names from uid-masks at {path}")
-        return names
+        log_debug(f"Loaded {len(names)} names from {path}")
+        return {"names": names, "file": path.name}
 
-    log_warn(
-        f"UID masks file not found at: {[str(p) for p in potential_paths]}")
+    log_warn("UID masks file not found")
     return None
   except Exception as e:
     log_warn(f"Failed to load uid-masks: {e}")
     return None
 
 
-async def get_existing_instance_names(base_name: str) -> list[str]:
-  """Get all existing instance names that start with base_name"""
-  try:
-    from .. import state
-
-    if not hasattr(state, "tsdb") or not state.tsdb:
-      return []
-
-    await state.tsdb.ensure_connected()
-    tables = await state.tsdb.list_tables()
-    if "instances" not in tables:
-      return []
-
-    # Placeholder for actual TSDB-specific query implementation
-    # For now, return empty list to allow basic functionality
-    return []
-  except Exception as e:
-    log_debug(f"Failed to query existing instance names: {e}")
-    return []
-
-
-def find_next_suffix(existing_names: list[str], base_name: str) -> str:
-  """Find the next available Roman numeral suffix"""
-  if base_name not in existing_names:
-    return base_name
-
-  # Extract existing suffix indices
-  existing_suffixes = []
-  for name in existing_names:
-    if name == base_name:
-      existing_suffixes.append(0)
-    elif name.startswith(f"{base_name}-"):
-      suffix = name[len(base_name) + 1:]
-      if suffix in ROMAN_NUMERALS:
-        existing_suffixes.append(ROMAN_NUMERALS.index(suffix))
-
-  # Find next available suffix
-  next_index = max(existing_suffixes) + 1 if existing_suffixes else 1
-
-  if next_index < len(ROMAN_NUMERALS):
-    suffix = ROMAN_NUMERALS[next_index]
-    return f"{base_name}-{suffix}" if suffix else base_name
-  else:
-    return f"{base_name}-{next_index}"
-
-
-async def generate_instance_name() -> str:
-  """Generate a unique human-friendly instance name"""
+async def generate_instance_name(uid: Optional[str] = None) -> str:
+  """Generate instance name using two names with different starting letters"""
   try:
     names = load_uid_masks()
-
-    # Fallback to UID if no masks available
     if not names:
-      uid = get_instance_uid()
-      log_warn(
-          f"Using UID as instance name due to missing uid-masks file: {uid}")
+      if not uid:
+        uid = get_instance_uid()
+      log_warn(f"Using UID as instance name: {uid}")
       return uid
 
-    # Try up to 10 random names
-    for _ in range(10):
-      base_name = random.choice(names)
-      existing_names = await get_existing_instance_names(base_name)
+    # Separate by length
+    short_names = [name for name in names["names"] if len(name) <= 5]
+    if not short_names:
+      short_names = names["names"]
 
-      if not existing_names:
-        return base_name
+    # Try to find two names with different starting letters
+    max_attempts = 20
+    for _ in range(max_attempts):
+      first_name = random.choice(short_names)
+      second_name = random.choice(names["names"])
 
-      unique_name = find_next_suffix(existing_names, base_name)
-      if unique_name not in existing_names:
-        return unique_name
+      # Check different starting letters and at least one short name
+      if (first_name[0].lower() != second_name[0].lower()
+          and (len(first_name) <= 5 or len(second_name) <= 5)):
+        break
+    else:
+      # Fallback: just ensure at least one short name
+      first_name = random.choice(short_names)
+      second_name = random.choice(names["names"])
 
-    # Ultimate fallback
-    import time
+    # Randomly order the names
+    name_pair = [first_name, second_name]
+    random.shuffle(name_pair)
 
-    return f"Instance-{int(time.time())}"
+    instance_name = f"{name_pair[0]}-{name_pair[1]}"
+    log_info(f"Instance name: {instance_name}, UID: {uid}")
+    return instance_name
 
   except Exception as e:
     log_error(f"Failed to generate instance name: {e}")
-    try:
-      uid = get_instance_uid()
-      log_warn(f"Using UID as instance name due to error: {uid}")
-      return uid
-    except Exception:
-      import time
-
-      return f"Instance-{int(time.time())}"
+    return get_instance_uid()

@@ -1,0 +1,3 @@
+[submodule "src/adapters/evm_multicall"]
+	path = src/adapters/evm_multicall
+	url = https://github.com/btr-supply/multicall.py

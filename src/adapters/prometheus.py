@@ -1,11 +1,12 @@
 from asyncio import gather
 from datetime import datetime, timezone
+from typing import Any, Optional
 from os import environ as env
-import aiohttp
-from typing import Any
 
 from ..utils import log_error, log_info, log_warn, Interval, ago, now
-from ..model import Ingester, Tsdb
+from ..utils.http import get, post
+from ..models.base import Tsdb
+from ..models.ingesters import Ingester, UpdateIngester
 
 UTC = timezone.utc
 
@@ -44,13 +45,6 @@ class PrometheusAdapter(Tsdb):
   Base adapter for Prometheus-compatible time series databases.
   This includes Prometheus itself, VictoriaMetrics, and other compatible systems.
   """
-  session: aiohttp.ClientSession | None = None
-  base_url: str
-  insert_url: str
-  query_url: str
-  query_range_url: str
-  health_url: str
-  label_values_url: str
 
   def __init__(self, host: str, port: int, db: str, user: str, password: str):
     super().__init__(host, port, db, user, password)
@@ -59,19 +53,19 @@ class PrometheusAdapter(Tsdb):
   def _setup_urls(self):
     """Setup API URLs. Can be overridden by subclasses for different endpoints."""
     self.base_url = f"http://{self.host}:{self.port}"
-    self.insert_url = f"{self.base_url}/api/v1/import/prometheus"
-    self.query_url = f"{self.base_url}/api/v1/query"
-    self.query_range_url = f"{self.base_url}/api/v1/query_range"
+    self.insert_url = f"{self.base_url}/import/prometheus"
+    self.query_url = f"{self.base_url}/query"
+    self.query_range_url = f"{self.base_url}/query_range"
     self.health_url = f"{self.base_url}/health"
-    self.label_values_url = f"{self.base_url}/api/v1/label/__name__/values"
+    self.label_values_url = f"{self.base_url}/label/__name__/values"
 
   @classmethod
   async def connect(cls,
-                    host: str | None = None,
-                    port: int | None = None,
-                    db: str | None = None,
-                    user: str | None = None,
-                    password: str | None = None) -> "PrometheusAdapter":
+                    host: Optional[str] = None,
+                    port: Optional[int] = None,
+                    db: Optional[str] = None,
+                    user: Optional[str] = None,
+                    password: Optional[str] = None) -> "PrometheusAdapter":
     self = cls(host=host or env.get("PROMETHEUS_HOST") or "localhost",
                port=int(port or env.get("PROMETHEUS_PORT") or 9090),
                db=db or env.get("PROMETHEUS_DB") or "default",
@@ -83,28 +77,22 @@ class PrometheusAdapter(Tsdb):
   async def ping(self) -> bool:
     try:
       await self.ensure_connected()
-      if self.session is None:
-        return False
-      async with self.session.get(self.health_url) as resp:
-        return resp.status == 200
+      response = await get(self.health_url,
+                           user=self.user,
+                           password=self.password)
+      return response.status_code == 200
     except Exception as e:
       log_error("Prometheus ping failed", e)
       return False
 
   async def ensure_connected(self):
-    if not self.session:
-      # Create session with basic auth if credentials provided
-      auth = None
-      if self.user and self.password:
-        auth = aiohttp.BasicAuth(self.user, self.password)
-
-      self.session = aiohttp.ClientSession(auth=auth)
-      log_info(
-          f"Connected to Prometheus-compatible DB on {self.host}:{self.port}")
+    # Connection is handled by singleton HTTP client
+    log_info(
+        f"Connected to Prometheus-compatible DB on {self.host}:{self.port}")
 
   async def close(self):
-    if self.session:
-      await self.session.close()
+    # Singleton client is managed globally
+    pass
 
   async def create_db(self,
                       name: str,
@@ -117,18 +105,36 @@ class PrometheusAdapter(Tsdb):
     # Prometheus doesn't have separate databases
     pass
 
-  async def create_table(self, c: Ingester, name: str = ""):
+  async def create_table(self, ing: Ingester, name: str = ""):
     # Prometheus doesn't require table creation
     # Metrics are created automatically when data is inserted
     pass
+
+  async def upsert(self, ing: UpdateIngester, table: str = "", uid: str = ""):
+    """Upsert for Prometheus - same as insert since metrics are time-series based."""
+    log_warn(
+        "Prometheus doesn't support upsert operations - using insert instead")
+    await self.insert(ing, table)
+
+  async def fetch_by_id(self, table: str, uid: str):
+    """Fetch by ID not supported in Prometheus - it's a time-series database."""
+    log_warn("fetch_by_id not supported for Prometheus time-series database")
+    return None
+
+  async def fetchall(self):
+    """Fetch all results - not applicable for Prometheus."""
+    log_warn(
+        "fetchall() not applicable for Prometheus - use specific query methods"
+    )
+    return []
 
   def _format_metric_name(self, table: str, field_name: str) -> str:
     """Format metric name. Can be overridden by subclasses."""
     return f"{table}_{field_name}"
 
-  def _build_labels(self, c: Ingester, field) -> list[str]:
+  def _build_labels(self, ing: Ingester, field) -> list[str]:
     """Build labels for a metric. Can be overridden by subclasses."""
-    labels = [f'ingester="{c.name}"']
+    labels = [f'ingester="{ing.name}"']
     for tag in field.tags:
       # Escape quotes in tag values
       escaped_tag = tag.replace('"', '\\"')
@@ -141,22 +147,35 @@ class PrometheusAdapter(Tsdb):
     labels_str = "{" + ",".join(labels) + "}" if labels else ""
     return f"{metric_name}{labels_str} {value} {timestamp}"
 
-  async def insert(self, c: Ingester, table: str = ""):
+  async def insert(self, ing: Ingester, table: str = ""):
     await self.ensure_connected()
-    table = table or c.name
+    table = table or ing.name
 
-    persistent_data = [field for field in c.fields if not field.transient]
+    persistent_data = [field for field in ing.fields if not field.transient]
 
-    # Convert timestamp to Unix timestamp (seconds)
-    if c.last_ingested is None:
+    # Get timestamp from ts field
+    ts_value = None
+    for field in persistent_data:
+      if field.name == 'ts':
+        ts_value = field.value
+        break
+
+    # Fallback to last_ingested if no ts field found
+    if ts_value is None:
+      ts_value = ing.last_ingested
+
+    if ts_value is None:
       raise Exception("No timestamp available for ingester")
-    timestamp_seconds = int(c.last_ingested.timestamp())
+    timestamp_seconds = int(ts_value.timestamp())
 
     # Build Prometheus-format data lines
     lines = []
     for field in persistent_data:
+      if field.name == 'ts':  # Skip ts field since it's handled as timestamp
+        continue
+
       metric_name = self._format_metric_name(table, field.name)
-      labels = self._build_labels(c, field)
+      labels = self._build_labels(ing, field)
       line = self._format_prometheus_line(metric_name, labels, field.value,
                                           timestamp_seconds)
       lines.append(line)
@@ -164,28 +183,27 @@ class PrometheusAdapter(Tsdb):
     prometheus_data = "\n".join(lines)
 
     try:
-      if self.session is None:
-        raise Exception("Session not initialized")
-      async with self.session.post(self.insert_url,
-                                   data=prometheus_data,
-                                   headers={"Content-Type":
-                                            "text/plain"}) as resp:
-        if resp.status not in [200, 204]:
-          error_text = await resp.text()
-          raise Exception(
-              f"Prometheus insert failed: {resp.status} - {error_text}")
+      response = await post(self.insert_url,
+                            content=prometheus_data,
+                            headers={"Content-Type": "text/plain"},
+                            user=self.user if self.user else None,
+                            password=self.password if self.password else None)
+      if response.status_code not in [200, 204]:
+        error_text = response.text
+        raise Exception(
+            f"Prometheus insert failed: {response.status_code} - {error_text}")
     except Exception as e:
       log_error("Failed to insert data into Prometheus", e)
       raise e
 
   async def insert_many(self,
-                        c: Ingester,
+                        ing: Ingester,
                         values: list[tuple],
                         table: str = ""):
     await self.ensure_connected()
-    table = table or c.name
+    table = table or ing.name
 
-    persistent_fields = [field for field in c.fields if not field.transient]
+    persistent_fields = [field for field in ing.fields if not field.transient]
 
     # Build Prometheus-format data lines for all values
     lines = []
@@ -199,7 +217,7 @@ class PrometheusAdapter(Tsdb):
       for i, field in enumerate(persistent_fields):
         field_value = value_tuple[i + 1]  # Skip timestamp at index 0
         metric_name = self._format_metric_name(table, field.name)
-        labels = self._build_labels(c, field)
+        labels = self._build_labels(ing, field)
         line = self._format_prometheus_line(metric_name, labels, field_value,
                                             timestamp_seconds)
         lines.append(line)
@@ -207,16 +225,16 @@ class PrometheusAdapter(Tsdb):
     prometheus_data = "\n".join(lines)
 
     try:
-      if self.session is None:
-        raise Exception("Session not initialized")
-      async with self.session.post(self.insert_url,
-                                   data=prometheus_data,
-                                   headers={"Content-Type":
-                                            "text/plain"}) as resp:
-        if resp.status not in [200, 204]:
-          error_text = await resp.text()
-          raise Exception(
-              f"Prometheus batch insert failed: {resp.status} - {error_text}")
+      response = await post(self.insert_url,
+                            content=prometheus_data,
+                            headers={"Content-Type": "text/plain"},
+                            user=self.user,
+                            password=self.password)
+      if response.status_code not in [200, 204]:
+        error_text = response.text
+        raise Exception(
+            f"Prometheus batch insert failed: {response.status_code} - {error_text}"
+        )
     except Exception as e:
       log_error("Failed to batch insert data into Prometheus", e)
       raise e
@@ -224,15 +242,15 @@ class PrometheusAdapter(Tsdb):
   async def _get_table_metrics(self, table: str) -> list[str]:
     """Get all metrics for a table. Can be overridden by subclasses."""
     try:
-      if self.session is None:
-        return []
-      async with self.session.get(self.label_values_url) as resp:
-        if resp.status == 200:
-          result = await resp.json()
-          all_metrics = result.get("data", [])
-          # Filter metrics that start with our table name
-          table_metrics = [m for m in all_metrics if m.startswith(f"{table}_")]
-          return [m.replace(f"{table}_", "") for m in table_metrics]
+      response = await get(self.label_values_url,
+                           user=self.user if self.user else None,
+                           password=self.password if self.password else None)
+      if response.status_code == 200:
+        result = await response.json()
+        all_metrics = result.get("data", [])
+        # Filter metrics that start with our table name
+        table_metrics = [m for m in all_metrics if m.startswith(f"{table}_")]
+        return [m.replace(f"{table}_", "") for m in table_metrics]
     except Exception:
       pass
     return []
@@ -245,8 +263,8 @@ class PrometheusAdapter(Tsdb):
 
   async def fetch(self,
                   table: str,
-                  from_date: datetime | None = None,
-                  to_date: datetime | None = None,
+                  from_date: Optional[datetime] = None,
+                  to_date: Optional[datetime] = None,
                   aggregation_interval: Interval = "m5",
                   columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     await self.ensure_connected()
@@ -283,59 +301,58 @@ class PrometheusAdapter(Tsdb):
       }
 
       try:
-        if self.session is None:
+        response = await get(self.query_range_url,
+                             params=params,
+                             user=self.user,
+                             password=self.password)
+        if response.status_code != 200:
+          error_text = response.text
+          log_warn(
+              f"Prometheus query failed for {metric_name}: {response.status_code} - {error_text}"
+          )
           continue
-        async with self.session.get(self.query_range_url,
-                                    params=params) as resp:
-          if resp.status != 200:
-            error_text = await resp.text()
-            log_warn(
-                f"Prometheus query failed for {metric_name}: {resp.status} - {error_text}"
-            )
-            continue
 
-          result = await resp.json()
-          data = result.get("data", {})
+        result = await response.json()
+        data = result.get("data", {})
 
-          if data.get("resultType") == "matrix":
-            for series in data.get("result", []):
-              values: list[tuple] = series.get("values", [])
-              for timestamp_unix, value in values:
-                timestamp_dt = datetime.fromtimestamp(float(timestamp_unix),
-                                                      UTC)
+        if data.get("resultType") == "matrix":
+          for series in data.get("result", []):
+            values: list[tuple] = series.get("values", [])
+            for timestamp_unix, value in values:
+              timestamp_dt = datetime.fromtimestamp(float(timestamp_unix), UTC)
 
-                # Find existing row for this timestamp or create new one
-                existing_row = None
-                for i, row in enumerate(result_data):
-                  if row[0] == timestamp_dt:
-                    existing_row = i
-                    break
+              # Find existing row for this timestamp or create new one
+              existing_row = None
+              for i, row in enumerate(result_data):
+                if row[0] == timestamp_dt:
+                  existing_row = i
+                  break
 
-                if existing_row is not None:
-                  # Update existing row
-                  row_list = list(result_data[existing_row])
-                  if column not in result_columns:
-                    result_columns.append(column)
-                    row_list.append(float(value))
-                  else:
-                    col_index = result_columns.index(column)
-                    row_list[col_index] = float(value)
-                  result_data[existing_row] = tuple(row_list)
+              if existing_row is not None:
+                # Update existing row
+                row_list = list(result_data[existing_row])
+                if column not in result_columns:
+                  result_columns.append(column)
+                  row_list.append(float(value))
                 else:
-                  # Create new row
-                  if column not in result_columns:
-                    result_columns.append(column)
-
-                  # Pad row with None values for missing columns
-                  new_row: list[Any] = [timestamp_dt
-                                        ] + [None] * (len(result_columns) - 2)
                   col_index = result_columns.index(column)
-                  if col_index < len(new_row):
-                    new_row[col_index] = float(value)
-                  else:
-                    new_row.append(float(value))
+                  row_list[col_index] = float(value)
+                result_data[existing_row] = tuple(row_list)
+              else:
+                # Create new row
+                if column not in result_columns:
+                  result_columns.append(column)
 
-                  result_data.append(tuple(new_row))
+                # Pad row with None values for missing columns
+                new_row: list[Any] = [timestamp_dt
+                                      ] + [None] * (len(result_columns) - 2)
+                col_index = result_columns.index(column)
+                if col_index < len(new_row):
+                  new_row[col_index] = float(value)
+                else:
+                  new_row.append(float(value))
+
+                result_data.append(tuple(new_row))
 
       except Exception as e:
         log_error(f"Failed to query metric {metric_name} from Prometheus", e)
@@ -346,15 +363,11 @@ class PrometheusAdapter(Tsdb):
 
     return (result_columns, result_data)
 
-  async def fetchall(self):
-    # Prometheus doesn't have a universal "fetch all" - need table name
-    raise NotImplementedError("fetchall requires table name for Prometheus")
-
   async def fetch_batch(
       self,
       tables: list[str],
-      from_date: datetime | None = None,
-      to_date: datetime | None = None,
+      from_date: Optional[datetime] = None,
+      to_date: Optional[datetime] = None,
       aggregation_interval: Interval = "m5",
       columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     results = await gather(*[
@@ -382,26 +395,75 @@ class PrometheusAdapter(Tsdb):
 
     try:
       # Get all metric names and extract table prefixes
-      if self.session is None:
-        return []
-      async with self.session.get(self.label_values_url) as resp:
-        if resp.status != 200:
-          error_text = await resp.text()
-          raise Exception(
-              f"Prometheus list metrics failed: {resp.status} - {error_text}")
+      response = await get(self.label_values_url,
+                           user=self.user if self.user else None,
+                           password=self.password if self.password else None)
+      if response.status_code != 200:
+        error_text = response.text
+        raise Exception(
+            f"Prometheus list metrics failed: {response.status_code} - {error_text}"
+        )
 
-        result = await resp.json()
-        metrics = result.get("data", [])
+      result = await response.json()
+      metrics = result.get("data", [])
 
-        # Extract table names (everything before the last underscore)
-        tables = set()
-        for metric in metrics:
-          if "_" in metric:
-            table_name = "_".join(metric.split("_")[:-1])
-            tables.add(table_name)
+      # Extract table names (everything before the last underscore)
+      tables = set()
+      for metric in metrics:
+        if "_" in metric:
+          table_name = "_".join(metric.split("_")[:-1])
+          tables.add(table_name)
 
-        return list(tables)
+      return list(tables)
 
     except Exception as e:
       log_error("Failed to list tables from Prometheus", e)
+      return []
+
+  async def fetch_batch_by_ids(self, table: str,
+                               uids: list[str]) -> list[tuple]:
+    """Fetch multiple records by their UIDs from Prometheus
+
+    For Prometheus, this is essentially a no-op since it's primarily a metrics database.
+    UIDs don't make as much sense in this context, but we can try to query
+    for metrics with specific labels matching the UIDs.
+    """
+    if not uids:
+      return []
+
+    try:
+      # Construct a query to find metrics with uid labels matching the list
+      uid_filter = "|".join(uids)
+      query = f'{table}{{uid=~"{uid_filter}"}}'
+
+      params = {"query": query}
+      resp = await get(self.query_url,
+                       params=params,
+                       user=self.user if self.user else None,
+                       password=self.password if self.password else None)
+
+      if resp.status_code != 200:
+        log_warn(f"Prometheus query failed: {resp.status_code}")
+        return []
+
+      result = await resp.json()
+      data = result.get("data", {})
+
+      # Convert result to list of tuples format
+      rows = []
+      if data.get("resultType") == "vector":
+        for series in data.get("result", []):
+          metric = series.get("metric", {})
+          value = series.get("value", [None, None])
+          if len(value) >= 2:
+            timestamp = value[0]
+            val = value[1]
+            # Create a tuple with uid, timestamp, value
+            uid = metric.get("uid", "")
+            rows.append((uid, timestamp, val))
+
+      return rows
+
+    except Exception as e:
+      log_error(f"Failed to fetch batch by IDs from Prometheus: {e}")
       return []

@@ -7,16 +7,12 @@ export PARENT
 
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
-# Parse arguments and set defaults
+find_env "$@"
 parse_common_args "$@"
 
-# Handle setup-specific arguments
-ACTION="all"
-for arg in "$@"; do
-  case "$arg" in
-    deps|images|all) ACTION="$arg" ;;
-  esac
-done
+ACTION=${1:-"all"}
+MODE=${MODE:-"dev"}
+DEPLOYMENT=${DEPLOYMENT:-"docker"}
 
 echo "🚀 Setup: MODE=$MODE DEPLOYMENT=$DEPLOYMENT ACTION=$ACTION"
 
@@ -32,8 +28,8 @@ install_deps() {
 
   # Create virtual environment if it doesn't exist
   if [ ! -d ".venv" ]; then
-    echo "Creating virtual environment with Python 3.11..."
-    uv venv --python 3.11
+    echo "Creating virtual environment with Python 3.12..."
+    uv venv --python 3.12
   fi
 
   # Install dependencies based on EXTRA parameter
@@ -67,6 +63,7 @@ install_deps() {
 
 build_images() {
   echo "🐳 Building Docker images..."
+  echo "   NB: Images are configuration-agnostic - configs mounted at runtime"
   check_docker
   ensure_network "$DOCKER_NET"
 

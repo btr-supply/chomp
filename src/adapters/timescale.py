@@ -1,48 +1,46 @@
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Optional, Any
 from os import environ as env
-from typing import Any
 
-from ..utils import log_error, log_info, Interval, TimeUnit
-from ..model import Ingester, FieldType
 from .sql import SqlAdapter
+from ..models.base import FieldType
+from ..models.ingesters import Ingester
+from ..utils import log_error, log_info, Interval, TimeUnit
 
-# TimescaleDB data type mapping (PostgreSQL compatible)
+import asyncpg  # happy mypy
+
+UTC = timezone.utc
+
+# PostgreSQL field type mapping
 TYPES: dict[FieldType, str] = {
-    "int8": "smallint",  # 16 bits minimum in postgres
-    "uint8": "smallint",  # no unsigned in postgres
-    "int16": "smallint",  # 16 bits
-    "uint16": "integer",  # use 32-bit for unsigned 16-bit
-    "int32": "integer",  # 32 bits
-    "uint32": "bigint",  # use 64-bit for unsigned 32-bit
-    "int64": "bigint",  # 64 bits
-    "uint64": "bigint",  # no unsigned in postgres
-    "float32": "real",  # 32 bits
-    "ufloat32": "real",  # no unsigned in postgres
-    "float64": "double precision",  # 64 bits
-    "ufloat64": "double precision",  # no unsigned in postgres
-    "bool": "boolean",
-    "timestamp": "timestamptz",  # timestamp with timezone
-    "string": "text",
-    "binary": "bytea",
-    "varbinary": "bytea",
+    "int8": "SMALLINT",
+    "uint8": "SMALLINT",  # PostgreSQL doesn't have unsigned types
+    "int16": "SMALLINT",
+    "uint16": "INTEGER",
+    "int32": "INTEGER",
+    "uint32": "BIGINT",
+    "int64": "BIGINT",
+    "uint64": "BIGINT",
+    "float32": "REAL",
+    "ufloat32": "REAL",
+    "float64": "DOUBLE PRECISION",
+    "ufloat64": "DOUBLE PRECISION",
+    "bool": "BOOLEAN",
+    "timestamp": "TIMESTAMP WITH TIME ZONE",
+    "string": "TEXT",
+    "binary": "BYTEA",
+    "varbinary": "BYTEA",
 }
 
-# Define precision and timezone
-PRECISION: TimeUnit = "ms"  # Supported values: ns, us, ms, s, m
-TIMEZONE = "UTC"
-
-partitioning_by_precision: dict[TimeUnit, str] = {
-    "ns": "1 day",
-    "us": "1 day",
-    "ms": "1 day",
-    "s": "7 days",
-    "m": "7 days",
-    "h": "1 month",
-    "D": "6 months",
-    "W": "5 years",
-    "M": "10 years",
-    "Y": "100 years"
+# Time precision for chunk intervals
+partitioning_by_precision = {
+    "ms": "1 hour",  # For millisecond precision
+    "us": "1 hour",  # For microsecond precision
+    "ns": "30 minutes",  # For nanosecond precision
+    "s": "1 day",  # For second precision
 }
+
+PRECISION: TimeUnit = "ms"
 
 
 class TimescaleDb(SqlAdapter):
@@ -53,24 +51,10 @@ class TimescaleDb(SqlAdapter):
   def __init__(self,
                host: str = "localhost",
                port: int = 5432,
-               db: str = "postgres",
+               db: str = "chomp",
                user: str = "postgres",
                password: str = "password"):
     super().__init__(host, port, db, user, password)
-    self._asyncpg_module = None
-
-  @property
-  def asyncpg_module(self):
-    """Lazy load asyncpg module to avoid import errors if not installed."""
-    if self._asyncpg_module is None:
-      try:
-        import asyncpg
-        self._asyncpg_module = asyncpg
-      except ImportError as e:
-        raise ImportError(
-            "asyncpg is required for TimescaleDB adapter. Install with: pip install asyncpg"
-        ) from e
-    return self._asyncpg_module
 
   @property
   def timestamp_column_type(self) -> str:
@@ -78,11 +62,11 @@ class TimescaleDb(SqlAdapter):
 
   @classmethod
   async def connect(cls,
-                    host: str | None = None,
-                    port: int | None = None,
-                    db: str | None = None,
-                    user: str | None = None,
-                    password: str | None = None) -> "TimescaleDb":
+                    host: Optional[str] = None,
+                    port: Optional[int] = None,
+                    db: Optional[str] = None,
+                    user: Optional[str] = None,
+                    password: Optional[str] = None) -> "TimescaleDb":
     self = cls(host=host or env.get("TIMESCALE_HOST") or "localhost",
                port=int(port or env.get("TIMESCALE_PORT") or 5432),
                db=db or env.get("TIMESCALE_DB") or "postgres",
@@ -93,22 +77,31 @@ class TimescaleDb(SqlAdapter):
 
   async def _connect(self):
     """TimescaleDB-specific connection using asyncpg."""
-    try:
-      asyncpg = self.asyncpg_module
+    conn = await asyncpg.connect(host=self.host,
+                                 port=self.port,
+                                 user=self.user,
+                                 password=self.password,
+                                 database=self.db)
+    log_info(f"Connected to TimescaleDB at {self.host}:{self.port}")
+    return conn
 
+  async def _init_db(self):
+    """Initialize TimescaleDB database and create default tables."""
+    try:
       self.conn = await asyncpg.connect(host=self.host,
                                         port=self.port,
-                                        database=self.db,
                                         user=self.user,
-                                        password=self.password)
-      log_info(
-          f"Connected to TimescaleDB on {self.host}:{self.port}/{self.db} as {self.user}"
-      )
-
+                                        password=self.password,
+                                        database=self.db)
+      log_info(f"Connected to TimescaleDB at {self.host}:{self.port}")
     except Exception as e:
-      raise ValueError(
-          f"Failed to connect to TimescaleDB on {self.user}@{self.host}:{self.port}/{self.db}: {e}"
-      )
+      log_error("Failed to initialize TimescaleDB database", e)
+      raise e
+
+  async def _create_table(self, name, definition):
+    await self.conn.execute(f"CREATE TABLE IF NOT EXISTS {name} ({definition})"
+                            )
+    log_info(f"Created table {name}")
 
   async def _close_pool(self):
     """TimescaleDB-specific pool closing."""
@@ -139,8 +132,6 @@ class TimescaleDb(SqlAdapter):
                       force: bool = False):
     """TimescaleDB-specific database creation."""
     try:
-      # Connect to postgres database to create the target database
-      asyncpg = self.asyncpg_module
       admin_conn = await asyncpg.connect(host=self.host,
                                          port=self.port,
                                          user=self.user,
@@ -162,52 +153,72 @@ class TimescaleDb(SqlAdapter):
       await self.conn.close()
 
     self.db = db
-    asyncpg = self.asyncpg_module
     self.conn = await asyncpg.connect(host=self.host,
                                       port=self.port,
                                       database=db,
                                       user=self.user,
                                       password=self.password)
 
-  def _build_create_table_sql(self, c: Ingester, table_name: str) -> str:
-    """TimescaleDB-specific CREATE TABLE with hypertable creation."""
-    persistent_fields = [field for field in c.fields if not field.transient]
-    fields = ", ".join([
-        f'"{field.name}" {self.TYPES[field.type]}'
-        for field in persistent_fields
-    ])
+  def _build_create_table_sql(self, ing: Ingester, table_name: str) -> str:
+    """TimescaleDB-specific CREATE TABLE with hypertable setup."""
+    persistent_fields = [field for field in ing.fields if not field.transient]
+    fields = []
 
-    return f'''
-    CREATE TABLE IF NOT EXISTS "{table_name}" (
-      ts TIMESTAMPTZ NOT NULL,
-      {fields}
-    );
-    '''
+    # Add data fields (including ts field)
+    for field in persistent_fields:
+      field_type = TYPES.get(field.type, "TEXT")
+      fields.append(f'"{field.name}" {field_type}')
+
+    if not fields:
+      # Fallback for ingesters with no persistent fields
+      fields = ['"value" TEXT']
+
+    fields_sql = ",\n      ".join(fields)
+
+    # For TimeSeriesIngester, create hypertable with ts as time dimension
+    if getattr(ing, 'ts', None) and ing.resource_type == 'timeseries':
+      chunk_interval = partitioning_by_precision.get(PRECISION, "1 day")
+      return f'''
+      CREATE TABLE IF NOT EXISTS "{table_name}" (
+        {fields_sql}
+      );
+
+      SELECT create_hypertable('"{table_name}"', 'ts',
+                               chunk_time_interval => INTERVAL '{chunk_interval}',
+                               if_not_exists => TRUE);
+      '''
+    else:
+      # Regular table for non-timeseries ingesters
+      return f'''
+      CREATE TABLE IF NOT EXISTS "{table_name}" (
+        {fields_sql}
+      );
+      '''
 
   async def create_table(self,
-                         c: Ingester,
+                         ing: Ingester,
                          name: str = "",
                          force: bool = False):
     """TimescaleDB-specific table creation with hypertable."""
     await self.ensure_connected()
-    table = name or c.name
-
-    drop_sql = f'DROP TABLE IF EXISTS "{table}";' if force else ""
-    create_sql = self._build_create_table_sql(c, table)
-
-    # Create hypertable with appropriate chunk interval
-    hypertable_sql = f"""
-    SELECT create_hypertable('"{table}"', by_range('ts', INTERVAL '{partitioning_by_precision[c.precision]}'), if_not_exists => TRUE);
-    """
+    table = name or ing.name
 
     try:
-      if drop_sql:
-        await self.conn.execute(drop_sql)
-      await self.conn.execute(create_sql)
-      await self.conn.execute(hypertable_sql)
-      log_info(f"Created hypertable {self.db}.{table}")
+      if force:
+        await self._execute(f'DROP TABLE IF EXISTS "{table}"')
+
+      # Build and execute table creation SQL (includes hypertable conversion for time series)
+      create_sql = self._build_create_table_sql(ing, table)
+      await self._execute(create_sql)
+
+      # Log appropriate message based on table type
+      if getattr(ing, 'ts', None) and ing.resource_type == 'timeseries':
+        log_info(f"Created TimescaleDB hypertable {self.db}.{table}")
+      else:
+        log_info(f"Created TimescaleDB table {self.db}.{table}")
+
     except Exception as e:
-      log_error(f"Failed to create hypertable {self.db}.{table}", e)
+      log_error(f"Failed to create table {self.db}.{table}", e)
       raise e
 
   def _build_aggregation_sql(
@@ -266,15 +277,15 @@ class TimescaleDb(SqlAdapter):
 
   async def _get_table_columns(self, table: str) -> list[str]:
     """TimescaleDB-specific column information query."""
-    query = """
-    SELECT column_name
-    FROM information_schema.columns
-    WHERE table_name = $1 AND column_name != $2
-    ORDER BY ordinal_position
-    """
-
     try:
-      result = await self._fetch(query, (table, self.timestamp_column_name))
+      result = await self._fetch(
+          """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = $1 AND table_schema = 'public'
+        ORDER BY ordinal_position
+      """, (table, ))
+      # Return all columns including ts since it's now a proper field
       return [row[0] for row in result]
     except Exception:
       return []
@@ -282,18 +293,30 @@ class TimescaleDb(SqlAdapter):
   async def list_tables(self) -> list[str]:
     """TimescaleDB-specific table listing."""
     await self.ensure_connected()
-
-    # Query for both regular tables and hypertables
-    query = """
-    SELECT table_name
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-    ORDER BY table_name
-    """
-
     try:
-      result = await self._fetch(query)
+      result = await self._fetch(
+          "SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
       return [row[0] for row in result]
     except Exception as e:
       log_error(f"Failed to list tables from {self.db}", e)
+      return []
+
+  async def fetch_batch_by_ids(self, table: str,
+                               uids: list[str]) -> list[tuple]:
+    """Fetch multiple records by their UIDs in a single TimescaleDB query for efficiency"""
+    await self.ensure_connected()
+    try:
+      if not uids:
+        return []
+
+      # Build parameterized query for TimescaleDB (PostgreSQL syntax)
+      placeholders = ",".join([f"${i+1}" for i in range(len(uids))])
+      query = f"SELECT * FROM {table} WHERE uid IN ({placeholders}) ORDER BY updated_at DESC"
+
+      result = await self._fetch(query, tuple(uids))
+      return result if result else []
+    except Exception as e:
+      log_error(
+          f"Failed to fetch batch records by IDs from TimescaleDB {table}: {e}"
+      )
       return []

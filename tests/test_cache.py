@@ -9,7 +9,6 @@ import pickle
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src import cache
-from src.model import Ingester
 
 
 class TestCacheModule:
@@ -367,51 +366,92 @@ class TestCacheModule:
       assert result == [1, 1]
 
   @pytest.mark.asyncio
-  async def test_register_ingester(self):
-    """Test ingester registration."""
-    mock_ingester = Mock(spec=Ingester)
-    mock_ingester.name = "test_ingester"
-    mock_ingester.to_dict.return_value = {"name": "test_ingester"}
+  async def test_get_active_ingesters(self):
+    """Test getting active ingesters from monitoring data."""
+    mock_resources = ["test_ingester1", "test_ingester2", "test_monitor"]
+    mock_data = {
+        "ts": "2024-01-01T00:00:00Z",
+        "field1": "value1",
+        "field2": "value2"
+    }
 
-    with patch('src.cache.wait_acquire_registry_lock', return_value=True), \
-         patch('src.cache.get_cache', return_value={}), \
-         patch('src.cache.cache'), \
-         patch('asyncio.gather', new_callable=AsyncMock, return_value=[True, True]), \
-         patch('src.cache.release_registry_lock') as mock_release, \
-         patch('src.cache.log_info') as mock_log_info:
+    with patch('src.cache.get_cached_resources', return_value=mock_resources), \
+         patch('src.cache.get_cache', return_value=mock_data):
+      result = await cache.get_active_ingesters()
 
-      result = await cache.register_ingester(mock_ingester)
-      assert result is True
-      mock_log_info.assert_called_once()
-      mock_release.assert_called_once()
-
-  @pytest.mark.asyncio
-  async def test_register_ingester_lock_fail(self):
-    """Test ingester registration when lock acquisition fails."""
-    mock_ingester = Mock(spec=Ingester)
-    mock_ingester.name = "test_ingester"
-
-    with patch('src.cache.wait_acquire_registry_lock', return_value=False):
-      with pytest.raises(ValueError, match="Failed to acquire registry lock"):
-        await cache.register_ingester(mock_ingester)
+      # Should exclude _monitor resources
+      assert "test_monitor" not in result
+      assert "test_ingester1" in result
+      assert "test_ingester2" in result
+      assert result["test_ingester1"]["status"] == "active"
 
   @pytest.mark.asyncio
-  async def test_get_registered_ingester(self):
-    """Test getting registered ingester."""
-    test_data = {"name": "test_ingester"}
+  async def test_get_active_instances(self):
+    """Test getting active instances from monitoring data."""
+    mock_keys = [
+        b"chomp:cache:instance1.monitor", b"chomp:cache:resource1.monitor"
+    ]
+    mock_instance_data = {
+        "instance_name": "instance1",
+        "ts": "2024-01-01T00:00:00Z",
+        "cpu_usage": 25.5,
+        "memory_usage": 1024,
+        "coordinates": "40.7128,-74.0060",
+        "location": "New York, NY, USA"
+    }
 
-    with patch('src.cache.get_cache', return_value=test_data):
-      result = await cache.get_registered_ingester("test_ingester")
-      assert result == test_data
+    with patch('src.cache.state') as mock_state, \
+         patch('src.cache.get_cache') as mock_get_cache:
+      mock_state.redis.keys.return_value = mock_keys
+      mock_get_cache.return_value = mock_instance_data
+
+      result = await cache.get_active_instances()
+
+      assert "instance1" in result
+      assert result["instance1"]["status"] == "active"
+      assert result["instance1"]["cpu_usage"] == 25.5
 
   @pytest.mark.asyncio
-  async def test_get_registered_ingesters(self):
-    """Test getting all registered ingesters."""
-    test_data = {"ingester1": {}, "ingester2": {}}
+  async def test_get_ingester_status(self):
+    """Test getting status of a specific ingester."""
+    mock_cached_data = {"ts": "2024-01-01T00:00:00Z", "field1": "value1"}
+    mock_monitor_data = {
+        "latency_ms": 150.5,
+        "response_bytes": 2048,
+        "status_code": 200,
+        "instance_name": "test_instance"
+    }
 
-    with patch('src.cache.get_cache', return_value=test_data):
-      result = await cache.get_registered_ingesters()
-      assert result == test_data
+    with patch('src.cache.get_cache') as mock_get_cache:
+      mock_get_cache.side_effect = lambda name, **kwargs: {
+          "test_ingester": mock_cached_data,
+          "test_ingester.monitor": mock_monitor_data
+      }.get(name)
+
+      result = await cache.get_ingester_status("test_ingester")
+
+      assert result is not None
+      assert result["name"] == "test_ingester"
+      assert result["status"] == "active"
+      assert result["latency_ms"] == 150.5
+
+  @pytest.mark.asyncio
+  async def test_discover_cluster_state(self):
+    """Test discovering complete cluster state."""
+    mock_instances = {"instance1": {"status": "active"}}
+    mock_ingesters = {"ingester1": {"status": "active"}}
+    mock_topics = ["topic1", "topic2"]
+
+    with patch('src.cache.get_active_instances', return_value=mock_instances), \
+         patch('src.cache.get_active_ingesters', return_value=mock_ingesters), \
+         patch('src.cache.get_topics', return_value=mock_topics):
+
+      result = await cache.discover_cluster_state()
+
+      assert result["total_instances"] == 1
+      assert result["total_ingesters"] == 1
+      assert result["total_topics"] == 2
+      assert "timestamp" in result
 
   def test_get_status_key(self):
     """Test status key generation."""

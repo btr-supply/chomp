@@ -188,7 +188,7 @@ class TestTSAnalysisIntegration:
       # Test with coroutine functions
       for attr_name in dir(ts_analysis):
         attr = getattr(ts_analysis, attr_name)
-        if hasattr(attr, '__call__') and hasattr(attr, '__code__'):
+        if callable(attr):
           # This is a basic test for async functions
           assert attr is not None
 

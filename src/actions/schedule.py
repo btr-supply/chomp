@@ -1,15 +1,16 @@
 from asyncio import gather, get_running_loop, Task
 from aiocron import Cron, crontab
-from typing import Callable, Optional, Dict, Any
+from typing import Callable, Any, cast, Optional
 
-from ..cache import ensure_claim_task, inherit_fields, register_ingester
-from ..utils import log_debug, log_info, log_error, submit_to_threadpool,\
+from ..cache import ensure_claim_task, inherit_fields
+from ..utils import log_info, log_error, submit_to_threadpool,\
   Interval, interval_to_cron
-from ..model import Ingester, IngesterType
+from ..models.base import IngesterType
+from ..models.ingesters import Ingester
 from .. import state
 
 # Type annotation for function with attributes
-scheduler_registry: Dict[IngesterType, Callable] = {}
+scheduler_registry: dict[IngesterType, Callable] = {}
 
 
 def get_scheduler(ingestor_type: IngesterType) -> Optional[Callable]:
@@ -34,8 +35,8 @@ def get_scheduler(ingestor_type: IngesterType) -> Optional[Callable]:
       if hasattr(ingesters, module_name):
         # Map some module names to different scheduler keys
         scheduler_key = "scrapper" if module_name == "static_scrapper" else module_name
-        scheduler_registry[scheduler_key] = getattr(
-            ingesters, module_name).schedule  # type: ignore[index]
+        scheduler_registry[cast(IngesterType, scheduler_key)] = getattr(
+            ingesters, module_name).schedule
 
   return scheduler_registry.get(ingestor_type, None)
 
@@ -54,10 +55,10 @@ async def monitor_cron(cron: Cron):
 class Scheduler:
 
   def __init__(self):
-    self.cron_by_job_id: Dict[str, Cron] = {}
-    self.cron_by_interval: Dict[Interval, Cron] = {}
-    self.jobs_by_interval: Dict[Interval, list[str]] = {}
-    self.job_by_id: Dict[str, tuple[Callable, tuple]] = {}
+    self.cron_by_job_id: dict[str, Cron] = {}
+    self.cron_by_interval: dict[Interval, Cron] = {}
+    self.jobs_by_interval: dict[Interval, list[str]] = {}
+    self.job_by_id: dict[str, tuple[Callable, tuple]] = {}
 
   def run_threaded(self, job_ids: list[str]) -> list[Any]:
     jobs = [self.job_by_id[j] for j in job_ids]
@@ -98,7 +99,6 @@ class Scheduler:
 
     job_ids = self.jobs_by_interval[interval]
 
-    # cron = crontab(interval_to_cron(interval), func=self.run_threaded if threaded else self.run_async, args=(job_ids,))
     cron = crontab(interval_to_cron(interval),
                    func=self.run_async,
                    args=(job_ids, ))
@@ -123,14 +123,14 @@ class Scheduler:
     ])
 
   async def add_ingester(self,
-                         c: Ingester,
+                         ing: Ingester,
                          fn: Callable,
                          start=True,
                          threaded=False) -> Optional[Task]:
-    return await self.add(id=c.id,
+    return await self.add(id=ing.id,
                           fn=fn,
-                          args=(c, ),
-                          interval=c.interval,
+                          args=(ing, ),
+                          interval=ing.interval,
                           start=start,
                           threaded=threaded)
 
@@ -150,19 +150,19 @@ class Scheduler:
     return None
 
 
-async def schedule(c: Ingester) -> list[Task]:
-  if c.ingester_type == "processor":
-    c = await inherit_fields(c)
-  await register_ingester(c)
-  schedule_fn = get_scheduler(c.ingester_type)
+async def schedule(ing: Ingester) -> list[Task]:
+  if ing.ingester_type == "processor":
+    ing = await inherit_fields(ing)
+  # Registry registration is now handled automatically via monitoring
+  schedule_fn = get_scheduler(ing.ingester_type)
   if not schedule_fn:
     raise ValueError(
-        f"Unsupported ingester type: {c.ingester_type} (available: {list(scheduler_registry.keys())})"
+        f"Unsupported ingester type: {ing.ingester_type} (available: {list(scheduler_registry.keys())})"
     )
-  await ensure_claim_task(c)
-  tasks = await schedule_fn(c)
-  log_debug(
-      f"Scheduled for ingestion: {c.name}.{c.interval} [{', '.join([field.name for field in c.fields])}]"
+  await ensure_claim_task(ing)
+  tasks = await schedule_fn(ing)
+  log_info(
+      f"Scheduled for ingestion: {ing.name}.{ing.interval} [{', '.join([field.name for field in ing.fields])}]"
   )
   return tasks
 

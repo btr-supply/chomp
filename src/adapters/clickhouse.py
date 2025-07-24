@@ -1,12 +1,16 @@
-from asyncio import gather, sleep
+from asyncio import sleep
 from datetime import datetime, timezone
 from os import environ as env
-from asynch import connect, Connection, Cursor
-from dateutil.relativedelta import relativedelta
+from typing import Optional
 
+from ..models.base import FieldType
+from ..models.ingesters import Ingester, UpdateIngester
 from ..cache import get_or_set_cache
 from ..utils import log_error, log_info, log_warn, Interval, TimeUnit, fmt_date, ago, now
-from ..model import Ingester, FieldType, Tsdb
+from .sql import SqlAdapter
+from .. import state
+
+from asynch.connection import Connection  # happy mypy
 
 UTC = timezone.utc
 
@@ -61,17 +65,36 @@ INTERVALS: dict[str, str] = {
 PRECISION: TimeUnit = "ms"
 
 
-class ClickHouse(Tsdb):
-  conn: Connection
-  cursor: Cursor
+class ClickHouse(SqlAdapter):
+  """ClickHouse adapter extending SqlAdapter."""
+
+  TYPES = TYPES
+
+  def __init__(self,
+               host: str = "localhost",
+               port: int = 9000,
+               db: str = "default",
+               user: str = "default",
+               password: str = ""):
+    super().__init__(host, port, db, user, password)
+    self.executor = state.thread_pool
+
+  @property
+  def timestamp_column_type(self) -> str:
+    return "DateTime"
+
+  @property
+  def connection_string(self) -> str:
+    """Return connection string for ClickHouse"""
+    return f"clickhouse://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
   @classmethod
   async def connect(cls,
-                    host: str | None = None,
-                    port: int | None = None,
-                    db: str | None = None,
-                    user: str | None = None,
-                    password: str | None = None) -> "ClickHouse":
+                    host: Optional[str] = None,
+                    port: Optional[int] = None,
+                    db: Optional[str] = None,
+                    user: Optional[str] = None,
+                    password: Optional[str] = None) -> "ClickHouse":
     self = cls(host=host or env.get("CLICKHOUSE_HOST") or "localhost",
                port=int(port or env.get("CLICKHOUSE_PORT") or 9000),
                db=db or env.get("CLICKHOUSE_DB") or "default",
@@ -80,29 +103,31 @@ class ClickHouse(Tsdb):
     await self.ensure_connected()
     return self
 
-  async def ping(self) -> bool:
+  async def _connect(self):
+    """ClickHouse-specific connection using asynch."""
     try:
-      await self.ensure_connected()
-      await self.cursor.execute("SELECT 1")
-      return True
+      conn = Connection(host=self.host,
+                        port=self.port,
+                        database=self.db,
+                        user=self.user,
+                        password=self.password)
+      await conn.connect()
+      log_info(f"Connected to ClickHouse at {self.host}:{self.port}")
+      return conn
     except Exception as e:
-      log_error("ClickHouse ping failed", e)
-      return False
-
-  async def close(self):
-    if self.cursor:
-      await self.cursor.close()
-    if self.conn:
-      await self.conn.close()
+      log_error(f"Failed to connect to ClickHouse: {e}")
+      raise e
 
   async def ensure_connected(self):
+    """ClickHouse-specific connection with database creation."""
     if not self.conn:
       try:
-        self.conn = await connect(host=self.host,
-                                  port=self.port,
-                                  database=self.db,
-                                  user=self.user,
-                                  password=self.password)
+        self.conn = Connection(host=self.host,
+                               port=self.port,
+                               database=self.db,
+                               user=self.user,
+                               password=self.password)
+        await self.conn.connect()
         log_info(
             f"Connected to ClickHouse on {self.host}:{self.port}/{self.db} as {self.user}"
         )
@@ -112,22 +137,23 @@ class ClickHouse(Tsdb):
           log_warn(
               f"Database '{self.db}' does not exist on {self.host}:{self.port}, creating it now..."
           )
-          # Connect without specifying database to create it
-          temp_conn = await connect(host=self.host,
-                                    port=self.port,
-                                    user=self.user,
-                                    password=self.password)
+          temp_conn = Connection(host=self.host,
+                                 port=self.port,
+                                 user=self.user,
+                                 password=self.password)
+          await temp_conn.connect()
           temp_cursor = await temp_conn.cursor()
           await temp_cursor.execute(f"CREATE DATABASE IF NOT EXISTS {self.db}")
           await temp_cursor.close()
           await temp_conn.close()
 
           # Now connect to the created database
-          self.conn = await connect(host=self.host,
-                                    port=self.port,
-                                    database=self.db,
-                                    user=self.user,
-                                    password=self.password)
+          self.conn = Connection(host=self.host,
+                                 port=self.port,
+                                 database=self.db,
+                                 user=self.user,
+                                 password=self.password)
+          await self.conn.connect()
           log_info(
               f"Connected to ClickHouse on {self.host}:{self.port}/{self.db} as {self.user}"
           )
@@ -143,12 +169,97 @@ class ClickHouse(Tsdb):
           f"Failed to create cursor for ClickHouse on {self.user}@{self.host}:{self.port}/{self.db}"
       )
 
-  async def get_dbs(self):
-    await self.cursor.execute("SHOW DATABASES")
-    return await self.cursor.fetchall()
+  async def _execute(self, query: str, params: tuple = ()):
+    """ClickHouse-specific query execution."""
+    await self.ensure_connected()
+    # ClickHouse uses %s placeholders instead of ?
+    if params:
+      formatted_query = query.replace("?", "%s")
+      await self.cursor.execute(formatted_query, list(params))
+    else:
+      await self.cursor.execute(query)
+    return self.cursor
+
+  async def _fetch(self, query: str, params: tuple = ()) -> list[tuple]:
+    """ClickHouse-specific query execution and fetch."""
+    await self._execute(query, params)
+    result = await self.cursor.fetchall()
+    return result
+
+  async def _executemany(self, query: str, params_list: list[tuple]):
+    """ClickHouse batch execution."""
+    await self.ensure_connected()
+    formatted_query = query.replace("?", "%s")
+    await self.cursor.executemany(formatted_query, params_list)
+
+  def _quote_identifier(self, identifier: str) -> str:
+    """ClickHouse uses backticks for identifiers."""
+    return f"`{identifier}`"
+
+  def _build_placeholders(self, count: int) -> str:
+    """ClickHouse uses %s placeholders."""
+    return ", ".join(["%s" for _ in range(count)])
+
+  def _build_create_table_sql(self, ing: Ingester, table_name: str) -> str:
+    """ClickHouse-specific CREATE TABLE with ENGINE specification."""
+    persistent_fields = [field for field in ing.fields if not field.transient]
+    fields = []
+
+    # Add data fields (TimeSeriesIngester and UpdateIngester already include their standard fields)
+    for field in persistent_fields:
+      field_type = TYPES.get(field.type, "String")
+      fields.append(f"`{field.name}` {field_type}")
+
+    if not fields:
+      # Fallback for ingesters with no persistent fields
+      fields = ["`value` String"]
+
+    fields_sql = ",\n      ".join(fields)
+
+    # ClickHouse requires an engine specification
+    if ing.resource_type == 'update':
+      # UpdateIngester - use MergeTree with ORDER BY uid for upserts
+      return f"""
+      CREATE TABLE IF NOT EXISTS {self.db}.`{table_name}` (
+        {fields_sql}
+      ) ENGINE = MergeTree() ORDER BY uid
+      """
+    else:
+      # TimeSeriesIngester - use MergeTree with ORDER BY ts for time series
+      return f"""
+      CREATE TABLE IF NOT EXISTS {self.db}.`{table_name}` (
+        {fields_sql}
+      ) ENGINE = MergeTree() ORDER BY ts
+      """
+
+  def _build_aggregation_sql(
+      self, table_name: str, columns: list[str], from_date: datetime,
+      to_date: datetime, aggregation_interval: Interval) -> tuple[str, list]:
+    """ClickHouse-specific aggregation using toStartOfInterval."""
+    agg_seconds = INTERVALS[aggregation_interval]
+
+    # ClickHouse time-based aggregation using toStartOfInterval
+    select_cols = [
+        f"argMax(`{col}`, ts) AS `{col}`" for col in columns if col != 'ts'
+    ]
+    select_cols.insert(
+        0, f"toStartOfInterval(ts, INTERVAL {agg_seconds} second) AS ts")
+    select_cols_str = ", ".join(select_cols)
+
+    conditions = [
+        f"ts >= '{fmt_date(from_date, keepTz=False)}'" if from_date else None,
+        f"ts <= '{fmt_date(to_date, keepTz=False)}'" if to_date else None,
+    ]
+    where_clause = f"WHERE {' AND '.join(filter(None, conditions))}" if any(
+        conditions) else ""
+
+    query = f"SELECT {select_cols_str} FROM {self.db}.`{table_name}` {where_clause} GROUP BY toStartOfInterval(ts, INTERVAL {agg_seconds} second) ORDER BY ts DESC"
+
+    return query, []
 
   async def create_db(self, name: str, options={}, force=False):
-    base = "CREATE DATABASE IF NOT EXISTS" if force else "CREATE DATABASE"
+    """ClickHouse-specific database creation with retries."""
+    base = "CREATE DATABASE IF NOT EXISTS" if not force else "CREATE DATABASE"
     max_retries = 10
 
     for i in range(max_retries):
@@ -178,110 +289,14 @@ class ClickHouse(Tsdb):
     raise ValueError(f"Database {name} readiness check failed.")
 
   async def use_db(self, db: str):
+    """ClickHouse-specific database switching."""
     if not self.conn:
       await self.connect(db=db)
     else:
       await self.cursor.execute(f"USE {db}")
 
-  async def create_table(self, c: Ingester, name=""):
-    table = name or c.name
-    log_info(f"Creating table {self.db}.{table}...")
-    fields = ", ".join([
-        f"`{field.name}` {TYPES[field.type]}" for field in c.fields
-        if not field.transient
-    ])
-
-    # ClickHouse requires an engine specification - using MergeTree for time series data
-    sql = f"""
-    CREATE TABLE IF NOT EXISTS {self.db}.`{table}` (
-      ts DateTime,
-      {fields}
-    ) ENGINE = MergeTree()
-    ORDER BY ts
-    """
-    try:
-      await self.cursor.execute(sql)
-      log_info(f"Created table {self.db}.{table}")
-    except Exception as e:
-      log_error(f"Failed to create table {self.db}.{table}\nSQL: {sql}", e)
-      raise e
-
-  async def alter_table(self,
-                        table: str,
-                        add_columns: list[tuple[str, str]] = [],
-                        drop_columns: list[str] = []):
-    await self.ensure_connected()
-    for column_name, column_type in add_columns:
-      try:
-        await self.cursor.execute(
-            f"ALTER TABLE {self.db}.`{table}` ADD COLUMN `{column_name}` {column_type}"
-        )
-        log_info(
-            f"Added column {column_name} of type {column_type} to {self.db}.{table}"
-        )
-      except Exception as e:
-        log_error(f"Failed to add column {column_name} to {self.db}.{table}",
-                  e)
-        raise e
-
-    for column_name in drop_columns:
-      try:
-        await self.cursor.execute(
-            f"ALTER TABLE {self.db}.`{table}` DROP COLUMN `{column_name}`")
-        log_info(f"Dropped column {column_name} from {self.db}.{table}")
-      except Exception as e:
-        log_error(
-            f"Failed to drop column {column_name} from {self.db}.{table}", e)
-        raise e
-
-  async def insert(self, c: Ingester, table=""):
-    await self.ensure_connected()
-    table = table or c.name
-    persistent_data = [field for field in c.fields if not field.transient]
-    fields = "`, `".join(field.name for field in persistent_data)
-    values = ", ".join([field.sql_escape() for field in persistent_data])
-    sql = f"INSERT INTO {self.db}.`{table}` (ts, `{fields}`) VALUES ('{c.last_ingested}', {values})"
-
-    try:
-      await self.cursor.execute(sql)
-    except Exception as e:
-      error_message = str(e).lower()
-      if "doesn't exist" in error_message and "table" in error_message:
-        log_warn(f"Table {self.db}.{table} does not exist, creating it now...")
-        await self.create_table(c, name=table)
-        await self.insert(c, table=table)
-      elif "no such column" in error_message:
-        log_warn(
-            f"Column mismatch detected, altering table {self.db}.{table} to add missing columns..."
-        )
-        existing_columns = await self.get_columns(table)
-        existing_column_names = [col[0] for col in existing_columns]
-        add_columns = [(field.name, TYPES[field.type])
-                       for field in persistent_data
-                       if field.name not in existing_column_names]
-        await self.alter_table(table, add_columns=add_columns)
-        await self.insert(c, table=table)
-      else:
-        log_error(f"Failed to insert data into {self.db}.{table}", e)
-        raise e
-
-  async def insert_many(self, c: Ingester, values: list[tuple], table=""):
-    table = table or c.name
-    persistent_fields = [
-        field.name for field in c.fields if not field.transient
-    ]
-    fields = "`, `".join(persistent_fields)
-    placeholders = ", ".join(["%s" for _ in range(len(persistent_fields) + 1)
-                              ])  # +1 for timestamp
-    sql = f"INSERT INTO {self.db}.`{table}` (ts, `{fields}`) VALUES ({placeholders})"
-
-    try:
-      await self.cursor.executemany(sql, values)
-    except Exception as e:
-      log_error(f"Failed to insert many records into {self.db}.{table}", e)
-      raise e
-
   async def get_columns(self, table: str) -> list[tuple[str, str, str]]:
+    """ClickHouse-specific column information."""
     try:
       await self.cursor.execute(f"DESCRIBE TABLE {self.db}.`{table}`")
       return await self.cursor.fetchall()
@@ -290,6 +305,7 @@ class ClickHouse(Tsdb):
       return []
 
   async def get_cache_columns(self, table: str) -> list[str]:
+    """Get cached column names for ClickHouse table."""
     column_descs = await get_or_set_cache(
         f"{table}:columns",
         callback=lambda: self.get_columns(table),
@@ -297,17 +313,30 @@ class ClickHouse(Tsdb):
         pickled=True)
     return [col[0] for col in column_descs]
 
+  async def _get_table_columns(self, table: str) -> list[str]:
+    """ClickHouse-specific table column listing."""
+    try:
+      result = await self._fetch(f"DESCRIBE TABLE {self.db}.`{table}`")
+      return [row[0] for row in result]
+    except Exception:
+      return []
+
+  async def list_tables(self) -> list[str]:
+    """ClickHouse-specific table listing."""
+    await self.cursor.execute(f"SHOW TABLES FROM {self.db}")
+    results = await self.cursor.fetchall()
+    return [table[0] for table in results]
+
   async def fetch(self,
                   table: str,
-                  from_date: datetime | None = None,
-                  to_date: datetime | None = None,
+                  from_date: Optional[datetime] = None,
+                  to_date: Optional[datetime] = None,
                   aggregation_interval: Interval = "m5",
                   columns: list[str] = [],
                   use_first: bool = False) -> tuple[list[str], list[tuple]]:
-
+    """ClickHouse-specific fetch with advanced aggregation."""
     to_date = to_date or now()
     from_date = from_date or ago(from_date=to_date, years=1)
-    agg_seconds = INTERVALS[aggregation_interval]
 
     if not columns:
       columns = await self.get_cache_columns(table)
@@ -319,62 +348,92 @@ class ClickHouse(Tsdb):
       log_warn(f"No columns found for table {self.db}.{table}")
       return (columns, [])
 
-    # ClickHouse time-based aggregation using toStartOfInterval
-    select_cols = [
-        f"{'argMin' if use_first else 'argMax'}(`{col}`, ts) AS `{col}`"
-        for col in columns if col != 'ts'
-    ]
-    select_cols.insert(
-        0, f"toStartOfInterval(ts, INTERVAL {agg_seconds} second) AS ts")
-    select_cols_str = ", ".join(select_cols)
-
-    conditions = [
-        f"ts >= '{fmt_date(from_date, keepTz=False)}'" if from_date else None,
-        f"ts <= '{fmt_date(to_date, keepTz=False)}'" if to_date else None,
-    ]
-    where_clause = f"WHERE {' AND '.join(filter(None, conditions))}" if any(
-        conditions) else ""
-    sql = f"SELECT {select_cols_str} FROM {self.db}.`{table}` {where_clause} GROUP BY toStartOfInterval(ts, INTERVAL {agg_seconds} second) ORDER BY ts DESC"
+    # Use ClickHouse-specific aggregation
+    query, params = self._build_aggregation_sql(table, columns, from_date,
+                                                to_date, aggregation_interval)
 
     try:
-      await self.cursor.execute(sql)
+      await self.cursor.execute(query)
       results = await self.cursor.fetchall()
       return (columns, results)
     except Exception as e:
       log_error(f"Failed to fetch data from {self.db}.{table}", e)
       raise e
 
-  async def fetch_batch(
-      self,
-      tables: list[str],
-      from_date: datetime | None = None,
-      to_date: datetime | None = None,
-      aggregation_interval: Interval = "m5",
-      columns: list[str] = []) -> tuple[list[str], list[tuple]]:
+  async def upsert(self, ing: UpdateIngester, table="", uid=""):
+    """ClickHouse upsert using INSERT (ReplacingMergeTree pattern)."""
+    table = table or ing.name
+    uid = uid or ing.uid
 
-    if not columns:
-      columns = await self.get_cache_columns(tables[0])
-    to_date = to_date or now()
-    from_date = from_date or to_date - relativedelta(years=10)
-    results = await gather(*[
-        self.fetch(table, from_date, to_date, aggregation_interval, columns)
-        for table in tables
-    ])
-    # Flatten the results from multiple tables
-    all_rows = []
-    for _, rows in results:
-      all_rows.extend(rows)
-    return (columns, all_rows)
+    if not uid:
+      raise ValueError("UID is required for upsert operations")
 
-  async def fetch_all(self, query: str) -> list:
-    await self.cursor.execute(query)
-    return await self.cursor.fetchall()
+    # Get non-transient fields and their values
+    fields = [field for field in ing.fields if not field.transient]
+    field_names = [field.name for field in fields]
+    field_values = [field.value for field in fields]
 
-  async def list_tables(self) -> list[str]:
-    await self.cursor.execute(f"SHOW TABLES FROM {self.db}")
-    results = await self.cursor.fetchall()
-    return [table[0] for table in results]
+    # Ensure uid is in the values
+    if 'uid' not in field_names:
+      field_names.append('uid')
+      field_values.append(uid)
 
-  async def commit(self):
-    # ClickHouse doesn't require explicit commits for most operations
-    pass
+    placeholders = ", ".join(["%s"] * len(field_values))
+    columns = ", ".join([f"`{name}`" for name in field_names])
+
+    # Use INSERT with ReplacingMergeTree pattern
+    sql = f"INSERT INTO {self.db}.`{table}` ({columns}) VALUES ({placeholders})"
+
+    try:
+      await self.cursor.execute(sql, field_values)
+      log_info(f"Upserted record with uid {uid} into {table}")
+    except Exception as e:
+      log_error(f"Failed to upsert into {table}", e)
+      raise e
+
+  async def fetch_by_id(self, table: str, uid: str):
+    """ClickHouse-specific fetch by ID."""
+    await self.ensure_connected()
+
+    try:
+      sql = f"SELECT * FROM {self.db}.`{table}` WHERE uid = %s ORDER BY updated_at DESC LIMIT 1"
+      await self.cursor.execute(sql, [uid])
+      result = await self.cursor.fetchone()
+
+      if result:
+        # Get column names
+        columns = [desc[0] for desc in self.cursor.description]
+        return dict(zip(columns, result))
+      return None
+
+    except Exception as e:
+      log_error(f"Failed to fetch record with uid {uid} from {table}", e)
+      return None
+
+  async def fetchall(self):
+    """ClickHouse-specific fetchall."""
+    try:
+      return await self.cursor.fetchall()
+    except Exception as e:
+      log_error("Failed to fetch all results", e)
+      return []
+
+  async def fetch_batch_by_ids(self, table: str,
+                               uids: list[str]) -> list[tuple]:
+    """ClickHouse-specific batch fetch by UIDs."""
+    await self.ensure_connected()
+    try:
+      if not uids:
+        return []
+
+      # Build parameterized query for ClickHouse
+      placeholders = ",".join([f"'{uid}'" for uid in uids])
+      query = f"SELECT * FROM {self.db}.`{table}` WHERE uid IN ({placeholders}) ORDER BY updated_at DESC"
+
+      await self.cursor.execute(query)
+      results = await self.cursor.fetchall()
+      return results if results else []
+    except Exception as e:
+      log_error(
+          f"Failed to fetch batch records by IDs from {self.db}.{table}: {e}")
+      return []

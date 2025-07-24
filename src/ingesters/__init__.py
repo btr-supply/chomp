@@ -3,6 +3,8 @@ from . import http_api
 from . import ws_api
 from . import processor
 from . import monitor
+from . import resp3_getter
+from . import resp3_subscriber
 
 # Optional ingesters that require specific dependencies
 import importlib.util
@@ -44,7 +46,7 @@ if _has_web3_misc:
   from . import ton_logger  # noqa: F401
 
 # Export list for explicit imports
-__all__ = ['http_api', 'ws_api', 'processor', 'monitor']
+__all__ = ['http_api', 'ws_api', 'processor', 'monitor', 'resp3_getter', 'resp3_subscriber']
 
 if _has_static_scrapper:
   __all__.append('static_scrapper')

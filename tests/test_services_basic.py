@@ -7,13 +7,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-def test_gatekeeper_imports():
-  """Test gatekeeper service imports."""
+def test_auth_imports():
+  """Test auth service imports."""
   try:
-    from src.services import gatekeeeper
-    assert gatekeeeper is not None
+    from src.services.auth import AuthService
+    assert AuthService is not None
   except ImportError:
-    pytest.skip("Gatekeeper service not available")
+    pytest.skip("Auth service not available")
 
 
 def test_loader_imports():
@@ -45,38 +45,50 @@ def test_ts_analysis_imports():
 
 def test_service_module_structure():
   """Test basic service module structures."""
-  services_to_test = ['gatekeeeper', 'loader', 'status_checker', 'ts_analysis']
+  services_to_test = ['auth', 'loader', 'status_checker', 'ts_analysis']
 
   for service_name in services_to_test:
     try:
-      service_module = __import__(f'src.services.{service_name}',
-                                  fromlist=[service_name])
-
-      # Check module has basic attributes
-      assert hasattr(service_module, '__name__')
-
-      # Check for module contents
-      module_attrs = dir(service_module)
-      assert len(module_attrs) > 0
+      if service_name == 'auth':
+        from src.services.auth import AuthService
+        # Check AuthService has basic attributes
+        assert hasattr(AuthService, 'requester_id')
+        assert hasattr(AuthService, 'hashed_requester_id')
+      else:
+        service_module = __import__(f'src.services.{service_name}',
+                                    fromlist=[service_name])
+        # Check module has basic attributes
+        assert hasattr(service_module, '__name__')
+        # Check for module contents
+        module_attrs = dir(service_module)
+        assert len(module_attrs) > 0
 
     except ImportError:
       # Skip if module not available
       continue
 
 
-def test_gatekeeper_basic_functions():
-  """Test gatekeeper has expected functions."""
+def test_auth_basic_functions():
+  """Test AuthService has expected functions."""
   try:
-    from src.services import gatekeeeper
-    module_attrs = dir(gatekeeeper)
-    # Should have some callable functions
-    callables = [
-        attr for attr in module_attrs
-        if callable(getattr(gatekeeeper, attr)) and not attr.startswith('_')
-    ]
-    assert len(callables) >= 0
+    from src.services.auth import AuthService
+
+    # Check for expected static methods
+    assert hasattr(AuthService, 'requester_id')
+    assert hasattr(AuthService, 'hashed_requester_id')
+    assert hasattr(AuthService, 'login')
+    assert hasattr(AuthService, 'logout')
+    assert hasattr(AuthService, 'verify_session')
+
+    # Check they are callable
+    assert callable(AuthService.client_uid)
+    assert callable(AuthService.hashed_requester_id)
+    assert callable(AuthService.login)
+    assert callable(AuthService.logout)
+    assert callable(AuthService.verify_session)
+
   except ImportError:
-    pytest.skip("Gatekeeper service not available")
+    pytest.skip("Auth service not available")
 
 
 def test_status_checker_structure():

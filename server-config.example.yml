@@ -1,0 +1,94 @@
+# Chomp Server Configuration
+name: "Chomp Data Ingester"
+description: "High-performance data ingestion framework"
+
+host: "0.0.0.0"              # Server bind address (0.0.0.0 for all interfaces)
+port: 40004                  # Server port
+ws_ping_interval: 30         # WebSocket ping interval in seconds
+ws_ping_timeout: 20          # WebSocket ping timeout in seconds
+allow_origin_regex: r"^https?://localhost(:[0-9]+)?$|^https?://127\.0\.0\.1(:[0-9]+)?$|^wss?://localhost(:[0-9]+)?$|^wss?://127\.0\.0\.1(:[0-9]+)?$|^https?://cho\.mp$|^wss?://cho\.mp$"  # CORS allowed origins
+
+# JWT configuration
+jwt_secret_key: "your-jwt-secret-key-change-this-in-production"
+jwt_expires_hours: 24        # JWT token expiration (1-8760 hours)
+
+# Authentication
+auth_methods:
+  - "static"                 # Available: static, email, oauth2_x, oauth2_github, evm, svm, sui
+  - "evm"                    # Ethereum wallet authentication
+  - "svm"                    # Solana wallet authentication
+  - "sui"                    # Sui wallet authentication
+  # - "oauth2_github"        # Enable for GitHub OAuth2
+  # - "oauth2_x"             # Enable for X (Twitter) OAuth2
+static_auth_token: "your-secret-token-here"
+
+# OAuth2 configuration (disabled by default - uncomment and configure to enable)
+# oauth2_app_ids:
+#   github: "your-github-app-id"
+#   x: "your-x-app-id"
+# oauth2_client_ids:
+#   github: "your-github-client-id"
+#   x: "your-x-client-id"
+# oauth2_client_secrets:
+#   github: "your-github-client-secret"
+#   x: "your-x-client-secret"
+# callback_base_url: "https://cho.mp"  # Or your deployment URL
+
+# Session management
+auth_flow_expiry: 600        # 10 minutes for OAuth2 flows
+session_ttl: 86400          # 24 hours in seconds
+auto_renew_session: true    # Auto-renew sessions on API requests
+
+protected_routes:
+  - "/admin/*"
+  - "/api/v1/admin/*"
+
+# Rate Limiting
+default_rate_limits:
+  rpm: 60                    # requests per minute
+  rph: 1200                  # requests per hour
+  rpd: 9600                  # requests per day
+  spm: 100000000             # size per minute (100MB)
+  sph: 2000000000            # size per hour (2GB)
+  spd: 16000000000           # size per day (16GB)
+  ppm: 60                    # points per minute
+  pph: 1200                  # points per hour
+  ppd: 9600                  # points per day
+
+# Rate limiting access control
+whitelist:                   # IPs/users exempt from rate limits
+  - "127.0.0.1"
+  - "localhost"
+  - "::1"
+
+blacklist:                   # IPs/users completely blocked
+  # - "192.168.1.100"        # Example blocked IP
+
+# Route configuration overrides (optional)
+# Uncomment and customize specific routes as needed
+# routes_config:
+#   history:                 # Route name (enum name in lowercase)
+#     points: 10             # Override default history points
+#   admin_cache_clear:       # Route name for ADMIN_CACHE_CLEAR
+#     points: 20             # Override cache clear points
+
+# WebSocket Configuration
+ws_config:
+  # Subscription costs
+  subscription_base_cost: 10      # Base cost for any subscription request
+  subscription_per_topic_cost: 2  # Additional cost per topic subscribed to
+
+  # Connection limits
+  max_topics_per_connection: 50   # Maximum topics per websocket connection
+  max_connections_per_user: 5     # Maximum concurrent connections per user
+
+  # Message filtering and security
+  filter_protected_fields: true   # Filter protected fields for non-authenticated users
+  allowed_topics_pattern: "chomp:*"  # Pattern for allowed topic subscriptions
+
+# Input rate limiting for failed authentication attempts
+# Default exponential backoff: 50s * 6 -> 5min * 6 -> 30min * 6 -> 3h * 6 -> 18h * 6 -> 4days * 6
+input_rate_limits:
+  start: 50                  # starting delay in seconds
+  factor: 6.0                # exponential backoff factor
+  max: 345600                # maximum delay (4 days in seconds)

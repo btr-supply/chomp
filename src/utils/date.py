@@ -1,14 +1,12 @@
 from datetime import datetime, timedelta, timezone
 import re
-from typing import Literal, Callable, Any, Optional
+from typing import Literal, Callable, Any, Optional, Union
 from dateutil.relativedelta import relativedelta
-from .format import parse_date
-
-UTC = timezone.utc
+from ..constants import UTC, DATETIME_FMT, DATETIME_FMT_TZ, DATETIME_FMT_ISO
 
 
 def now(utc=True) -> datetime:
-  return datetime.now(UTC) if utc else datetime.now()
+  return datetime.now(timezone.utc) if utc else datetime.now()
 
 
 def ago(from_date=None, tz=UTC, **kwargs) -> datetime:
@@ -217,7 +215,7 @@ def interval_to_seconds(interval: str, raw=False) -> int:
 
 
 def floor_date(date: Optional[datetime] = None,
-               interval: Optional[str | int | float] = None) -> datetime:
+               interval: Optional[Union[str, int, float]] = None) -> datetime:
   if isinstance(interval, str):
     interval = interval_to_seconds(interval)
   if interval is None:
@@ -231,7 +229,7 @@ def floor_date(date: Optional[datetime] = None,
 
 
 def ceil_date(date: Optional[datetime] = None,
-              interval: Optional[str | int | float] = None) -> datetime:
+              interval: Optional[Union[str, int, float]] = None) -> datetime:
   date = date or now()
   if isinstance(interval, str):
     interval = interval_to_seconds(interval)
@@ -286,6 +284,56 @@ def round_interval(seconds: float, margin: float = 0.25) -> Interval:
     if SEC_BY_TF[interval] >= seconds * (1 - margin):
       return interval  # type: ignore[return-value]
   return "h1"  # Default to hourly if no match
+
+
+def fmt_date(date: datetime, iso=True, keepTz=True):
+  return date.strftime(
+      DATETIME_FMT_ISO if iso else DATETIME_FMT_TZ if keepTz else DATETIME_FMT)
+
+
+def parse_date(date: Union[str, int, datetime]) -> Optional[datetime]:
+  if isinstance(date, datetime):
+    return date
+  if date is None:
+    return None
+  try:
+    if isinstance(date,
+                  (int, float)) or (isinstance(date, str) and is_float(date)):
+      timestamp = float(date) if isinstance(date, str) else date
+      return datetime.fromtimestamp(rebase_epoch_to_sec(timestamp), tz=UTC)
+    if isinstance(date, str):
+      match date.lower():
+        case "now":
+          return datetime.now(UTC)
+        case "today":
+          return datetime.now(UTC).replace(hour=0,
+                                           minute=0,
+                                           second=0,
+                                           microsecond=0)
+        case "yesterday":
+          return datetime.now(UTC).replace(
+              hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        case "tomorrow":
+          return datetime.now(UTC).replace(
+              hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+      parsed_result = parser.parse(date,
+                                   fuzzy_with_tokens=True,
+                                   ignoretz=False)
+      parsed = parsed_result[0] if isinstance(parsed_result,
+                                              tuple) else parsed_result
+      if not parsed.tzinfo:
+        parsed = parsed.replace(tzinfo=UTC)
+      return parsed
+  except Exception as e:
+    raise ValueError(f"Failed to parse date: {date}", e)
+
+
+def rebase_epoch_to_sec(epoch: Union[int, float]) -> int:
+  while epoch >= 10000000000:
+    epoch /= 1000
+  while epoch <= 100000000:
+    epoch *= 1000
+  return int(epoch)
 
 
 def fit_date_params(

@@ -9,7 +9,18 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src import state
-from src.proxies import ThreadPoolProxy, Web3Proxy, TsdbProxy, RedisProxy, ConfigProxy
+from src.proxies import ThreadPoolProxy, Web3Proxy, TsdbProxy, RedisProxy
+
+# Mock the args object
+# ... existing code ...
+
+
+@pytest.fixture(autouse=True)
+def setup_teardown():
+  """Clear the state singleton before and after each test."""
+  state.clear()
+  yield
+  state.clear()
 
 
 class TestStateModule:
@@ -134,26 +145,6 @@ class TestStateModule:
     mock_task.cancel.assert_called_once()
     assert state.redis_task is None
 
-  def test_multicall_constants_updated(self):
-    """Test that multicall constants are properly updated."""
-    from multicall import constants as mc_const
-
-    # Test that new addresses were added
-    assert 238 in mc_const.MULTICALL3_ADDRESSES
-    assert 5000 in mc_const.MULTICALL3_ADDRESSES
-    assert 59144 in mc_const.MULTICALL3_ADDRESSES
-    assert 534352 in mc_const.MULTICALL3_ADDRESSES
-
-    # Test the addresses are correct
-    expected_address = "0xcA11bde05977b3631167028862bE2a173976CA11"
-    assert mc_const.MULTICALL3_ADDRESSES[238] == expected_address  # blast
-    assert mc_const.MULTICALL3_ADDRESSES[5000] == expected_address  # mantle
-    assert mc_const.MULTICALL3_ADDRESSES[59144] == expected_address  # linea
-    assert mc_const.MULTICALL3_ADDRESSES[534352] == expected_address  # scroll
-
-    # Test gas limit was updated
-    assert mc_const.GAS_LIMIT == 5_000_000
-
   def test_state_imports(self):
     """Test that all required imports are available."""
     # Test FastAPI import
@@ -161,7 +152,7 @@ class TestStateModule:
     assert FastAPI is not None
 
     # Test multicall import
-    from multicall import constants
+    from chomp.src import constants
     assert constants is not None
 
     # Test typing imports
@@ -170,10 +161,8 @@ class TestStateModule:
 
     # Test internal imports
     from src.utils import PackageMeta
-    assert all([
-        PackageMeta, ThreadPoolProxy, Web3Proxy, TsdbProxy, RedisProxy,
-        ConfigProxy
-    ])
+    assert all(
+        [PackageMeta, ThreadPoolProxy, Web3Proxy, TsdbProxy, RedisProxy])
 
   def test_meta_object(self):
     """Test that meta object exists and has correct properties."""
@@ -247,3 +236,7 @@ class TestStateModule:
 
       # Should be called twice since we reset the task
       assert mock_create_task.call_count >= 1
+
+  def test_state_initialization(self):
+    """Test that the state is initialized correctly."""
+    assert state.args is not None

@@ -1,187 +1,412 @@
 import orjson
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.websockets import WebSocketState, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import asynccontextmanager
-from typing import Literal
-import os
+from typing import Literal, Optional
+from asyncio import gather, Task, create_task, CancelledError, sleep
 import fnmatch
 import pickle
+from aiocron import crontab
+from contextlib import suppress
 
-from ...utils import log_debug, log_error, log_info
+from ...utils import log_debug, log_error, log_info, log_warn, now
 from ... import state
 from ..responses import ORJSON_OPTIONS
+from ...services.limiter import RateLimiter
+from ...services.auth import AuthService
+from ...services.loader import is_resource_protected
+from ...models import User
+from ...constants import (
+    WS_MAX_CLIENTS,
+    WS_CLIENT_MAX_LIFETIME_S,
+    WS_ALLOWED_TOPICS_PATTERN,
+)
 
-WsAction = Literal["subscribe", "unsubscribe", "ping", "keepalive"]
+WsAction = Literal["subscribe", "unsubscribe", "ping"]
 
-# Redis connection and pub/sub setup
-redis_client = None
-
-# Data structures for client management
+# Global state - optimized for memory and performance
+redis_listener_task: Optional[Task] = None
 clients_by_topic: dict[str, set[WebSocket]] = {}
 topics_by_client: dict[WebSocket, set[str]] = {}
-forwarded_topics: set[str] = set()  # Track globally subscribed topics
+client_users: dict[WebSocket,
+                   User] = {}  # Removed Optional - all clients must have users
+client_connect_times: dict[WebSocket, float] = {}
 
-# Add near the top with other globals
-ALLOWED_TOPICS_PATTERN = os.getenv(
-    "WS_ALLOWED_TOPICS", "chomp:*")  # Default to all ingesters topics
+# Message cache for broadcast optimization
+_message_cache: dict[str, tuple[dict, dict, float]] = {
+}  # topic -> (public_data, admin_data, timestamp)
+_cache_ttl = 1.0  # 1 second cache TTL
 
 
 @asynccontextmanager
 async def lifespan(router: APIRouter):
-  # on startup
-  await state.start_redis_listener(ALLOWED_TOPICS_PATTERN)
+  """Manage WebSocket forwarder lifecycle."""
+  global redis_listener_task
+  log_info("Starting WebSocket forwarder...")
+  redis_listener_task = create_task(handle_redis_messages())
 
   try:
     yield
   finally:
-    # on shutdown
-    await state.stop_redis_listener()
+    log_info("Stopping WebSocket forwarder...")
+    if redis_listener_task:
+      redis_listener_task.cancel()
+      with suppress(CancelledError):
+        await redis_listener_task
 
 
 router = APIRouter(lifespan=lifespan)
 
 
-async def handle_redis_messages():
+async def authenticate_websocket_user(websocket: WebSocket) -> Optional[User]:
+  """Authenticate websocket user by leveraging the AuthService."""
+  return await AuthService.load_websocket_user(websocket)
+
+
+async def check_authorization_and_filter(
+    user: User, topics: list[str]) -> tuple[list[str], list[str]]:
+  """Combined authorization check and topic filtering - single pass optimization."""
+
+  allowed, rejected = [], []
+
+  for topic in topics:
+    # Pattern check
+    if not fnmatch.fnmatch(topic, WS_ALLOWED_TOPICS_PATTERN):
+      rejected.append(topic)
+      continue
+
+    # Resource protection check for non-admin users
+    if user.status in ["public", "anonymous"]:
+      resource_name = topic.split(":", 1)[-1] if ":" in topic else topic
+      if await is_resource_protected(resource_name):
+        rejected.append(topic)
+        continue
+
+    allowed.append(topic)
+
+  return allowed, rejected
+
+
+async def consume_rate_limit(user: User, topic_count: int) -> bool:
+  """Optimized rate limiting with config caching."""
   try:
-    # Initialize pubsub connection
-    await state.redis.pubsub.ping()
+    ws_config = getattr(state.server_config, 'ws_config', None)
+    base_cost = ws_config.subscription_base_cost if ws_config else 10
+    per_topic_cost = ws_config.subscription_per_topic_cost if ws_config else 2
 
-    # Subscribe to the wildcard pattern
-    await state.redis.pubsub.psubscribe(ALLOWED_TOPICS_PATTERN)
-    log_info(
-        f"Subscribed to topics matching pattern: {ALLOWED_TOPICS_PATTERN}")
-
-    # Use pubsub.listen() instead of get_message() to avoid concurrent read issues
-    async for message in state.redis.pubsub.listen():
-      if message['type'] in ['message', 'pmessage'
-                             ]:  # Handle both message and pmessage types
-        try:
-          topic = message['channel'].decode('utf-8')
-          data = pickle.loads(message['data'])
-          if topic in forwarded_topics:
-            await broadcast_message(topic, data)
-        except Exception as e:
-          log_error(f"Error processing message: {e}")
-          continue
-
-  except Exception as e:
-    log_error(f"Fatal error in Redis message handler: {e}")
-    # Let the error propagate so the task can be properly cleaned up
-    raise
+    points_needed = base_cost + (per_topic_cost * topic_count)
+    result = await RateLimiter.check_and_increment(user, "/ws/subscribe",
+                                                   points_needed)
+    return not result.get("limited", False)
+  except HTTPException as e:
+    return e.status_code != 429
+  except Exception:
+    return False
 
 
-async def broadcast_message(topic, msg):
-  for ws in clients_by_topic.get(topic, []):
-    if ws.client_state == WebSocketState.DISCONNECTED:
-      await disconnect_client(ws)
+async def get_filtered_data(topic: str, data: dict, user: User) -> dict:
+  """Optimized data filtering with caching."""
+  current_time = now().timestamp()
+
+  # Check cache first
+  if topic in _message_cache:
+    public_data, admin_data, cache_time = _message_cache[topic]
+    if current_time - cache_time < _cache_ttl:
+      return admin_data if user.status not in ["public", "anonymous"
+                                               ] else public_data
+
+  # Generate filtered data
+  if user.status not in ["public", "anonymous"]:
+    filtered_data = data  # Admin gets all data
+  else:
+    # Filter protected fields for public users
+    filtered_data = {
+        k: v
+        for k, v in data.items()
+        if not (k.startswith("_") or k.endswith("_protected")
+                or k in ["admin", "internal", "system"])
+    }
+
+  # Update cache
+  admin_data = data
+  public_data = filtered_data if user.status in ["public", "anonymous"] else {
+      k: v
+      for k, v in data.items()
+      if not (k.startswith("_") or k.endswith("_protected")
+              or k in ["admin", "internal", "system"])
+  }
+  _message_cache[topic] = (public_data, admin_data, current_time)
+
+  return filtered_data
+
+
+async def handle_redis_messages():
+  """Redis message handler with connection resilience."""
+  while True:
     try:
-      if isinstance(msg, str):
-        await ws.send_text(msg)
-      elif isinstance(msg, bytes):
-        await ws.send_text(msg.decode('utf-8'))
-      else:
-        text_msg = orjson.dumps(msg, option=ORJSON_OPTIONS).decode('utf-8')
-        await ws.send_text(text_msg)
+      await state.redis.ping()
+      await state.redis.pubsub.psubscribe(WS_ALLOWED_TOPICS_PATTERN)
+      log_info(f"Redis subscribed to: {WS_ALLOWED_TOPICS_PATTERN}")
+
+      async for message in state.redis.pubsub.listen():
+        if message['type'] in ['message', 'pmessage']:
+          topic = message['channel'].decode('utf-8')
+
+          # Only process if we have active subscribers
+          if topic in clients_by_topic and clients_by_topic[topic]:
+            try:
+              data = pickle.loads(message['data'])
+              await broadcast_message(topic, data)
+            except Exception as e:
+              log_warn(f"Failed to process message for {topic}: {e}")
+
+    except CancelledError:
+      log_info("Redis handler stopped")
+      with suppress(Exception):
+        await state.redis.pubsub.punsubscribe(WS_ALLOWED_TOPICS_PATTERN)
+      break
     except Exception as e:
-      log_error(f"Error sending message to client: {e}")
+      log_error(f"Redis error: {e}. Reconnecting in 5s...")
+      await sleep(5)
+
+
+async def broadcast_message(topic: str, data: dict):
+  """Optimized message broadcasting with batch operations and correct error handling."""
+  clients = clients_by_topic.get(topic)
+  if not clients:
+    return
+
+  timestamp = now().isoformat()
+
+  # Use a copy of the clients to avoid issues with modification during iteration
+  client_list = list(clients)
+
+  # Create tasks for all clients
+  send_tasks = []
+  for ws in client_list:
+    if ws.client_state != WebSocketState.CONNECTED:
+      continue
+
+    user = client_users.get(ws)
+    # It's possible the user was disconnected and cleaned up in another task
+    if not user:
+      continue
+
+    # Get filtered data for this user type
+    filtered_data = await get_filtered_data(topic, data, user)
+
+    message = {
+        "type": "data",
+        "topic": topic.split(":", 1)[-1],  # Remove namespace for client
+        "data": filtered_data,
+        "timestamp": timestamp
+    }
+
+    send_tasks.append(_send_safe(ws, message))
+
+  # Execute all sends concurrently and check for failures
+  if send_tasks:
+    results = await gather(*send_tasks, return_exceptions=True)
+
+    disconnected_clients = set()
+    for i, result in enumerate(results):
+      # A result of False from _send_safe or an exception indicates a failed send
+      if result is False or isinstance(result, Exception):
+        disconnected_clients.add(client_list[i])
+
+    # Batch cleanup disconnected clients
+    if disconnected_clients:
+      await gather(*[disconnect_client(ws) for ws in disconnected_clients], return_exceptions=True)
+
+
+async def _send_safe(ws: WebSocket, message: dict) -> bool:
+  """Safe WebSocket send with error handling."""
+  try:
+    await ws.send_text(orjson.dumps(message, option=ORJSON_OPTIONS).decode())
+    return True
+  except Exception:
+    return False
 
 
 async def disconnect_client(ws: WebSocket):
+  """Optimized client cleanup."""
+  # Batch remove from all tracking structures
+  client_topics = topics_by_client.pop(ws, set())
+  client_users.pop(ws, None)
+  client_connect_times.pop(ws, None)
+
+  # Update topic subscriptions
+  for topic in client_topics:
+    if topic in clients_by_topic:
+      clients_by_topic[topic].discard(ws)
+      if not clients_by_topic[topic]:
+        clients_by_topic.pop(topic, None)
+
+
+@crontab("*/5 * * * *")
+async def force_disconnect_expired():
+  """Force disconnect expired clients."""
+  current_time = now().timestamp()
+  expired = [
+      ws for ws, connect_time in client_connect_times.items()
+      if current_time - connect_time > WS_CLIENT_MAX_LIFETIME_S
+  ]
+
+  # Use gather for concurrent disconnection
+  await gather(*[disconnect_and_notify(ws) for ws in expired], return_exceptions=True)
+
+
+async def disconnect_and_notify(ws: WebSocket):
+  """Gracefully notify and disconnect a client."""
   try:
-    await ws.close()
-  except RuntimeError:
-    # Connection might already be closed
-    pass
+    if ws.client_state == WebSocketState.CONNECTED:
+      await _send_safe(ws, {
+          "type": "disconnect",
+          "code": 1001,
+          "reason": "Periodic reconnect required"
+      })
+      await ws.close(code=1001)
+  except Exception as e:
+    log_warn(f"Error during forced disconnect: {e}")
+  finally:
+    await disconnect_client(ws)
 
-  # Unsubscribe from topics that have no more clients
-  for topic in topics_by_client[ws]:
-    clients = clients_by_topic[topic]
-    clients.remove(ws)
-    if not clients:  # No more clients for this topic
-      await state.redis.pubsub.unsubscribe(topic)
-      forwarded_topics.remove(topic)
-      del clients_by_topic[topic]
-      if state.args.verbose:
-        log_debug(f"Unsubscribed from topic with no clients: {topic}")
 
-  del topics_by_client[ws]
-  if state.args.verbose:
-    log_debug(f"Disconnected client {ws}")
+@crontab("*/10 * * * *")
+async def maintenance():
+  """Periodic maintenance and cleanup."""
+  # Clean stale connections
+  stale = [
+      ws for ws in topics_by_client
+      if ws.client_state != WebSocketState.CONNECTED
+  ]
+  await gather(*[disconnect_client(ws) for ws in stale],
+                       return_exceptions=True)
+
+  # Enforce limits
+  if len(topics_by_client) > WS_MAX_CLIENTS:
+    excess = list(topics_by_client.keys())[:len(topics_by_client) -
+                                           WS_MAX_CLIENTS]
+    await gather(*[disconnect_client(ws) for ws in excess],
+                         return_exceptions=True)
+
+  # Clear old cache entries
+  current_time = now().timestamp()
+  expired_cache = [
+      topic for topic, (_, _, cache_time) in _message_cache.items()
+      if current_time - cache_time > _cache_ttl * 10
+  ]
+  for topic in expired_cache:
+    _message_cache.pop(topic, None)
+
+  # Log stats
+  if topics_by_client:
+    log_info(
+        f"WS: {len(topics_by_client)} clients, {len(clients_by_topic)} topics")
+
+
+async def handle_subscribe(ws: WebSocket, user: User, topics: list[str]):
+  """Handle subscription with optimized processing."""
+  if not topics:
+    await _send_safe(ws, {"type": "error", "message": "No topics provided"})
+    return
+
+  # Add namespace and check authorization
+  prefixed_topics = [f"{state.NS}:{t}" for t in topics]
+  allowed, rejected = await check_authorization_and_filter(
+      user, prefixed_topics)
+
+  if rejected:
+    await _send_safe(
+        ws, {
+            "type": "error",
+            "message":
+            f"Access denied: {[t.split(':', 1)[-1] for t in rejected]}"
+        })
+
+  if not allowed:
+    return
+
+  # Rate limiting
+  if not await consume_rate_limit(user, len(allowed)):
+    await _send_safe(ws, {"type": "error", "message": "Rate limit exceeded"})
+    return
+
+  # Subscribe to new topics only
+  current_topics = topics_by_client.setdefault(ws, set())
+  new_topics = set(allowed) - current_topics
+
+  for topic in new_topics:
+    clients_by_topic.setdefault(topic, set()).add(ws)
+    current_topics.add(topic)
+
+  await _send_safe(ws, {
+      "type": "subscribed",
+      "topics": [t.split(':', 1)[-1] for t in allowed]
+  })
+
+
+async def handle_unsubscribe(ws: WebSocket, topics: list[str]):
+  """Handle unsubscription with batch processing."""
+  if ws not in topics_by_client:
+    return
+
+  prefixed_topics = [f"{state.NS}:{t}" for t in topics]
+  client_topics = topics_by_client[ws]
+
+  for topic in prefixed_topics:
+    if topic in client_topics:
+      client_topics.remove(topic)
+      if topic in clients_by_topic:
+        clients_by_topic[topic].discard(ws)
+        if not clients_by_topic[topic]:
+          clients_by_topic.pop(topic, None)
+
+  await _send_safe(ws, {"type": "unsubscribed", "topics": topics})
 
 
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
   await ws.accept()
-  topics_by_client[ws] = set()
+
+  # Authenticate user
+  user = await authenticate_websocket_user(ws)
+  if not user:
+    await ws.close(code=1008, reason="Authentication failed")
+    return
+
+  # Track client
+  client_users[ws] = user
+  client_connect_times[ws] = now().timestamp()
+  log_debug(f"WebSocket connected: {user.uid}")
 
   try:
-    while True:
-      msg = orjson.loads(await ws.receive_text())
-      act: WsAction = msg.get("action")
+    async for raw_message in ws.iter_text():
+      try:
+        message = orjson.loads(raw_message)
+        action = message.get("action")
 
-      match act:
-        case "subscribe":
-          topics = msg["topics"]
-          accepted_topics = []
-          rejected_topics = []
+        if action == "subscribe":
+          await handle_subscribe(ws, user, message.get("topics", []))
+        elif action == "unsubscribe":
+          await handle_unsubscribe(ws, message.get("topics", []))
+        elif action == "ping":
+          await _send_safe(ws, {
+              "type": "pong",
+              "timestamp": now().isoformat()
+          })
+        else:
+          await _send_safe(ws, {
+              "type": "error",
+              "message": f"Unknown action: {action}"
+          })
 
-          for topic in topics:
-            # Check if topic matches allowed pattern
-            if not fnmatch.fnmatch(topic, ALLOWED_TOPICS_PATTERN):
-              rejected_topics.append(topic)
-              continue
-
-            # Check if topic exists using the new function
-            # TODO: implement a better resource status check since the first subscription will always be rejected
-            # if not await topic_exist(topic):
-            #   rejected_topics.append(topic)
-            #   continue
-
-            # Add to tracking sets
-            clients = clients_by_topic.setdefault(topic, set())
-            clients.add(ws)
-            topics_by_client[ws].add(topic)
-
-            # Only subscribe if not already subscribed
-            if topic not in forwarded_topics:
-              await state.redis.pubsub.subscribe(topic)
-              forwarded_topics.add(topic)
-              if state.args.verbose:
-                log_debug(f"New Redis subscription: {topic}")
-
-            accepted_topics.append(topic)
-
-          # Send subscription response
-          if rejected_topics:
-            await ws.send_text(
-                orjson.dumps(
-                    {
-                        "error":
-                        f"Some topics were rejected: {rejected_topics}",
-                        "subscribed": accepted_topics
-                    },
-                    option=ORJSON_OPTIONS).decode())
-          else:
-            await ws.send_text(
-                orjson.dumps({
-                    "success": True,
-                    "subscribed": accepted_topics
-                },
-                             option=ORJSON_OPTIONS).decode())
-
-        case "unsubscribe":
-          topics = msg["topics"]
-          for topic in topics:
-            topics_by_client[ws].discard(topic)
-            clients = clients_by_topic.get(topic, set())
-            clients.discard(ws)
-            if not clients:  # No more clients for this topic
-              await state.redis.pubsub.unsubscribe(topic)
-              forwarded_topics.remove(topic)
-              del clients_by_topic[topic]
-        case _:
-          # TODO: return 404 and stop hadshake
-          log_error(f"Invalid ws action: {msg}, skipping...")
+      except orjson.JSONDecodeError:
+        await _send_safe(ws, {"type": "error", "message": "Invalid JSON"})
 
   except WebSocketDisconnect:
+    log_debug(f"WebSocket disconnected: {user.uid}")
+  except Exception as e:
+    log_error(f"WebSocket error for {user.uid}: {e}")
+  finally:
     await disconnect_client(ws)

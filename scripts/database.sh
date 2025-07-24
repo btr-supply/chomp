@@ -2,7 +2,7 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
-# Parse arguments
+find_env "$@"
 parse_common_args "$@"
 
 echo "🚀 Database setup: MODE=$MODE DEPLOYMENT=$DEPLOYMENT"

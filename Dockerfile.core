@@ -1,5 +1,5 @@
- # Default python version
- ARG PYTHON_VERSION=3.11
+# Default python version
+ARG PYTHON_VERSION=3.12
 
 # 1. Prepare TDengine binaries and libs from a lightweight base image
 FROM tdengine/tdengine:3.2.3.0 AS tdengine-base
@@ -22,7 +22,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TZ=UTC \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    LD_LIBRARY_PATH=/usr/local/taos/lib:$LD_LIBRARY_PATH
+    LD_LIBRARY_PATH=/usr/local/taos/lib
 
 # Set the timezone
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
@@ -35,6 +35,8 @@ RUN ldconfig
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gcc \
+    libc6-dev \
+    python3-dev \
     libffi-dev \
     libssl-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -45,23 +47,29 @@ RUN pip install --no-cache-dir uv
 # Set the working directory
 WORKDIR /app
 
-# Copy only necessary files for dependency installation
+# LAYER CACHING OPTIMIZATION:
+# Copy only dependency files first to leverage Docker layer caching.
+# This ensures dependencies are only reinstalled when pyproject.toml changes,
+# not when any Python source code changes. This can save hours on rebuilds.
 COPY pyproject.toml ./pyproject.toml
 
-# Install dependencies using uv (production dependencies only, no dev group)
+# Install dependencies using uv with virtual environment
+# This layer will be cached until pyproject.toml changes
 RUN uv venv --python ${PYTHON_VERSION}
 RUN uv pip install -e ".[default]"
 
-ENV PYTHONPATH=$PYTHONPATH:/app
+# Set environment to use the virtual environment
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH=/app
 
-# Copy the application source code
+# NOW copy the application source code
+# This layer will be rebuilt on any code change, but dependencies above are cached
 COPY . .
 
 # Make main.py executable
 RUN chmod +x main.py
 
-# Activate virtual environment and run directly without uv run
-ENV PATH="/app/.venv/bin:$PATH"
+# Activate virtual environment and run directly
 ENTRYPOINT ["python", "main.py"]
 
 # Default command options

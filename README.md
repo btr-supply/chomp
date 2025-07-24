@@ -2,9 +2,10 @@
   <img style="border-radius=25px; max-height=250px;" height="400" src="./banner.png" />
   <h1>Chomp</h1>
   <p>
-    <strong>Lightweight, multimodal data ingester for Web2/Web3 sources</strong>
+    <strong>Low-code, lightweight, multi-modal data ingester</strong>
   </p>
   <p>
+    <a href="https://cho.mp/docs"><img alt="Docs" src="https://img.shields.io/badge/cho.mp-Docs-blue?style=social&logo=react"></a>
     <a href="https://t.me/chomp_ingester"><img alt="Chomp" src="https://img.shields.io/badge/Chomp--white?style=social&logo=telegram"></a>
     <a href="https://opensource.org/licenses/MIT"><img alt="License" src="https://img.shields.io/github/license/btr-supply/chomp?style=social" /></a>
   </p>
@@ -12,55 +13,91 @@
 
 ## Overview
 
-Chomp is a productivity-first, highly modular data ingester that retrieves, transforms and archives data from Web2 and Web3 sources. It enables anyone to set up a data backend and ETL pipelines in minutes using simple YAML configuration files.
+Chomp is a **low-code data ingestion platform** that retrieves, transforms, and archives data from Web2 and Web3 sources using YAML configuration files. The **cho.mp** web interface provides no-code configuration and monitoring.
 
-### Key Characteristics
+### Core Capabilities
+- **High-Throughput**: Process millions of data points per day (hundreds of millions with decent hardware)
+- **Rapid Deployment**: Start multi-node clusters in minutes
+- **Lightweight**: Runs on Raspberry Pi 4 to enterprise clusters
+- **Multi-Modal**: HTTP APIs, WebSockets, EVM, SVM (Solana), Sui
+- **High-Performance Stack**: Built on Redis (caching/streaming) and TDengine (high-compression time-series storage)
 
-**What Chomp Is:**
-- **Productivity-First**: YAML-configured ETL pipelines that deploy in minutes
-- **Multimodal**: Supports HTTP APIs, WebSockets, EVM chains, SVM chains (Solana), Sui, and more
-- **Lightweight**: Self-hostable on a Raspberry Pi 4, cluster-native with built-in sync
-- **Real-time**: Faster alternative to Ponder and TheGraph for live protocol tracking
-- **Battle-tested**: Powers BTR Supply's automated liquidity management across 44 CEXs and 7+ chains
+### Scaling Capabilities
+- **Vertical Scaling**: Powerful instances handle hundreds of millions of data points per day
+- **Horizontal Scaling**: Nodes automatically sync via cluster Redis, preventing resource competition and redundant ingestion
 
-**What Chomp Is Not:**
-- A graph indexer (specializes in 1-dimensional timeseries data ingestion)
-- An all-purpose task scheduler (focused on data ingestion and ETL pipelines)
+### What Chomp Is
+- YAML-configured ETL pipelines
+- Self-hostable with built-in clustering
+- Real-time data streaming platform
+- Battle-tested at BTR Supply across 50+ exchanges
+
+### What Chomp Is Not
+- A graph indexer (focuses on timeseries data)
+- An all-purpose task scheduler
 
 ## Architecture
 
 ### Core Components
-
-- **[Ingesters](./docs/ingesters/)**: Multi-protocol data source connectors
-- **[Actions](./docs/actions.md)**: ETL pipeline orchestration (Schedule → Load → Transform → Store)
-- **[Services](./docs/services.md)**: Core business logic and coordination
-- **[Adapters](./docs/adapters/)**: Database and cache system integrations
-- **[API](./docs/api.md)**: FastAPI server with REST and WebSocket endpoints
+- **Ingesters**: Multi-protocol data source connectors
+- **Actions**: ETL pipeline orchestration (Schedule → Load → Transform → Store)
+- **Services**: Core business logic and coordination
+- **Adapters**: Database and cache system integrations
+- **API**: FastAPI server with REST and WebSocket endpoints
+- **UI**: Web interface for configuration and monitoring
 
 ### Technology Stack
-
-- **Runtime**: Python 3.11+ with asyncio-based concurrency
-- **Database**: TDengine (primary), with adapters for Timescale, MongoDB, InfluxDB
-- **Cache/Coordination**: Redis for caching, pubsub, and distributed locking
+- **Runtime**: Python 3.12+ with asyncio
+- **Database**: TDengine (primary - high-compression, high-speed time-series), adapters for TimescaleDB, InfluxDB, QuestDB, MongoDB
+- **Cache/Coordination**: Redis for caching, pubsub, distributed locking, and cluster communication
 - **Data Processing**: Polars for high-performance data manipulation
-- **API Framework**: FastAPI with automatic OpenAPI documentation
-- **Deployment**: Docker containerization with clustering support
+- **API**: FastAPI with automatic OpenAPI documentation
+- **Frontend**: React/Next.js with TypeScript and MUI
+- **Deployment**: Docker or bare-metal with clustering
+
+### Performance Foundation
+The lightweight and high-speed capabilities are enabled by:
+- **Redis**: Caching, real-time streaming, and cluster coordination
+- **TDengine**: High-compression, high-speed time-series storage and retrieval
+- **Cluster Sync**: Automatic node synchronization prevents resource competition
+
+## Web Interface
+
+The cho.mp web interface connects to any Chomp backend:
+
+- **Public Instances**: Curated list from [directory.json](./directory.json)
+- **Custom Backends**: User-added instances
+- **Local Development**: Default localhost:40004 support
+- **Self-Hosted**: Full compatibility with private deployments
+
+### Authentication
+- **Static Tokens**: Admin access tokens
+- **Web3 Wallets**: EVM, SVM, Sui signatures
+- **OAuth2**: GitHub, Twitter/X (self-hosted deployments only)
+
+*NB: OAuth2 requires fixed callback URLs, so it's not available on the public cho.mp site.*
 
 ## Features
 
 ### Data Ingestion
-- **HTTP APIs**: REST endpoints with automatic retry and rate limiting
-- **WebSockets**: Real-time streaming data connections
-- **EVM Chains**: Event logs, contract calls, and block data
+- **HTTP APIs**: REST endpoints with retry and rate limiting
+- **WebSockets**: Real-time streaming connections
+- **EVM Chains**: Event logs, contract calls, block data
 - **SVM Chains**: Solana program logs and account monitoring
 - **Sui Network**: Move-based smart contract interactions
-- **FIX Protocol**: Financial market data feeds (🚧 in development)
 
 ### Data Processing
 - **Field Extraction**: JSONPath and custom selectors
 - **Type Conversion**: Automatic type inference and validation
 - **Transformations**: Built-in functions and mathematical expressions
 - **Aggregation**: Cross-field dependencies and computed metrics
+
+### Web Interface Features
+- **Visual Configuration**: WYSIWYG YAML editing with inheritance support using Eemeli Aro's YAML library (best for preserving anchors and round-trip editing) or raw file editing with Prism editor
+- **Real-time Testing**: "Try" configuration with live preview
+- **Data Visualization**: Interactive charts and tables for timeseries data
+- **Resource Monitoring**: Live ingester health and performance metrics
+- **User Management**: Access control and rate limiting
 
 ### Operational Features
 - **Native Clustering**: Automatic job distribution across instances
@@ -70,30 +107,19 @@ Chomp is a productivity-first, highly modular data ingester that retrieves, tran
 
 ## Quick Start
 
-### Framework Testing
 ```bash
-# Test full setup (clustered ingesters + server)
-sudo bash ./full_setup.sh
-
-# Or using Make
+# Test full setup
 make full-setup
-```
 
-### Development Setup
-```bash
-# Install dependencies
+# Development setup
 pip install -e .
-
-# Configure ingesters
-cp examples/basic.yml ingesters/my-config.yml
-
-# Start ingestion
+cp examples/dex-trades.yml ingesters/my-config.yml
 python -m chomp.main --config ingesters/my-config.yml
 ```
 
 ## Configuration
 
-Chomp uses YAML files to define data sources and processing pipelines:
+YAML-based configuration for data sources and processing:
 
 ```yaml
 http_api:
@@ -109,80 +135,33 @@ http_api:
       - name: volume
         type: float64
         selector: .data.volume
-
-evm_logs:
-  - name: UniswapV3
-    resource_type: timeseries
-    target: wss://mainnet.infura.io/ws/v3/YOUR_KEY
-    contracts:
-      - address: "0x1f98431c8ad98523631ae4a59f267346ea31f984"
-        events: ["PoolCreated"]
 ```
-
-**For complete configuration reference**: [Deployment Guide](./docs/deployment.md)
-
-## Documentation
-
-### Getting Started
-- **📖 [Overview](./docs/overview.md)** - Complete guide navigation and quick start paths
-- **🚀 [Deployment](./docs/deployment.md)** - Installation, configuration, and production setup
-- **⚙️ [Configuration](./docs/configuration.md)** - YAML setup and ingester configuration
-
-### Technical Reference
-- **🏗️ [Architecture](./docs/architecture.md)** - System design, components, and data flow
-- **🔌 [API Reference](./docs/api.md)** - REST and WebSocket API documentation
-- **⚡ [Actions](./docs/actions.md)** - ETL pipeline and workflow orchestration
-- **🛠️ [Services](./docs/services.md)** - Core services and business logic
-
-### Integration Guides
-- **🔗 [Ingesters](./docs/ingesters/)** - Data source connectors and protocols
-- **💾 [Storage Adapters](./docs/adapters/storage.md)** - Database backends and configuration
-- **⚡ [Cache System](./docs/adapters/cache.md)** - Redis-based caching and coordination
-
-### Development
-- **🧪 [Testing](./docs/testing.md)** - Test suites and quality assurance
-- **📊 [Monitoring](./docs/monitoring.md)** - Observability and debugging tools
 
 ## Framework Comparison
 
 | Feature | Chomp | Ponder.sh | The Graph |
-|---------|-------|-----------|-----------|
-| **Configuration** | YAML | TypeScript | GraphQL Schema |
+|---|---|---|---|
+| **Configuration** | YAML + Web UI | TypeScript | GraphQL Schema |
+| **Interface** | cho.mp or self-hosted | Self-hosted only | Hosted/CLI |
 | **Real-time API** | HTTP + WebSocket | HTTP + GraphQL | GraphQL |
-| **Data Sources** | HTTP + WS + EVM + SVM + Sui | EVM | EVM |
-| **Deployment** | Self-hosted | Self-hosted | Hosted/Decentralized |
-| **Data Types** | Timeseries focus | Relational | Graph |
+| **Data Sources** | HTTP, WS, EVM, SVM, Sui | EVM | EVM |
+| **Deployment** | Self-hosted/Hosted | Self-hosted | Self-hosted/Hosted |
+| **Data Types** | Timeseries | Relational | Graph |
+| **Storage** | TDengine, TimescaleDB, InfluxDB | PostgreSQL | IPFS + PostgreSQL |
 | **Latency** | Low | Medium | High |
-
-## Performance Considerations
-
-- **Rate Limits**: Respect API and RPC endpoint limits (WebSocket/FIX connections typically exempt)
-- **Storage Growth**: Timeseries data can grow rapidly; plan storage and use compression
-- **Memory Usage**: Configure batch sizes and connection pools based on available resources
-- **Network**: Use Redis clustering for distributed setups across data centers
 
 ## Contributing
 
-Chomp welcomes contributions! Areas needing development:
-
-### High Priority
-- **GraphQL Adapter**: Expose stored data using [Strawberry GraphQL](https://strawberry.rocks/)
-- **Management UI**: Dashboard for configuring ingesters and monitoring data feeds
-- **Database Adapters**: Expand beyond TDengine to Timescale, InfluxDB, kdb/kx
-
-### Medium Priority
-- **Performance Optimization**: Better I/O handling, threading, and data transformers
-- **Additional Protocols**: More blockchain networks and financial data feeds
-- **Monitoring**: Enhanced observability and debugging capabilities
-
-### Future Exploration
-- **Rust Port**: High-performance rewrite for extreme throughput requirements
-- **AI Integration**: Machine learning pipelines for anomaly detection and prediction
+High-priority areas:
+- **GraphQL Adapter**: Expose stored data via GraphQL
+- **Database Adapters**: Add support for more databases
+- **Visual Configuration**: Enhance WYSIWYG editor
+- **Template Library**: Pre-built configurations for common use cases
 
 **Development Guide**: [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## License
 
-This project is licensed under the MIT License - see [LICENSE](./LICENSE) for details.
+MIT License - see [LICENSE](./LICENSE)
 
-**Community**: [Telegram](https://t.me/chomp_ingester)
+**Community**: [Telegram](https://t.me/chomp_ingester) | **Web UI**: [cho.mp](https://cho.mp)

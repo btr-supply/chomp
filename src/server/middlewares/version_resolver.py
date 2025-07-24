@@ -12,5 +12,4 @@ class VersionResolver(BaseHTTPMiddleware):
     if path.startswith(latest_prefix):
       request.scope["path"] = path.replace(
           latest_prefix, "", 1)  # replace /v{latest} with / (api root)
-    response = await call_next(request)
-    return response
+    return await call_next(request)

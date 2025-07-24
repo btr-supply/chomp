@@ -101,7 +101,7 @@ class TestArgParser:
     assert args == ("--test", )
     assert kwargs == {"default": "default", "help": "Help text", "type": str}
 
-  def test_argument_tuple_to_kwargs_with_action(self):
+  def test_argument_tuple_to_kw_argswith_action(self):
     """Test argument tuple conversion with action."""
     parser = ArgParser()
 

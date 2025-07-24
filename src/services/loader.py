@@ -4,160 +4,250 @@ import polars as pl
 from datetime import datetime
 from asyncio import gather, get_running_loop
 from io import BytesIO
-from typing import Any, Optional, cast
+from typing import Any, cast, Optional, Union
 from concurrent.futures import Executor
+from fastapi import HTTPException
 
 from ..server.responses import ORJSON_OPTIONS
 from ..cache import get_cache_batch, get_cache, get_resource_status
-from ..utils import now, round_sigfig, split, Interval, numeric_columns, log_info, log_debug
+from ..utils import round_sigfig, split, Interval, numeric_columns, log_debug, log_warn, log_error
 from .. import state
-from ..model import SCOPE_ATTRS, UNALIASED_FORMATS, FillMode, Scope, ServiceResponse, DataFormat
-
-# level 1: In-memory module cache for resources that expires after 5 minutes (lvl 2: redis)
-_resources_by_scope: dict[Scope, dict[str, Any] | None] = {
-    Scope.ALL: None,
-    Scope.DEFAULT: None,
-    Scope.DETAILED: None
-}
-_resources_cached_at = None
+from ..models import SCOPES, UNALIASED_FORMATS, FillMode, Scope, DataFormat
+from ..utils.decorators import service_method, cache as _cache
 
 
-def trim_resource(resource: dict, scope: Scope = Scope.DEFAULT) -> dict:
-  """Trim resource dictionary based on scope mask."""
-  if not resource:
-    return resource
+@_cache(ttl=300, maxsize=1)
+async def _get_all_resources() -> dict[Scope, dict[str, Any]]:
+  """
+    Fetches all resources and prepares them for different scopes, caching the result.
+    This is an internal function.
+    """
+  resources = await get_resource_status()
+  tp = cast(Executor,
+            state.thread_pool)  # Cast to Executor for type compatibility
+  loop = get_running_loop()
+
+  async def trim_all(scope: Scope, has_auth: bool = True):
+    return dict(
+        zip(
+            resources.keys(), await gather(
+                *(loop.run_in_executor(tp, trim_resource, v, scope, has_auth)
+                  for v in resources.values()))))
+
+  # Run trimming tasks concurrently in tp for authenticated-like view
+  trimmed_default, trimmed_detailed = await gather(
+      trim_all(Scope.DEFAULT, True), trim_all(Scope.DETAILED, True))
 
   return {
-      "name": resource.get("name"),
-      "type": resource.get("type"),
-      "fields": {
-          name: {
-              "type": field.get("type"),
-              **{
-                  attr: field.get(attr)
-                  for flag, attr in SCOPE_ATTRS.items() if scope & flag == flag
-              }, "tags": field.get("tags", []),
-              "transient": field.get("transient", False)
-          }
-          for name, field in resource.get("fields", {}).items()
-          if not (field.get("transient") and not (scope & Scope.TRANSIENT))
-      }
+      Scope.ALL: resources,
+      Scope.DEFAULT: trimmed_default,
+      Scope.DETAILED: trimmed_detailed
   }
 
 
-async def get_resources(scope: Scope = Scope.DEFAULT) -> ServiceResponse[dict]:
-  """Get and cache resources with 5-minute expiry"""
-  global _resources_by_scope, _resources_cached_at
+def trim_resource(resource: dict,
+                  scope: Scope,
+                  is_admin: bool = False) -> Optional[dict]:
+  """
+  Elegant resource filtering based on scope and admin status.
 
-  if not _resources_cached_at or (now() -
-                                  _resources_cached_at).total_seconds() > 300:
-    resources = await get_resource_status()
-    tp = cast(Executor,
-              state.thread_pool)  # Cast to Executor for type compatibility
-    loop = get_running_loop()
+  Args:
+    resource: Resource dictionary to filter
+    scope: Scope mask determining what fields to include
+    is_admin: Whether the user has admin privileges
 
-    async def trim_all(scope: Scope):
-      return dict(
-          zip(
-              resources.keys(), await
-              gather(*(loop.run_in_executor(tp, trim_resource, v, scope)
-                       for v in resources.values()))))
-
-    # Run trimming tasks concurrently in tp
-    trimmed_default, trimmed_detailed = await gather(trim_all(Scope.DEFAULT),
-                                                     trim_all(Scope.DETAILED))
-
-    _resources_by_scope[Scope.ALL] = resources
-    _resources_by_scope[Scope.DEFAULT] = trimmed_default
-    _resources_by_scope[Scope.DETAILED] = trimmed_detailed
-    _resources_cached_at = now()
-
-  cached_resource = _resources_by_scope.get(scope)
-  if cached_resource is None:
-    return f"Unsupported resource scope: {scope}", {}
-
-  return "", cached_resource
-
-
-async def parse_resources(
-    resources: str,
-    scope: Scope = Scope.DEFAULT) -> ServiceResponse[list[str]]:
-  """Parse and validate resource strings"""
+  Returns:
+    Filtered resource dictionary or None if resource should be excluded
+  """
   try:
-    resource_list = split(resources) or ['*']
-    if resource_list[0] in ["all", "*"]:
-      err, res = await get_resources(scope)
-      if err:
-        return err, []
-      resource_list = list(res.keys())
-    else:
-      # Ensure resources are initialized and valid for scope
-      if _resources_by_scope.get(scope) is None:
-        log_info(f"Initializing resources for scope: {scope}")
-        err, _ = await get_resources(scope
-                                     )  # Initialize cache if not already done
-        if err:
-          return "Problem initializing resources", []
-      cached_resources = _resources_by_scope.get(scope)
-      if cached_resources is None:
-        return "No resources found", []
-      resource_list = [
-          resource for resource in resource_list
-          if resource in cached_resources
-      ]
-    if not resource_list:
-      return "No resources found", []
-    return "", resource_list
+    # Skip protected resources for non-admin users
+    if resource.get("protected", False) and not is_admin:
+      return None
+
+    # Filter resource fields based on scope
+    filtered_resource = {"name": resource.get("name", "")}
+
+    # Apply scope-based field filtering
+    for flag, attr in SCOPES.items():
+      if scope & flag and attr in resource:
+        filtered_resource[attr] = resource[attr]
+
+    # Handle field-level filtering for resources with fields
+    if "fields" in resource and isinstance(resource["fields"], dict):
+      filtered_fields = {}
+      for field_name, field_data in resource["fields"].items():
+        # Skip transient fields unless TRANSIENT scope is included
+        if field_data.get("transient",
+                          False) and not (scope & Scope.TRANSIENT):
+          continue
+
+        # Apply scope filtering to individual fields
+        filtered_field = {"name": field_data.get("name", field_name)}
+        for flag, attr in SCOPES.items():
+          if scope & flag and attr in field_data:
+            filtered_field[attr] = field_data[attr]
+
+        # Always include basic field info
+        for basic_attr in ["type", "tags"]:
+          if basic_attr in field_data:
+            filtered_field[basic_attr] = field_data[basic_attr]
+
+        filtered_fields[field_name] = filtered_field
+
+      if filtered_fields:
+        filtered_resource["fields"] = filtered_fields
+
+    return filtered_resource
+
   except Exception as e:
-    return f"Error parsing resources: {e}", []
+    log_error(f"Error filtering resource: {e}")
+    return None
 
 
-# TODO: merge with get_schema
+async def get_resources(scope: Scope = Scope.DEFAULT, request=None) -> dict:
+  """Get resources, filtered by scope and authentication status."""
+  has_auth = await _check_authentication(request) if request else True
+
+  all_resources = await _get_all_resources()
+  scoped_resources = all_resources.get(scope)
+
+  if scoped_resources is None:
+    log_error(f"Unsupported resource scope: {scope}")
+    raise ValueError(f"Unsupported resource scope: {scope}")
+
+  # Apply resource-level protection filtering for unauthenticated users
+  if not has_auth:
+    return {
+        name: resource
+        for name, resource in scoped_resources.items()
+        if resource and not resource.get("protected", False)
+    }
+
+  return scoped_resources
+
+
+@service_method("parse resources")
+async def parse_resources(resources: Union[str, list[str]],
+                          scope: Scope = Scope.DEFAULT,
+                          request=None) -> list[str]:
+  """Parse and validate resource strings with protection filtering"""
+  resource_list = split(resources) if isinstance(resources,
+                                                 str) else resources or ['*']
+  if resource_list[0] in ["all", "*"]:
+    res = await get_resources(scope, request)
+    resource_list = list(res.keys())
+  else:
+    # Ensure resources are initialized and valid for scope
+    available_resources = await get_resources(scope, request)
+    resource_list = [
+        resource for resource in resource_list
+        if resource in available_resources
+    ]
+
+  if not resource_list:
+    log_warn(f"No resources found for query: {resources}")
+    raise ValueError("No resources found")
+
+  return resource_list
+
+
+async def is_resource_protected(resource_name: str) -> bool:
+  """Check if a resource is protected based on resource attributes"""
+  try:
+    all_resources = await _get_all_resources()
+    cached_resources = all_resources.get(Scope.ALL)
+    if not cached_resources:
+      return False
+
+    if resource_name in cached_resources:
+      resource_data = cached_resources[resource_name]
+      return resource_data.get("protected", False)
+    return False
+  except Exception as e:
+    log_warn(f"Error checking protected resource {resource_name}: {e}")
+    return False
+
+
+async def _check_authentication(request) -> bool:
+  """Check if request has valid authentication"""
+  try:
+    # Get authorization header
+    auth_header = request.headers.get("Authorization") if getattr(
+        request, 'headers', None) else ""
+    if not auth_header or not auth_header.startswith("Bearer "):
+      return False
+
+    token = auth_header[7:]  # Remove "Bearer " prefix
+
+    # Extract user ID from request (could be IP, session, etc.)
+    uid = request.state.user.uid
+    # Import AuthService here to avoid circular imports
+    from ..services.auth import AuthService
+
+    # Verify session
+    try:
+      valid = await AuthService.verify_and_renew_session(uid, token)
+      if not valid:
+        log_warn(f"Authentication failed for {uid}")
+        return False
+
+      if state.args.verbose:
+        log_debug(f"Authentication successful for {uid}")
+      return True
+    except ValueError as e:
+      log_warn(f"Authentication failed for {uid}: {e}")
+      return False
+
+  except Exception as e:
+    log_warn(f"Error during authentication check: {e}")
+    return False
+
+
+@service_method("parse fields")
 async def parse_fields(resource: str,
-                       fields: str,
-                       scope: Scope = Scope.ALL) -> ServiceResponse[list[str]]:
+                       fields: Union[str, list[str]],
+                       scope: Scope = Scope.ALL,
+                       request=None) -> list[str]:
   """Parse and validate fields for a resource"""
-  try:
-    field_list = split(fields) or ['*']
-    err, resources = await get_resources(scope)
-    if err:
-      return err, []
-    if resource in resources:
-      found = resources[resource].get('fields', {})
-      if not found:
-        return f"Fields not found: {resource}.{fields}", []
-      filtered = [field for field in field_list if field in found
-                  ] if field_list[0] not in ["all", "*"] else found
-      return "", (list(filtered.keys())
-                  if isinstance(filtered, dict) else filtered)
-    return f"Resource not found: {resource}", []
-  except Exception as e:
-    return f"Error parsing fields: {resource}.{fields} - {e}", []
+  field_list = split(fields) if isinstance(fields, str) else fields or ['*']
+  resources = await get_resources(scope, request)
+  found = resources[resource].get('fields',
+                                  {}) if resource in resources else None
+  if not found:
+    log_warn(f"Resource or fields not found: {resource}")
+    raise ValueError(f"Resource not found: {resource}")
+
+  if field_list[0] in ["all", "*"]:
+    filtered = found
+  else:
+    filtered = [field for field in field_list if field in found]
+
+  result = list(filtered.keys()) if isinstance(filtered, dict) else filtered
+  return result
 
 
-async def parse_resources_fields(
-    resources: str,
-    fields: str,
-    scope: Scope = Scope.ALL) -> ServiceResponse[tuple[list[str], list[str]]]:
+async def parse_resources_fields(resources: Union[str, list[str]],
+                                 fields: Union[str, list[str]],
+                                 scope: Scope = Scope.ALL,
+                                 request=None) -> tuple[list[str], list[str]]:
 
-  err, parsed_resources = await parse_resources(resources, scope)
-  if err:
-    return err, ([], [])
-  err, parsed_fields = await parse_fields(parsed_resources[0], fields, scope)
-  if err:
-    return err, ([], [])
-  return "", (parsed_resources, parsed_fields)
+  parsed_resources = await parse_resources(resources, scope, request)
+  field_tasks = [
+      parse_fields(resource, fields, scope, request)
+      for resource in parsed_resources
+  ]
+  parsed_fields = list(set(await gather(*field_tasks))) or []
+  return (parsed_resources, parsed_fields)
 
 
 async def get_schema(resources: Optional[list[str]] = None,
                      fields: Optional[list[str]] = None,
-                     scope: Scope = Scope.ALL) -> ServiceResponse[dict]:
+                     scope: Scope = Scope.ALL,
+                     request=None) -> dict:
 
-  err, resources_data = await get_resources(scope)
-  if err:
-    return err, {}
+  resources_data = await get_resources(scope, request)
 
-  partial = resources_data.copy()
+  partial = resources_data
   if resources:
     if len(resources) > 1:
       partial = {
@@ -176,28 +266,36 @@ async def get_schema(resources: Optional[list[str]] = None,
       }
     partial = filtered
 
-  return "", partial
+  return partial
+
+
+def _is_empty(data: Any) -> bool:
+  """Check if data is empty, handling various data types efficiently"""
+  if data is None:
+    return True
+
+  try:
+    if isinstance(data, pl.DataFrame):
+      return data.is_empty()
+    elif isinstance(data, pl.Series):
+      return data.is_empty()
+    else:
+      return data in ["", [], {}, ()]
+  except Exception:
+    # Fallback for edge cases
+    return data in [None, "", [], {}, ()]
 
 
 def format_table(data,
                  from_format: DataFormat = "py:row",
                  to_format: DataFormat = "py:column",
-                 columns: Optional[list[str]] = None) -> ServiceResponse[Any]:
+                 columns: Optional[list[str]] = None) -> Any:
+  """Format data table between different formats with comprehensive type support"""
 
-  try:
-    # Check if data is empty
-    if isinstance(data, pl.DataFrame):
-      empty = data.is_empty()
-    elif isinstance(data, pl.Series):
-      empty = data.is_empty()
-    else:
-      empty = data in [None, "", [], {}, ()] if data is not None else True
-  except Exception:
-    # Fallback if data doesn't have is_empty method or isn't comparable
-    empty = data in [None, "", [], {}, ()] if data is not None else True
-
-  if empty:
-    return "No dataset to format", None
+  # Check if data is empty
+  if _is_empty(data):
+    log_warn("No dataset to format")
+    raise ValueError("No dataset to format")
 
   from_fmt = UNALIASED_FORMATS.get(from_format, from_format)
   to_fmt = UNALIASED_FORMATS.get(to_format, to_format)
@@ -205,7 +303,7 @@ def format_table(data,
   needs_conversion = (isinstance(data, pl.Series)
                       and to_fmt == "polars") or columns
   if from_fmt == to_fmt and not needs_conversion:
-    return "", data
+    return data
 
   # Load JSON if needed
   if from_fmt and from_fmt.startswith("json"):
@@ -218,130 +316,129 @@ def format_table(data,
       from_fmt = "py:column"
     else:
       from_fmt = "py:row"  # default fallback
-  try:
-    # Convert to Polars DataFrame
-    match from_fmt:
-      case "py:row":
-        df = pl.DataFrame(data, orient="row")
-      case "py:column":
-        if isinstance(data, pl.DataFrame):
-          df = data
-        else:
-          df = pl.DataFrame(data)
-      case "csv":
-        df = pl.read_csv(data, separator=',', has_header=True)
-      case "tsv":
-        df = pl.read_csv(data, separator='\t', has_header=True)
-      case "psv":
-        df = pl.read_csv(data, separator='|', has_header=True)
-      case "parquet":
-        df = pl.read_parquet(data)
-      case "arrow":
-        result = pl.from_arrow(data)
-        df = result if isinstance(result, pl.DataFrame) else result.to_frame()
-      case "feather":
-        df = pl.read_ipc(data)
-      # case "orc": df = pl.read_orc(data) # not supported
-      case "avro":
-        df = pl.read_avro(data)
-      case "polars":
-        if isinstance(data, pl.DataFrame):
-          df = data
-        elif isinstance(data, pl.Series):
-          df = data.to_frame()
-        else:
-          df = pl.DataFrame(data)
-      case _:
-        return f"Unsupported from_format: {from_fmt}", None
 
-    # Assign column names if provided
-    if columns:
-      df = df.rename(dict(zip(df.columns, columns)))
+  # Convert to Polars DataFrame
+  match from_fmt:
+    case "py:row":
+      df = pl.DataFrame(data, orient="row")
+    case "py:column":
+      if isinstance(data, pl.DataFrame):
+        df = data
+      else:
+        df = pl.DataFrame(data)
+    case "csv":
+      df = pl.read_csv(data, separator=',', has_header=True)
+    case "tsv":
+      df = pl.read_csv(data, separator='\t', has_header=True)
+    case "psv":
+      df = pl.read_csv(data, separator='|', has_header=True)
+    case "parquet":
+      df = pl.read_parquet(data)
+    case "arrow":
+      result = pl.from_arrow(data)
+      df = result if isinstance(result, pl.DataFrame) else result.to_frame()
+    case "feather":
+      df = pl.read_ipc(data)
+    # case "orc": df = pl.read_orc(data) # not supported
+    case "avro":
+      df = pl.read_avro(data)
+    case "polars":
+      if isinstance(data, pl.DataFrame):
+        df = data
+      elif isinstance(data, pl.Series):
+        df = data.to_frame()
+      else:
+        df = pl.DataFrame(data)
+    case _:
+      log_error(f"Unsupported from_format: {from_fmt}")
+      raise ValueError(f"Unsupported from_format: {from_fmt}")
 
-    # Convert timestamps to milliseconds since epoch for (JS Date compatible)
-    if to_fmt and not to_fmt.startswith(("py:", "polars", "np:", "pd:")):
-      if 'ts' in df.columns:
-        df = df.with_columns([
-            (pl.col('ts').cast(pl.Datetime).dt.timestamp(time_unit="ms")).cast(
-                pl.Int64).alias('ts')
-        ])
+  # Assign column names if provided
+  if columns:
+    df = df.rename(dict(zip(df.columns, columns)))
 
-    # Export from Polars DataFrame
-    match to_fmt:
-      case "polars":
-        data = df
-      case "py:row":
-        data = df.to_numpy().tolist()
-      case "py:column":
-        data = df.to_numpy().T.tolist()
-      case "np:row":
-        data = df.to_numpy()
-      case "np:column":
-        data = df.to_numpy().T
-      # case "json:row:labelled": data = orjson.dumps(df.to_dicts(), option=ORJSON_OPTIONS)
-      # case "json:column:labelled": data = orjson.dumps({col: df[col].to_list() for col in df.columns}, option=ORJSON_OPTIONS)
-      case "json:row":
-        data = orjson.dumps(
-            {
-                'columns': df.columns,
-                'types': [str(t).lower() for t in df.dtypes],
-                'data': df.to_numpy().tolist()
-            },
-            option=ORJSON_OPTIONS)
-      case "json:column":
-        data = orjson.dumps(
-            {
-                'columns': df.columns,
-                'types': [str(t).lower() for t in df.dtypes],
-                'data': df.to_numpy().T.tolist()
-            },
-            option=ORJSON_OPTIONS)
-      # TODO: determine float precision based on content?
-      case "csv":
-        data = df.write_csv(separator=',',
-                            include_header=True,
-                            line_terminator='\n',
-                            float_precision=9)
-      case "tsv":
-        data = df.write_csv(separator='\t',
-                            include_header=True,
-                            line_terminator='\n',
-                            float_precision=9)
-      case "psv":
-        data = df.write_csv(separator='|',
-                            include_header=True,
-                            line_terminator='\n',
-                            float_precision=9)
-      case "parquet":
-        buf = BytesIO()
-        df.write_parquet(buf, compression="zstd")
-        data = buf.getvalue()
-      case "arrow":
-        data = df.to_arrow()
-      case "feather":
-        buf = BytesIO()
-        df.write_ipc(buf, compression="zstd")
-        data = buf.getvalue()
-      # case "orc": data = df.write_orc() # not supported
-      case "avro":
-        buf = BytesIO()
-        df.write_avro(buf, compression="snappy")
-        data = buf.getvalue()
-      case "np:row":
-        data = df.to_numpy()
-      case "np:column":
-        data = df.to_numpy().T
-      case _:
-        return f"Unsupported to_format: {to_fmt}", None
+  # Convert timestamps to milliseconds since epoch for (JS Date compatible)
+  if to_fmt and not to_fmt.startswith(("py:", "polars", "np:", "pd:")):
+    if 'ts' in df.columns:
+      df = df.with_columns([(pl.col('ts').cast(
+          pl.Datetime).dt.timestamp(time_unit="ms")).cast(pl.Int64).alias('ts')
+                            ])
 
-  except Exception as e:
-    return f"Error formatting table: {e}", None
-  return "", data
+  # Export from Polars DataFrame
+  match to_fmt:
+    case "polars":
+      data = df
+    case "py:row":
+      data = df.to_numpy().tolist()
+    case "py:column":
+      data = df.to_numpy().T.tolist()
+    case "np:row":
+      data = df.to_numpy()
+    case "np:column":
+      data = df.to_numpy().T
+    # case "json:row:labelled": data = orjson.dumps(df.to_dicts(), option=ORJSON_OPTIONS)
+    # case "json:column:labelled": data = orjson.dumps({col: df[col].to_list() for col in df.columns}, option=ORJSON_OPTIONS)
+    case "json:row":
+      data = orjson.dumps(
+          {
+              'columns': df.columns,
+              'types': [str(t).lower() for t in df.dtypes],
+              'data': df.to_numpy().tolist()
+          },
+          option=ORJSON_OPTIONS)
+    case "json:column":
+      data = orjson.dumps(
+          {
+              'columns': df.columns,
+              'types': [str(t).lower() for t in df.dtypes],
+              'data': df.to_numpy().T.tolist()
+          },
+          option=ORJSON_OPTIONS)
+    case "csv":
+      data = df.write_csv(separator=',',
+                          include_header=True,
+                          line_terminator='\n',
+                          float_precision=9)
+    case "tsv":
+      data = df.write_csv(separator='\t',
+                          include_header=True,
+                          line_terminator='\n',
+                          float_precision=9)
+    case "psv":
+      data = df.write_csv(separator='|',
+                          include_header=True,
+                          line_terminator='\n',
+                          float_precision=9)
+    case "parquet":
+      buf = BytesIO()
+      df.write_parquet(buf, compression="zstd")
+      data = buf.getvalue()
+    case "arrow":
+      data = df.to_arrow()
+    case "feather":
+      buf = BytesIO()
+      df.write_ipc(buf, compression="zstd")
+      data = buf.getvalue()
+    # case "orc": data = df.write_orc() # not supported
+    case "avro":
+      buf = BytesIO()
+      df.write_avro(buf, compression="snappy")
+      data = buf.getvalue()
+    case "np:row":
+      data = df.to_numpy()
+    case "np:column":
+      data = df.to_numpy().T
+    case _:
+      log_error(f"Unsupported to_format: {to_fmt}")
+      raise ValueError(f"Unsupported to_format: {to_fmt}")
+
+  return data
 
 
+@service_method("get last values")
 async def get_last_values(resources: list[str],
                           quote: Optional[str] = None,
-                          precision: int = 6) -> ServiceResponse[dict]:
+                          precision: int = 6) -> dict:
   """Get latest values for resources with optional quote conversion"""
   res = await get_cache_batch(resources, pickled=True) if len(resources) > 1 else \
         {resources[0]: await get_cache(resources[0], pickled=True)}
@@ -350,49 +447,60 @@ async def get_last_values(resources: list[str],
       resource for resource, value in res.items() if value is None
   ]
   if missing_resources:
-    return f"Resources not found: {', '.join(missing_resources)}", {}
+    log_warn(f"Resources not found: {', '.join(missing_resources)}")
+    raise ValueError(f"Resources not found: {', '.join(missing_resources)}")
 
   if quote and quote != "USDC.idx":
-    try:
-      quote_resource, quote_field = quote.split('.', 1)
-      quote_data = await get_cache(quote_resource, pickled=True)
-      if quote_data is None:
-        return f"Quote resource not found: {quote_resource}", {}
-      quote_value = quote_data.get(quote_field)
-      if quote_value is None or math.isnan(quote_value):
-        return f"Quote field not found or NaN: {quote}", {}
+    quote_resource, quote_field = quote.split('.', 1)
+    quote_data = await get_cache(quote_resource, pickled=True)
+    if quote_data is None:
+      log_warn(f"Quote resource not found: {quote_resource}")
+      raise ValueError(f"Quote resource not found: {quote_resource}")
 
-      for resource in res:
+    quote_value = quote_data.get(quote_field)
+    if quote_value is None or math.isnan(quote_value):
+      log_warn(f"Quote field not found or NaN: {quote}")
+      raise ValueError(f"Quote field not found or NaN: {quote}")
+
+    # Convert all numeric values using quote
+    for resource in resources:
+      if res[resource]:
         res[resource] = {
             k:
             round_sigfig(v *
                          quote_value, precision) if isinstance(v, float) else v
             for k, v in res[resource].items()
         }
-    except ValueError:
-      return "Quote must be in format resource.field", {}
 
   quote = quote or "USDC.idx"
   for resource in res:
     res[resource]["quote"] = quote
     res[resource]["precision"] = precision
-  return "", res
+
+  # Round all float values to specified precision
+  # for resource in resources:
+  #   if res[resource]:
+  #     res[resource] = {
+  #         k: round_sigfig(v, precision) if isinstance(v, float) else v
+  #         for k, v in res[resource].items()
+  #     }
+
+  return res
 
 
-async def get_history(
-    resources: list[str],
-    fields: list[str],
-    from_date: datetime,
-    to_date: datetime,
-    interval: Interval,
-    quote: Optional[str] = None,
-    precision: int = 6,
-    format: DataFormat = "json:row",
-    fill_mode: FillMode = "forward_fill",
-    truncate_leading_zeros: bool = True) -> ServiceResponse[Any]:
-  """Get historical data with optional quote conversion and fill mode"""
+@service_method("get historical data")
+async def get_history(resources: list[str],
+                      fields: list[str],
+                      from_date: datetime,
+                      to_date: datetime,
+                      interval: Interval,
+                      quote: Optional[str] = None,
+                      precision: int = 6,
+                      format: DataFormat = "json:row",
+                      fill_mode: FillMode = "forward_fill",
+                      truncate_leading_zeros: bool = True) -> Any:
+  """Get historical data for resources with optional quote conversion"""
 
-  # try:
   # Fetch base data
   base_columns, base_data = await state.tsdb.fetch_batch(
       tables=resources,
@@ -400,43 +508,32 @@ async def get_history(
       to_date=to_date,
       aggregation_interval=interval,
       columns=fields or [])
-  if not base_data:
-    return "No data found", None
 
-  # Debug: Log the structure of base_data to understand the issue
-  # if state.args.verbose:
-  log_debug(f"base_data type: {type(base_data)}")
-  log_debug(f"base_data length: {len(base_data) if base_data else 0}")
-  if base_data and len(base_data) > 0:
-    log_debug(f"base_data[0] type: {type(base_data[0])}")
-    if hasattr(base_data[0], '__len__'):
-      log_debug(f"base_data[0] length: {len(base_data[0])}")
-    log_debug(f"base_data[0] content: {base_data[0]}")
+  if not base_data:
+    log_warn(
+        f"No data found for resources {resources} from {from_date} to {to_date}"
+    )
+    raise HTTPException(status_code=404, detail="No data found")
+
+  def _process_row(row):
+    """Helper to normalize database row format"""
+    if isinstance(row, (list, tuple)):
+      return row if row[0] is not None else None
+    elif hasattr(row, '__iter__') and not isinstance(row, (str, bytes)):
+      try:
+        row_list = list(row)
+        return tuple(
+            row_list) if row_list and row_list[0] is not None else None
+      except Exception:
+        return None
+    else:
+      return (row, ) if row is not None else None
 
   # Filter out rows where ts is null before creating DataFrame
-  filtered_base_data = []
-  for row in base_data:
-    # Handle different row data formats from various databases
-    if isinstance(row, (list, tuple)):
-      # Row is a sequence (tuple/list) - standard format
-      if row[0] is not None:
-        filtered_base_data.append(row)
-    else:
-      # Row might be an object or single value - this can happen with some database drivers
-      # Try to convert to a proper tuple format
-      try:
-        if hasattr(row, '__iter__') and not isinstance(row, (str, bytes)):
-          # Row is iterable but not a string/bytes - convert to list
-          row_list = list(row)
-          if row_list and row_list[0] is not None:
-            filtered_base_data.append(tuple(row_list))
-        else:
-          # Single value case - could be just a timestamp
-          if row is not None:
-            filtered_base_data.append((row, ))
-      except Exception:
-        # If all else fails, skip this row
-        continue
+  filtered_base_data = [
+      processed_row for row in base_data
+      if (processed_row := _process_row(row)) is not None
+  ]
 
   # Explicitly specify orientation and ensure datetime conversion
   df = pl.DataFrame(filtered_base_data, schema=base_columns, orient="row")
@@ -462,32 +559,15 @@ async def get_history(
         to_date=to_date,
         aggregation_interval=interval,
         columns=['ts', quote_field])
-    if not quote_data:
-      return "No quote data found", None
 
-    filtered_quote_data = []
-    for row in quote_data:
-      # Handle different row data formats from various databases
-      if isinstance(row, (list, tuple)):
-        # Row is a sequence (tuple/list) - standard format
-        if row[0] is not None:
-          filtered_quote_data.append(row)
-      else:
-        # Row might be an object or single value - this can happen with some database drivers
-        # Try to convert to a proper tuple format
-        try:
-          if hasattr(row, '__iter__') and not isinstance(row, (str, bytes)):
-            # Row is iterable but not a string/bytes - convert to list
-            row_list = list(row)
-            if row_list and row_list[0] is not None:
-              filtered_quote_data.append(tuple(row_list))
-          else:
-            # Single value case - could be just a timestamp
-            if row is not None:
-              filtered_quote_data.append((row, ))
-        except Exception:
-          # If all else fails, skip this row
-          continue
+    if not quote_data:
+      log_warn(f"No quote data found for {quote_resource}")
+      raise ValueError("No quote data found")
+
+    filtered_quote_data = [
+        processed_row for row in quote_data
+        if (processed_row := _process_row(row)) is not None
+    ]
 
     quote_col_id = f'{quote_resource}.{quote_field}'
     # Create quote DataFrame with prefixed column names
@@ -525,6 +605,3 @@ async def get_history(
                       from_format="polars",
                       to_format=format,
                       columns=base_columns)
-
-  # except Exception as e:
-  #   return f"Error processing data: {e}", None

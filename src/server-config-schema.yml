@@ -1,0 +1,89 @@
+# Server Configuration Schema
+# This file defines the validation schema for server configuration
+
+# Server information
+name: str(required=False, default="Chomp Data Ingester")
+description: str(required=False, default="High-performance data ingestion framework")
+
+# Server runtime settings
+host: str(required=False, default="127.0.0.1")
+port: int(required=False, default=40004)
+ws_ping_interval: int(required=False, default=30)
+ws_ping_timeout: int(required=False, default=20)
+allow_origin_regex: str(required=False, default=r"^https?://localhost(:[0-9]+)?$|^https?://127\.0\.0\.1(:[0-9]+)?$|^wss?://localhost(:[0-9]+)?$|^wss?://127\.0\.0\.1(:[0-9]+)?$|^https?://cho\.mp$|^wss?://cho\.mp$")
+
+# Authentication settings
+auth_methods: list(enum('static', 'email', 'oauth2_x', 'oauth2_github', 'evm', 'svm', 'sui'), required=False)
+static_auth_token: str(required=False)
+jwt_secret_key: str(required=False)
+jwt_expires_hours: int(required=False, default=24)
+protected_routes: list(str(), required=False)
+
+# OAuth2 configuration
+oauth2_app_ids: map(str(), str(), required=False)
+oauth2_client_ids: map(str(), str(), required=False)
+oauth2_client_secrets: map(str(), str(), required=False)
+callback_base_url: str(required=False, default="https://cho.mp")
+
+# Session management
+auth_flow_expiry: int(required=False, default=600)  # 10 minutes for OAuth2 flows
+session_ttl: int(required=False, default=86400)     # 24 hours in seconds
+auto_renew_session: bool(required=False, default=True)
+
+# Rate limiting configuration
+default_rate_limits: include('rate_limits', required=False)
+input_rate_limits: include('input_rate_limits', required=False)
+whitelist: list(str(), required=False)
+blacklist: list(str(), required=False)
+
+# User tracking settings
+persist_user_debounce: int(required=False, default=30)
+
+# Route configuration overrides - allows customizing route behavior
+routes_config: map(str(), include('route_overrides'), required=False)
+
+# WebSocket configuration
+ws_config: include('ws_config', required=False)
+
+---
+# Rate limits schema
+rate_limits:
+  rpm: int(required=False, default=60)    # requests per minute
+  rph: int(required=False, default=1200)    # requests per hour
+  rpd: int(required=False, default=9600)    # requests per day
+  spm: int(required=False, default=100000000)    # size per minute (bytes)
+  sph: int(required=False, default=2000000000)    # size per hour (bytes)
+  spd: int(required=False, default=16000000000)    # size per day (bytes)
+  ppm: int(required=False, default=60)    # points per minute
+  pph: int(required=False, default=1200)    # points per hour
+  ppd: int(required=False, default=9600)    # points per day
+
+---
+# Input rate limits schema for authentication failures
+input_rate_limits:
+  start: int(required=False, default=50)   # starting delay in seconds
+  factor: num(required=False, default=6.0) # exponential backoff factor
+  max: int(required=False, default=345600)     # maximum delay in seconds
+
+---
+# Route override configuration schema
+route_overrides:
+  endpoint: str(required=False)        # Override the endpoint path
+  points: int(required=False)          # Override the point cost
+  protected: bool(required=False)      # Override the protected status
+  router_prefix: str(required=False)   # Override the router prefix
+
+---
+# WebSocket configuration schema
+ws_config:
+  # Subscription costs
+  subscription_base_cost: int(required=False, default=10)  # Base cost for any subscription
+  subscription_per_topic_cost: int(required=False, default=2)  # Additional cost per topic
+
+  # Connection limits
+  max_topics_per_connection: int(required=False, default=50)  # Max topics per websocket
+  max_connections_per_user: int(required=False, default=5)    # Max concurrent connections per user
+
+  # Message filtering
+  filter_protected_fields: bool(required=False, default=True)  # Filter protected fields for non-auth users (always true in practice)
+  allowed_topics_pattern: str(required=False, default="chomp:*")  # Allowed topic patterns

@@ -1,10 +1,11 @@
 import ast
-from hashlib import md5
 import operator
-import re  # for math operators
+import re
 import numpy
 import polars
-from typing import Any
+from typing import Optional
+
+from .decorators import cache as _cache
 
 SAFE_TYPES = (int, float, str, list, set, map, tuple, dict, type
               )  # Basic types
@@ -33,16 +34,16 @@ SAFE_FUNCTIONS = {
 }
 BASE_NAMESPACE = {op.__name__: op for op in SAFE_OPERATORS}
 BASE_NAMESPACE.update({
-    name: getattr(module, func)
+    func: getattr(module, func)
     for module in [numpy, polars]
-    for name, func in [(f, f) for f in SAFE_FUNCTIONS[module.__name__]]
+    for func in SAFE_FUNCTIONS[module.__name__]
 })
 BASE_NAMESPACE.update({t.__name__: t for t in SAFE_TYPES})
 # BASE_NAMESPACE.update({'numpy': numpy, 'pd': polars}) # Add numpy and pd modules themselves
 SAFE_EXPR_CACHE = set()
-EVAL_CACHE: dict[str, Any] = {}
 
 
+@_cache(ttl=3600, maxsize=512)
 def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
   """
   Evaluate a string expression in a safe environment.
@@ -53,14 +54,9 @@ def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
   """
 
   if type(expr) is not str:
-    if type(expr) is callable:
+    if callable(expr):
       return expr
     raise ValueError("Expression must be a string")
-
-  id = md5(
-      f"{expr}{lambda_check}{callable_check}{kwargs}".encode()).hexdigest()
-  if id in EVAL_CACHE:
-    return EVAL_CACHE[id]
   ns = BASE_NAMESPACE.copy()
   ns.update(kwargs)
 
@@ -70,10 +66,14 @@ def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
     should_be_lambda = match and match.group(1).startswith('lambda')
 
     tree = ast.parse(expr, mode='exec' if should_be_func else 'eval')
-    is_func = should_be_func and isinstance(tree, ast.Module) and len(
-        tree.body) > 0 and isinstance(tree.body[0], ast.FunctionDef)
-    is_lambda = should_be_lambda and isinstance(
-        tree, ast.Expression) and isinstance(tree.body, ast.Lambda)
+
+    # Improved boolean logic with proper type checking
+    is_func: bool = bool(should_be_func and isinstance(tree, ast.Module)
+                         and len(tree.body) > 0
+                         and isinstance(tree.body[0], ast.FunctionDef))
+    is_lambda: bool = bool(should_be_lambda
+                           and isinstance(tree, ast.Expression)
+                           and isinstance(tree.body, ast.Lambda))
 
     if lambda_check and not is_lambda:
       raise ValueError("Expression must be a lambda")
@@ -87,11 +87,11 @@ def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
     # compile the AST and evaluate
     if is_func and isinstance(tree, ast.Module):
       code = compile(tree, filename='<ast>', mode='exec')
-      func_name = tree.body[0].name if isinstance(tree.body[0],
-                                                  ast.FunctionDef) else None
+      func_name: Optional[str] = None
+      if tree.body and isinstance(tree.body[0], ast.FunctionDef):
+        func_name = tree.body[0].name
       exec(code, ns)
-      result = ns[
-          func_name] if func_name else None  # function reference to be used as lambda
+      result = ns[func_name] if func_name else None
     elif isinstance(tree, ast.Expression):
       code = compile(tree, filename='<ast>', mode='eval')
       result = eval(code, ns)
@@ -100,7 +100,6 @@ def safe_eval(expr, lambda_check=False, callable_check=False, **kwargs):
 
     # cache the expression as safe for faster evals
     SAFE_EXPR_CACHE.add(expr)
-    EVAL_CACHE[id] = result
     return result
 
   except Exception as e:
@@ -163,4 +162,4 @@ def safe_eval_to_lambda(expr, **kwargs):
   :param **kwargs: additional variables to inject into the evaluation namespace
   :return: lambda function
   """
-  return lambda **kwargs: safe_eval(expr, **kwargs)
+  return lambda **inner_kwargs: safe_eval(expr, **{**kwargs, **inner_kwargs})

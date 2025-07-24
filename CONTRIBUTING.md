@@ -11,27 +11,56 @@ Thank you for your interest in contributing to Chomp! This document provides gui
 - [Naming Conventions](#naming-conventions)
 - [Pull Request Process](#pull-request-process)
 - [Coding Standards](#coding-standards)
+- [Frontend Development](#frontend-development) - See [UI Contributing Guide](./ui/CONTRIBUTING.md)
 - [Testing](#testing)
 - [Architecture Guidelines](#architecture-guidelines)
 
 ## Project Overview
 
-Chomp is a lightweight, multimodal data ingester for Web2/Web3 sources with Python 3.11, asyncio, TDengine storage, Redis coordination, and FastAPI + WebSocket APIs.
+Chomp is a lightweight, multimodal data ingester for Web2/Web3 sources with Python 3.12, asyncio, TDengine storage, Redis coordination, and FastAPI + WebSocket APIs. The frontend is built with Next.js 14+, TypeScript, and modern tooling.
 
 ## Getting Started
 
 ### Prerequisites
 
 - **Unix-like system** (macOS/Linux)
-- **Git, Python >= 3.11, UV, Docker**
+- **Git, Python >= 3.12, UV (preferred) or pip, Docker**
+- **Bun >= 1.0.0** (for UI development)
+
+### Package Installation Options
+
+Chomp uses optional dependency groups to allow installing only what you need:
+
+- **`default`**: TDengine adapter + Web2 scraping + EVM/Solana support (recommended for most users)
+- **`all`**: Everything (all database adapters + all Web2/Web3 ingesters)
+- **Individual components**: `tdengine`, `clickhouse`, `web2`, `evm`, `svm`, etc.
+- **Combinations**: `all-adapters`, `all-ingesters`
+
+```bash
+# Install with uv (preferred)
+uv add chomp[default]           # Default setup
+uv add chomp[all]               # Everything
+uv add chomp[tdengine,evm]      # Specific components
+
+# Install with pip (fallback)
+pip install chomp[default]
+pip install chomp[all]
+```
 
 ### Setup
 
 ```bash
 git clone https://github.com/btr-supply/chomp.git
 cd chomp
-make install-deps
-make dev-setup
+make setup deps     # Installs default dependencies (TDengine + Web2/Web3)
+make setup all      # Installs all dependencies (all adapters + ingesters)
+# OR manually with uv:
+# uv pip install -e ".[default]"  # Default setup
+# uv pip install -e ".[all]"      # Everything
+
+# For frontend development:
+cd chomp/ui
+bun install         # Install frontend dependencies with Bun
 ```
 
 ## Development Workflow
@@ -65,10 +94,11 @@ main     ← production-ready, stable releases
 ### Pull Request Process
 
 1. Ensure `make build` passes locally (format, lint, test)
-2. Update documentation for new features/API changes
-3. Use proper commit format in PR title
-4. Reference related issues and provide clear change description
-5. Wait for maintainer review
+2. For frontend changes, ensure `bun run lint` and `bun run type-check` pass
+3. Update documentation for new features/API changes
+4. Use proper commit format in PR title
+5. Reference related issues and provide clear change description
+6. Wait for maintainer review
 
 ## Coding Standards
 
@@ -77,16 +107,24 @@ main     ← production-ready, stable releases
 - **Formatting**: `black` and `ruff format`
 - **Linting**: `ruff` checks
 - **Type Hints**: Use for all function parameters and return values
+- **Type Annotations**: ALWAYS use `Optional` and `Union` from typing module. NEVER use pipe (`|`) syntax for unions (e.g., `str | None`). Use `Optional[type]` instead of `type | None` and `Union[type1, type2]` instead of `type1 | type2`. Import these explicitly: `from typing import Optional, Union`
 - **Docstrings**: Google-style for all public functions and classes
 - **Environment Variables**: Always import `os.environ` as `env` for ease of use: `from os import environ as env`
+- **Import Organization**: All imports must be placed at the top of the file, with only these exceptions:
+  - **Optional Dependencies**: For packages that may not be installed
+  - **Circular Import Prevention**: To avoid circular import issues
+  - **Lazy Loading**: For enormous dependencies that are rarely used
 
 ```python
-def process_data(data: Dict[str, Any], timeout: float = 5.0) -> List[Dict[str, Any]]:
+from typing import Dict, Any, List, Optional
+
+def process_data(data: Dict[str, Any], timeout: float = 5.0, config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Process raw data from API response.
 
     Args:
         data: Raw API response data
         timeout: Processing timeout in seconds
+        config: Optional configuration dictionary
 
     Returns:
         List of processed data records
@@ -98,10 +136,18 @@ def process_data(data: Dict[str, Any], timeout: float = 5.0) -> List[Dict[str, A
     pass
 ```
 
-### Configuration Standards
+## Frontend Development
 
-- **YAML**: 2-space indentation, snake_case fields
-- **Comments**: Document complex configurations inline
+For comprehensive frontend development guidelines, component standards, and UI-specific practices, please refer to the dedicated [UI Contributing Guide](./ui/CONTRIBUTING.md).
+
+**Quick Reference**:
+```bash
+cd chomp/ui
+bun install         # Install dependencies (must use Bun)
+bun run dev         # Start development server
+bun run lint        # Check linting (must pass before commits)
+bun run type-check  # TypeScript validation
+```
 
 ### Component Guidelines
 
@@ -138,8 +184,8 @@ tests/
 
 ```bash
 make test                           # Run all tests
-pytest tests/unit/test_adapters.py -v  # Run specific test file
-pytest --cov=src tests/            # Run with coverage
+uv run pytest tests/unit/test_adapters.py -v  # Run specific test file
+uv run pytest --cov=src tests/            # Run with coverage
 ```
 
 ## Architecture Guidelines
@@ -194,12 +240,15 @@ http_api:
 ### Development Tools
 
 ```bash
-# Development
-make install-deps    # Install all dependencies
-make format         # Format code
-make lint           # Lint code
-make test           # Run tests
+# Backend Development
+make install-deps    # Install all dependencies (uses uv or pip)
+make format         # Format code (uv run ruff format)
+make lint           # Lint code (uv run ruff check)
+make test           # Run tests (uv run pytest)
 make build          # Complete build process
+
+# Frontend Development
+moved to chomp-ui repo
 
 # Infrastructure
 make db-setup       # Start databases

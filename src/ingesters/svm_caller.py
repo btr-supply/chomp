@@ -1,156 +1,112 @@
 from asyncio import Task
 import base64
-from typing import Any, Dict
-from ..model import Ingester, ResourceField
-from ..utils import log_debug, log_error
-from ..actions import transform_and_store, scheduler
-from ..cache import ensure_claim_task
-from .. import state
+from typing import Any
+
+from ..models.ingesters import Ingester
+from ..models.base import ResourceField
+from ..utils import log_error, log_debug
+from ..actions import scheduler
 from ..adapters.svm_rpc import SvmRpcClient
-
-max_batch_size = (
-    100  # Solana has a limit of 100 accounts per getMultipleAccounts request
-)
+from .. import state
 
 
-def parse_generic(data: Any) -> Any:
-  return data
+async def schedule(ing: Ingester) -> list[Task]:
 
-
-async def schedule(c: Ingester) -> list[Task]:
-
-  async def ingest(c: Ingester):
-    await ensure_claim_task(c)
+  async def ingest(ing: Ingester):
+    await ing.pre_ingest()
 
     data_by_account = {}
     b64_data_by_account = {}
-    account_cache = {}
 
     async def fetch_accounts_batch(
-        fields: list[ResourceField],
-        max_retries: int = state.args.max_retries,
-        max_batch_size=100,
-    ) -> Dict[str, Any]:
-      retry_count = 0
-      results: Dict[str, Any] = {}
-
-      # Get unique accounts while preserving order
+        fields: list[ResourceField]) -> dict[str, Any]:
+      results: dict[str, Any] = {}
       unique_accounts = list({f.target for f in fields if f.target})
+      max_batch_size = 100  # Solana limit
 
-      # Split accounts into batches
+      # Process accounts in batches
       for i in range(0, len(unique_accounts), max_batch_size):
         batch = unique_accounts[i:i + max_batch_size]
 
-        while retry_count < max_retries:
+        try:
           client = await state.web3.client("solana", roll=True)
+          if not isinstance(client, SvmRpcClient):
+            raise TypeError(f"Expected SvmRpcClient, got {type(client)}")
 
-          if c.monitor:
-            c.monitor.start_timer()  # type: ignore[attr-defined]
-
-          try:
-            # Type guard: ensure we have a SvmRpcClient
-            if not isinstance(client, SvmRpcClient):
-              raise TypeError(f"Expected SvmRpcClient, got {type(client)}")
-
-            if state.args.verbose:
-              log_debug(
-                  f"Fetching batch {i // max_batch_size + 1} of {(len(unique_accounts) + max_batch_size - 1) // max_batch_size}"
-              )
-
-            # Create a mapping of index to account address for this batch
-            batch_index_map = {i: addr for i, addr in enumerate(batch)}
-
-            # Fetch accounts for this batch with monitoring
-            accounts_info = await client.get_multi_accounts(batch,
-                                                            encoding="base64")
-
-            if c.monitor:
-              # Estimate response size
-              response_size = (len(str(accounts_info)) *
-                               2 if accounts_info else 0)
-              c.monitor.stop_timer(response_size,
-                                   200)  # type: ignore[attr-defined]
-
-            # Process results using the index mapping
-            for i, account in enumerate(accounts_info):
-              if account is None:
-                continue
-
-              account_address = batch_index_map[i]
-              account_data = account.get("data", [None, None])[0]
-
-              b64_data_by_account[account_address] = account_data
-              if account_data:
-                data_by_account[account_address] = base64.b64decode(
-                    account_data)
-
-            break  # Success, move to next batch
-
-          except Exception as e:
-            if c.monitor:
-              c.monitor.stop_timer(0, None)  # type: ignore[attr-defined]
-
-            log_error(
-                f"Error fetching accounts batch {i // max_batch_size + 1}, switching RPC... ({str(e)})"
+          if state.args.verbose:
+            batch_num = i // max_batch_size + 1
+            total_batches = (len(unique_accounts) + max_batch_size -
+                             1) // max_batch_size
+            log_debug(
+                f"Fetching batch {batch_num}/{total_batches} from RPC: {client.endpoint}"
             )
-            # Type guard for endpoint access
-            if isinstance(client, SvmRpcClient):
-              prev_rpc = client.endpoint
-            else:
-              prev_rpc = "unknown"
-            client = await state.web3.client("solana", roll=True)
-            if isinstance(client, SvmRpcClient):
-              new_rpc = client.endpoint
-            else:
-              new_rpc = "unknown"
-            if state.args.verbose:
-              log_debug(f"Switched RPC {prev_rpc} -> {new_rpc}")
-            retry_count += 1
 
-        if retry_count >= max_retries:
+          # Fetch accounts for this batch
+          accounts_info = await client.get_multi_accounts(batch,
+                                                          encoding="base64")
+
+          # Process results
+          for idx, account in enumerate(accounts_info):
+            if account is None:
+              continue
+
+            account_address = batch[idx]
+            account_data = account.get("data", [None, None])[0]
+
+            b64_data_by_account[account_address] = account_data
+            if account_data:
+              data_by_account[account_address] = base64.b64decode(account_data)
+
+        except Exception as e:
           log_error(
-              f"Failed to fetch accounts batch after {max_retries} retries")
-          return results
-
-      # Process results for all fields after all batches are fetched
-      for field in fields:
-        if field.target not in data_by_account:
-          log_error(f"Account not found: {field.target}")
+              f"Error fetching accounts batch {i // max_batch_size + 1}: {e}")
           continue
 
-        if field.selector and data_by_account[field.target]:
-          data = data_by_account[field.target]
-          if field.selector:
-            selector_parts = field.selector.split(",")
-            selected_data: list[bytes] = []
-            for selector in selector_parts:
-              start, end = map(int, selector.split(":"))
-              selected_data.append(data[start:end])
-            # Fix: assign the list directly instead of individual bytes
-            results[field.target] = selected_data
-          else:
-            results[field.target] = data
-          account_cache[field.target] = results[field.target]
+      # Process results for all fields
+      for field in fields:
+        if field.target not in data_by_account:
+          field_names_for_account = [
+              f.name for f in fields if f.target == field.target
+          ]
+          all_configured_accounts = set(f.target for f in ing.fields
+                                        if f.target)
+
+          ing.log_resource_not_found(
+              resource_type="Account",
+              resource_id=field.target,
+              field_names=field_names_for_account,
+              endpoint=getattr(client, 'endpoint', 'unknown'),
+              retries_exhausted=False,
+              batch_size=len(unique_accounts),
+              total_fields=len(ing.fields),
+              total_unique_resources=len(all_configured_accounts))
+          continue
+
+        data = data_by_account[field.target]
+        if not field.selector:
+          results[field.target] = data
+          continue
+
+        # Multi selector parsing: support comma-separated selectors
+        selector_parts = field.selector.split(",")
+        selected_data: list[bytes] = []
+        for selector in selector_parts:
+          try:
+            start, end = map(int, selector.split(":"))
+            selected_data.append(data[start:end])
+          except (ValueError, IndexError) as e:
+            log_error(
+                f"Error processing selector '{selector}' for field {field.name}: {e}"
+            )
+            continue
+        results[field.target] = selected_data
 
       return results
 
-    # Fetch all accounts
-    batch_results = await fetch_accounts_batch(c.fields)
+    # Fetch all accounts and process results
+    batch_results = await fetch_accounts_batch(ing.fields)
+    ing.process_batch_results(batch_results)
+    await ing.post_ingest(response_data=batch_results)
 
-    # Process results for each field
-    for field in c.fields:
-      try:
-        if field.target in batch_results:
-          field.value = batch_results[field.target]
-          c.data_by_field[field.name] = field.value
-      except Exception as e:
-        log_error(f"Error processing {field.name}: {str(e)}")
-
-    if state.args.verbose:
-      log_debug(f"Ingested {c.name} -> {c.data_by_field}")
-
-    await transform_and_store(c)
-
-  # Handle Optional[Task] return from scheduler.add_ingester
-  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+  task = await scheduler.add_ingester(ing, fn=ingest, start=False)
   return [task] if task is not None else []

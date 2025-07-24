@@ -74,7 +74,6 @@ def test_adapter_structure(adapter_path: str,
 def main():
   """Test all implemented adapters."""
   adapters = [
-      ("chomp/src/adapters/opentsdb.py", "OpenTsdb"),
       ("chomp/src/adapters/timescale.py", "TimescaleDb"),
       ("chomp/src/adapters/questdb.py", "QuestDb"),
       ("chomp/src/adapters/victoriametrics.py", "VictoriaMetrics"),

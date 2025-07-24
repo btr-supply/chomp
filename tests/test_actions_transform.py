@@ -15,7 +15,7 @@ try:
                                      process_cached_references,
                                      apply_transformer, transform,
                                      transform_all, _cached_data_cache)
-  from src.model import Ingester, ResourceField
+  from src.models import ing, ResourceField
   DEPENDENCIES_AVAILABLE = True
 except ImportError:
   DEPENDENCIES_AVAILABLE = False
@@ -254,7 +254,7 @@ class TestProcessCachedReferences:
 
   def setup_method(self):
     """Set up test fixtures."""
-    self.mock_ingester = Mock(spec=Ingester)
+    self.mock_ingester = Mock(spec=ing)
     self.mock_ingester.name = "TEST_INGESTER"
     self.mock_ingester.data_by_field = {"existing_field": 123}
 
@@ -330,7 +330,7 @@ class TestApplyTransformer:
 
   def setup_method(self):
     """Set up test fixtures."""
-    self.mock_ingester = Mock(spec=Ingester)
+    self.mock_ingester = Mock(spec=ing)
     self.mock_ingester.name = "TEST_INGESTER"
     self.mock_ingester.data_by_field = {"other_field": 50}
     self.mock_ingester.fields = []
@@ -436,7 +436,7 @@ class TestTransform:
 
   def setup_method(self):
     """Set up test fixtures."""
-    self.mock_ingester = Mock(spec=Ingester)
+    self.mock_ingester = Mock(spec=ing)
     self.mock_ingester.name = "TEST_INGESTER"
     self.mock_ingester.data_by_field = {}
 
@@ -486,7 +486,7 @@ class TestTransformAll:
 
   def setup_method(self):
     """Set up test fixtures."""
-    self.mock_ingester = Mock(spec=Ingester)
+    self.mock_ingester = Mock(spec=ing)
     self.mock_ingester.name = "TEST_INGESTER"
     self.mock_ingester.data_by_field = {}
 

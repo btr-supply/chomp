@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.deps import safe_import
+from chomp.src.utils.deps import safe_import
 
 # Check if EVM dependencies are available
 eth_utils = safe_import("eth_utils")

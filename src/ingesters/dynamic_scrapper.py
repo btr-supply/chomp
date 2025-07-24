@@ -1,37 +1,36 @@
-from asyncio import sleep, gather
 import random
-from typing import Literal, Any
+from asyncio import sleep, gather, Task
+from typing import Any, Literal, Optional
+
+from ..models.base import ResourceField
+from ..models.ingesters import Ingester
+from ..utils import log_error
+from ..actions import scheduler
+
+# Import playwright types directly - mypy will be happy
 from playwright.async_api import async_playwright, ViewportSize, Page, Locator, Browser, Playwright, ElementHandle
 
-from ..utils import log_error
-from ..model import Ingester, ResourceField
-from ..cache import ensure_claim_task
-from ..actions import transform_and_store, scheduler
-
 SelectorType = Literal["auto", "css", "xpath", "id", "name", "class", "role",
-                       "strict_role", "value", "text", "strict_text",
-                       "alt_text", "strict_alt_text", "title", "strict_title",
-                       "label", "strict_label", "placeholder",
-                       "strict_placeholder"]
+                       "text", "title", "href", "partial_link_text",
+                       "link_text"]
+
+__all__ = ["schedule"]
 
 
 class Puppet:
+  """Helper class for managing browser automation for individual fields."""
   by_id: dict[str, "Puppet"] = {}
-
-  ingester: Ingester
-  field: ResourceField
-  play: Playwright
-  browser: Browser
-  pages: list[Page] = []
-  selector: Locator
-  elements: list[ElementHandle] = []
 
   def __init__(self, field: ResourceField, ingester: Ingester,
                play: Playwright):
-    Puppet.by_id[field.id] = self
+    Puppet.by_id[field.target_id] = self
     self.field = field
     self.ingester = ingester
     self.play = play
+    self.browser: Optional[Browser] = None
+    self.pages: list[Page] = []
+    self.selector: Optional[Locator] = None
+    self.elements: list[ElementHandle] = []
 
   @staticmethod
   async def from_field(field: ResourceField, ingester: Ingester,
@@ -42,7 +41,8 @@ class Puppet:
     return p
 
   async def kill(self):
-    await self.browser.close() if self.browser else None
+    if self.browser:
+      await self.browser.close()
     await gather(*[p.close() for p in self.pages])
 
   async def ensure_browser(self, browser="chromium") -> Browser:
@@ -53,22 +53,21 @@ class Puppet:
   async def ensure_page(self, target=None) -> Page:
     target = target or self.field.target or "about:blank"
     if not self.pages:
-      await self.ensure_browser()
-      page = await self.browser.new_page()
+      page = await (await self.ensure_browser()).new_page()
       await page.goto(target)
       self.pages = [page]
     return self.pages[-1]
 
   async def ensure_selected(self, selector="html", by="auto") -> Locator:
-    if not hasattr(self, 'selector') or not self.selector:
+    if not self.selector:
       await self.ensure_page()
       self.selector = await self.select(selector=selector, by=by)
+    assert self.selector is not None
     return self.selector
 
   async def ensure_elements(self) -> list[ElementHandle]:
     if not self.elements:
-      await self.ensure_selected()
-      self.elements = await self.selector.element_handles()
+      self.elements = await (await self.ensure_selected()).element_handles()
     return self.elements
 
   async def ensure_contents(self) -> list[Any]:
@@ -101,7 +100,7 @@ class Puppet:
         locator = page.locator(f"text={selector}")
       case "role":
         # Cast to AriaRole literal type for type safety
-        locator = page.get_by_role(selector)  # type: ignore
+        locator = page.get_by_role(selector)
       case "strict_role":
         locator = page.locator(f"[role={selector}]")
       case "alt_text":
@@ -139,16 +138,18 @@ class Puppet:
                   args[0] if args else "chromium"].launch(
                       *args[1:])  # --mute-audio --no-sandbox by default
             case "close":
-              await self.browser.close() if self.browser else None
+              if self.browser:
+                await self.browser.close()
             case _:
               log_error(f"Unknown browser action: {action}")
 
         case "page":
           match command:
             case "new":
-              self.pages.append(await self.browser.new_page())
+              self.pages.append(await (await self.ensure_browser()).new_page())
             case "close":
-              await self.pages.pop().close() if self.pages else None
+              if self.pages:
+                await self.pages.pop().close()
             case "set_viewport_size":
               page = await self.ensure_page()
               await page.set_viewport_size(
@@ -184,153 +185,139 @@ class Puppet:
               await sleep(int(args[0]))
             case "wait_random":
               await sleep(random.uniform(int(args[0]), int(args[1])))
+            case "wait_for_selector":
+              page = await self.ensure_page()
+              await page.wait_for_selector(args[0])
+            case "wait_for_url":
+              page = await self.ensure_page()
+              await page.wait_for_url(args[0])
+            case "wait_for_load_state":
+              page = await self.ensure_page()
+              await page.wait_for_load_state(args[0] if args else "load")
+            case "screenshot":
+              page = await self.ensure_page()
+              await page.screenshot(path=args[0] if args else "screenshot.png")
+            case "pdf":
+              page = await self.ensure_page()
+              await page.pdf(path=args[0] if args else "page.pdf")
             case _:
               log_error(f"Unknown page action: {action}")
+
+        case "select":
+          await self.select(args[0], by=args[1] if len(args) > 1 else "auto")
 
         case "element":
           match command:
             case "click":
-              elements = await self.ensure_elements()
-              await elements[0].click()
-            case "hover":
-              elements = await self.ensure_elements()
-              await elements[0].hover()
-            case "focus":
-              elements = await self.ensure_elements()
-              await elements[0].focus()
-            case "press":
-              elements = await self.ensure_elements()
-              await elements[0].press(args[0])
-            case "select_option":
-              elements = await self.ensure_elements()
-              await elements[0].select_option(args[0])  # by value or label
-            case "drag_and_drop":
-              elements = await self.ensure_elements()
-              # ElementHandle doesn't have drag_and_drop, use locator instead
-              locator = await self.ensure_selected()
-              await locator.drag_to(page.locator(args[0]))
-            case "upload":
-              elements = await self.ensure_elements()
-              await elements[0].set_input_files(args[0])
+              await (await self.ensure_selected()).click()
             case "fill":
-              elements = await self.ensure_elements()
-              await elements[0].fill(args[0])
+              await (await self.ensure_selected()).fill(args[0])
             case "type":
-              elements = await self.ensure_elements()
-              # ElementHandle doesn't have press_sequentially, use locator instead
-              locator = await self.ensure_selected()
-              await locator.press_sequentially(args[0])
+              await (await self.ensure_selected()).type(args[0])
             case "check":
-              elements = await self.ensure_elements()
-              await elements[0].check()
+              await (await self.ensure_selected()).check()
             case "uncheck":
-              elements = await self.ensure_elements()
-              await elements[0].uncheck()
-            case "scroll_to":
-              elements = await self.ensure_elements()
-              await elements[0].scroll_into_view_if_needed()
+              await (await self.ensure_selected()).uncheck()
+            case "hover":
+              await (await self.ensure_selected()).hover()
+            case "focus":
+              await (await self.ensure_selected()).focus()
+            case "clear":
+              await (await self.ensure_selected()).clear()
+            case "scroll_into_view":
+              await (await self.ensure_selected()).scroll_into_view_if_needed()
             case _:
               log_error(f"Unknown element action: {action}")
 
-        case "keyboard":
-          match command:
-            case "press":
-              page = await self.ensure_page()
-              await page.keyboard.press(args[0])
-            case "down":
-              page = await self.ensure_page()
-              await page.keyboard.down(args[0])
-            case "up":
-              page = await self.ensure_page()
-              await page.keyboard.up(args[0])
-            case "type":
-              page = await self.ensure_page()
-              await page.keyboard.type(args[0])  # can add delay
-            case _:
-              log_error(f"Unknown keyboard action: {action}")
+        case _:
+          log_error(f"Unknown action part: {part}")
 
     except Exception as e:
-      log_error(f"Error acting {action}: {e}")
+      log_error(f"Error executing action {action}: {e}")
+      raise
 
 
 async def update_page(page: Page, action: str, selector: str, *args) -> Page:
-  """Executes a state-changing action on the page and returns the modified page."""
+  """Update a page with a given action on a selector."""
+
+  part, command = action.split(":")
   try:
-    match action:
+    match part:
       case "click":
-        await page.click(selector)
-      case "goto":
-        await page.goto(selector)
-      case "hover":
-        await page.hover(selector)
-      case "focus":
-        await page.focus(selector)
-      case "press":
-        await page.press(selector, args[0])
-      case "select_option":
-        await page.select_option(selector, args[0])
-      case "wait_for_load_state":
-        await page.wait_for_load_state()
-      case "wait_for_event":
-        await page.wait_for_event(selector)
-      case "drag_and_drop":
-        await page.drag_and_drop(selector, args[0])
-      case "upload":
-        await page.set_input_files(selector, args[0])
+        locator = page.locator(selector)
+        await locator.click()
       case "fill":
-        await page.fill(selector, args[0])
-      case "wait_for_selector":
+        locator = page.locator(selector)
+        await locator.fill(args[0] if args else "")
+      case "select":
+        locator = page.locator(selector)
+        await locator.select_option(args[0] if args else "")
+      case "check":
+        locator = page.locator(selector)
+        await locator.check()
+      case "uncheck":
+        locator = page.locator(selector)
+        await locator.uncheck()
+      case "hover":
+        locator = page.locator(selector)
+        await locator.hover()
+      case "type":
+        locator = page.locator(selector)
+        await locator.type(args[0] if args else "")
+      case "wait":
         await page.wait_for_selector(selector)
-      case "wait_for_timeout":
-        await page.wait_for_timeout(int(selector))
-      case "scroll_to":  # Added scroll action
-        await page.evaluate(f'window.scrollTo({selector}, {args[0]})')
-      case "check":  # Added check action
-        await page.check(selector)
-      case "uncheck":  # Added uncheck action
-        await page.uncheck(selector)
-      case "mouse":
-        if args[0] == "move":
-          await page.mouse.move(float(selector), float(args[1]))
-        elif args[0] == "down":
-          await page.mouse.down()
-        elif args[0] == "up":
-          await page.mouse.up()
-
-      case "set_viewport_size":
-        await page.set_viewport_size(
-            ViewportSize(width=int(selector), height=int(args[0])))
-      case "emulate_media":
-        await page.emulate_media(
-            media=args[0])  # Fixed: use emulate_media instead of emulate
+      case "goto":
+        await page.goto(selector)  # selector is URL in this case
       case _:
-        log_error(f"Unknown state action: {action}")
+        log_error(f"Unknown page action: {action}")
   except Exception as e:
-    log_error(f"Error executing state action {action}: {e}")
+    log_error(f"Error updating page with action {action}: {e}")
+    raise
 
-  return page  # Return the modified page
+  return page
 
 
-async def schedule(c: Ingester) -> list:
-  hashes = {}
+async def schedule(ing: Ingester) -> list[Task]:
+  """Schedule dynamic scrapping tasks."""
 
-  async def ingest(c: Ingester):
-    await ensure_claim_task(c)
+  async def ingest(ing: Ingester):
+    """Ingest data using dynamic scrapping."""
+    await ing.pre_ingest()
 
-    hashes.update({f.name: f.target_id for f in c.fields})
-    hashes.update({hashes[f.name]: f.name for f in c.fields})
+    try:
+      if async_playwright is None:
+        log_error("Playwright async_playwright not available")
+        return
 
-    async with async_playwright() as playwright:
-      # futures = action_chains.append(Puppet(hashes[f.name], c, playwright))
-      futures = [Puppet.from_field(f, c, playwright) for f in c.fields\
-        if Puppet.by_id.get(hashes[f.name]) is None]
-      puppets = await gather(*futures)  # run all puppets concurrently
-      for i, result in enumerate(puppets):
-        contents = await puppets[i].ensure_contents()
-        c.fields[i].value = contents[0] if contents else None
+      async with async_playwright() as p:
+        puppets = await gather(*[
+            Puppet.from_field(field, ing, p) for field in ing.fields
+            if field.target  # Check if field has a target URL
+        ])
 
-      await gather(*[p.kill() for p in puppets])
-      await transform_and_store(c)
+        # Extract data from each puppet and update field values
+        for puppet in puppets:
+          try:
+            contents = await puppet.ensure_contents()
+            if contents:
+              # Set field value to the extracted content
+              if len(contents) == 1:
+                puppet.field.value = contents[0]
+              else:
+                puppet.field.value = contents
+          except Exception as e:
+            log_error(
+                f"Error extracting content from {puppet.field.name}: {e}")
 
-  task = await scheduler.add_ingester(c, fn=ingest, start=False)
+        # Clean up
+        await gather(*[puppet.kill() for puppet in puppets])
+
+    except Exception as e:
+      log_error(f"Error in dynamic scrapper ingest: {e}")
+      raise
+
+    await ing.post_ingest()
+
+  # globally register/schedule the ingester
+  task = await scheduler.add_ingester(ing, fn=ingest, start=False)
   return [task] if task is not None else []

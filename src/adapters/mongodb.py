@@ -1,15 +1,17 @@
 from datetime import datetime, timezone
 from os import environ as env
-from typing import Optional, Any, Dict, List, Tuple
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from typing import Any, Optional
 
-from ..utils import log_error, log_info, log_warn, Interval, ago, now
-from ..model import Ingester, Tsdb
+from ..utils import log_error, log_info, Interval, ago, now
+from ..models.base import Tsdb
+from ..models.ingesters import Ingester, UpdateIngester
+
+from motor.motor_asyncio import AsyncIOMotorClient
 
 UTC = timezone.utc
 
 # MongoDB time series granularity mapping
-GRANULARITY_MAP: Dict[Interval, str] = {
+GRANULARITY_MAP: dict[Interval, str] = {
     "s1": "seconds",
     "s2": "seconds",
     "s5": "seconds",
@@ -38,7 +40,7 @@ GRANULARITY_MAP: Dict[Interval, str] = {
 }
 
 # MongoDB aggregation pipeline interval mapping
-BUCKET_GRANULARITY: Dict[Interval, Any] = {
+BUCKET_GRANULARITY: dict[Interval, Any] = {
     "s1": {
         "$dateToString": {
             "format": "%Y-%m-%d %H:%M:%S",
@@ -190,23 +192,31 @@ BUCKET_GRANULARITY: Dict[Interval, Any] = {
 
 
 class MongoDb(Tsdb):
-  """MongoDB adapter using time series collections for optimal time series performance."""
+  """MongoDB adapter for time series and update data storage."""
 
-  client: Optional[AsyncIOMotorClient] = None
-  database: Optional[AsyncIOMotorDatabase] = None
+  client: Optional[Any] = None
+  database: Optional[Any] = None
+
+  def __init__(self,
+               host: str = "localhost",
+               port: int = 27017,
+               db: str = "chomp",
+               user: str = "",
+               password: str = ""):
+    super().__init__(host, port, db, user, password)
 
   @classmethod
   async def connect(cls,
-                    host: str | None = None,
-                    port: int | None = None,
-                    db: str | None = None,
-                    user: str | None = None,
-                    password: str | None = None) -> "MongoDb":
-    self = cls(host=host or env.get("MONGO_HOST") or "localhost",
-               port=int(port or env.get("MONGO_PORT") or 27017),
-               db=db or env.get("MONGO_DB") or "default",
-               user=user or env.get("DB_RW_USER") or "admin",
-               password=password or env.get("DB_RW_PASS") or "pass")
+                    host: Optional[str] = None,
+                    port: Optional[int] = None,
+                    db: Optional[str] = None,
+                    user: Optional[str] = None,
+                    password: Optional[str] = None) -> "MongoDb":
+    self = cls(host=host or env.get("MONGODB_HOST") or "localhost",
+               port=int(port or env.get("MONGODB_PORT") or 27017),
+               db=db or env.get("MONGODB_DB") or "chomp",
+               user=user or env.get("DB_RW_USER") or "",
+               password=password or env.get("DB_RW_PASS") or "")
     await self.ensure_connected()
     return self
 
@@ -233,15 +243,21 @@ class MongoDb(Tsdb):
     """Ensure MongoDB connection is established."""
     if not self.client:
       try:
-        # Build connection string
+        # Build connection URI
         if self.user and self.password:
-          connection_string = f"mongodb://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}?authSource=admin"
+          uri = f"mongodb://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
         else:
-          connection_string = f"mongodb://{self.host}:{self.port}/{self.db}"
+          uri = f"mongodb://{self.host}:{self.port}/"
 
-        self.client = AsyncIOMotorClient(connection_string)
+        self.client = AsyncIOMotorClient(uri)
         self.database = self.client[self.db]
-        log_info(f"Connected to MongoDB on {self.host}:{self.port}/{self.db}")
+
+        # Test the connection
+        await self.client.admin.command('ping')
+
+        log_info(
+            f"Connected to MongoDB on {self.host}:{self.port}/{self.db} as {self.user or 'anonymous'}"
+        )
       except Exception as e:
         log_error(
             f"Failed to connect to MongoDB on {self.host}:{self.port}/{self.db}",
@@ -254,176 +270,172 @@ class MongoDb(Tsdb):
                       force: bool = False):
     """Create MongoDB database."""
     await self.ensure_connected()
+    if self.client is None or self.database is None:
+      raise RuntimeError("Database connection not established")
 
-    if force:
-      if self.client is None:
-        raise Exception("MongoDB client not connected")
-      await self.client.drop_database(name)
+    try:
+      # MongoDB creates databases implicitly when first collection is created
+      # Just switch to the new database
+      self.database = self.client[name]
+      self.db = name
 
-    # MongoDB databases are created implicitly when collections are created
-    if self.client is None:
-      raise Exception("MongoDB client not connected")
-    self.database = self.client[name]
-    self.db = name
-    log_info(f"Database {name} ready")
+      # Create a dummy collection to ensure database exists
+      await self.database.create_collection("_metadata")
+
+      log_info(f"Created/switched to database {name}")
+    except Exception as e:
+      log_error(f"Failed to create database {name}", e)
+      raise e
 
   async def use_db(self, db: str):
     """Switch to different MongoDB database."""
     await self.ensure_connected()
     if self.client is None:
-      raise Exception("MongoDB client not connected")
+      raise RuntimeError("Database connection not established")
     self.database = self.client[db]
     self.db = db
     log_info(f"Switched to database {db}")
 
-  async def create_table(self, c: Ingester, name: str = ""):
-    """Create MongoDB time series collection."""
+  async def create_table(self, ing: Ingester, name: str = ""):
+    """Create MongoDB collection (table equivalent)."""
     await self.ensure_connected()
-    table = name or c.name
-
-    # Check if collection already exists
     if self.database is None:
-      raise Exception("MongoDB database not connected")
-    collections = await self.database.list_collection_names()
-    if table in collections:
-      log_info(f"Time series collection {table} already exists")
-      return
+      raise RuntimeError("Database connection not established")
 
-    # Get appropriate granularity based on ingester interval
-    granularity = GRANULARITY_MAP.get(c.interval, "minutes")
+    table = name or ing.name
 
-    # Create time series collection
     try:
-      if self.database is None:
-        raise Exception("MongoDB database not connected")
-      await self.database.create_collection(
-          table,
-          timeseries={
-              "timeField": "ts",  # timestamp field
-              "metaField": "meta",  # metadata field for tags/labels
-              "granularity": granularity
-          })
+      if ing.resource_type == 'timeseries':
+        # Create time series collection for time series data
+        granularity = GRANULARITY_MAP.get(ing.interval, "seconds")
 
-      # Create index on timestamp for better query performance
-      if self.database is None:
-        raise Exception("MongoDB database not connected")
-      collection = self.database[table]
-      await collection.create_index("ts")
+        await self.database.create_collection(table,
+                                              timeseries={
+                                                  "timeField": "ts",
+                                                  "granularity": granularity
+                                              })
+        log_info(
+            f"Created time series collection {table} with granularity {granularity}"
+        )
 
-      log_info(
-          f"Created time series collection {self.db}.{table} with granularity '{granularity}'"
-      )
+      elif ing.resource_type == 'update':
+        # Create regular collection with unique index on uid for update data
+        collection = self.database[table]
+        await collection.create_index("uid", unique=True)
+        log_info(f"Created update collection {table} with unique uid index")
+
+      else:
+        # Create regular collection
+        await self.database.create_collection(table)
+        log_info(f"Created collection {table}")
+
     except Exception as e:
-      log_error(f"Failed to create time series collection {self.db}.{table}",
-                e)
+      if "already exists" in str(e).lower():
+        log_info(f"Collection {table} already exists")
+      else:
+        log_error(f"Failed to create collection {table}", e)
+        raise e
+
+  async def insert(self, ing: Ingester, table: str = ""):
+    """Insert single document into MongoDB collection."""
+    await self.ensure_connected()
+    if self.database is None:
+      raise RuntimeError("Database connection not established")
+
+    table = table or ing.name
+    collection = self.database[table]
+
+    # Build document from ingester fields
+    document = {}
+
+    # Add timestamp for time series
+    if ing.resource_type == 'timeseries':
+      document["ts"] = ing.ts or now()
+
+    # Add field values
+    for field in ing.fields:
+      if not field.transient:
+        document[field.name] = field.value
+
+    try:
+      result = await collection.insert_one(document)
+      log_info(f"Inserted document with _id {result.inserted_id} into {table}")
+    except Exception as e:
+      log_error(f"Failed to insert document into {table}", e)
       raise e
 
-  async def insert(self, c: Ingester, table: str = ""):
-    """Insert data into MongoDB time series collection."""
+  async def upsert(self, ing: UpdateIngester, table: str = "", uid: str = ""):
+    """Upsert (update or insert) document in MongoDB collection."""
     await self.ensure_connected()
-    table = table or c.name
+    if self.database is None:
+      raise RuntimeError("Database connection not established")
 
-    # Build document for time series collection
-    persistent_fields = [field for field in c.fields if not field.transient]
+    table = table or ing.name
+    uid = uid or ing.uid
+    collection = self.database[table]
 
-    # Prepare document
-    doc = {
-        "ts": c.last_ingested,
-        "meta": {
-            "ingester": c.name,
-            "tags": c.tags if c.tags else []
-        }
-    }
+    if not uid:
+      raise ValueError("UID is required for upsert operations")
 
-    # Add field values to document
-    for field in persistent_fields:
-      doc[field.name] = field.value
+    # Build document from ingester fields
+    document = {}
+    for field in ing.fields:
+      if not field.transient:
+        document[field.name] = field.value
+
+    # Ensure uid is in the document
+    document["uid"] = uid
 
     try:
-      if self.database is None:
-        raise Exception("MongoDB database not connected")
-      collection = self.database[table]
-      await collection.insert_one(doc)
-    except Exception as e:
-      error_message = str(e).lower()
-      if "collection does not exist" in error_message or "ns not found" in error_message:
-        log_warn(f"Collection {table} does not exist, creating it now...")
-        await self.create_table(c, name=table)
-        # Retry insert
-        if self.database is None:
-          raise Exception("MongoDB database not connected")
-        collection = self.database[table]
-        await collection.insert_one(doc)
+      result = await collection.replace_one({"uid": uid},
+                                            document,
+                                            upsert=True)
+
+      if result.upserted_id:
+        log_info(f"Inserted new document with uid {uid} into {table}")
       else:
-        log_error(f"Failed to insert data into {self.db}.{table}", e)
-        raise e
+        log_info(f"Updated existing document with uid {uid} in {table}")
 
-  async def insert_many(self,
-                        c: Ingester,
-                        values: List[Tuple],
-                        table: str = ""):
-    """Insert multiple records into MongoDB time series collection."""
+    except Exception as e:
+      log_error(f"Failed to upsert document with uid {uid} into {table}", e)
+      raise e
+
+  async def fetch_by_id(self, table: str, uid: str):
+    """Fetch single document by UID from MongoDB collection."""
     await self.ensure_connected()
-    table = table or c.name
+    if self.database is None:
+      raise RuntimeError("Database connection not established")
 
-    persistent_fields = [field for field in c.fields if not field.transient]
-
-    # Build documents
-    docs = []
-    for value_tuple in values:
-      timestamp = value_tuple[0]
-      if not isinstance(timestamp, datetime):
-        timestamp = datetime.fromtimestamp(timestamp, UTC)
-
-      doc = {
-          "ts": timestamp,
-          "meta": {
-              "ingester": c.name,
-              "tags": c.tags if c.tags else []
-          }
-      }
-
-      # Add field values
-      for i, field in enumerate(persistent_fields):
-        doc[field.name] = value_tuple[i + 1]  # Skip timestamp at index 0
-
-      docs.append(doc)
+    collection = self.database[table]
 
     try:
-      if self.database is None:
-        raise Exception("MongoDB database not connected")
-      collection = self.database[table]
-      await collection.insert_many(docs)
+      document = await collection.find_one({"uid": uid})
+
+      if document:
+        # Remove MongoDB's _id field if present
+        if "_id" in document:
+          del document["_id"]
+        return document
+      return None
+
     except Exception as e:
-      error_message = str(e).lower()
-      if "collection does not exist" in error_message or "ns not found" in error_message:
-        log_warn(f"Collection {table} does not exist, creating it now...")
-        await self.create_table(c, name=table)
-        # Retry insert
-        if not self.database:
-          raise Exception("Database not connected")
-        if self.database is None:
-          raise Exception("MongoDB database not connected")
-        collection = self.database[table]
-        await collection.insert_many(docs)
-      else:
-        log_error(f"Failed to batch insert data into {self.db}.{table}", e)
-        raise e
+      log_error(f"Failed to fetch document with uid {uid} from {table}", e)
+      return None
 
   async def fetch(self,
                   table: str,
-                  from_date: datetime | None = None,
-                  to_date: datetime | None = None,
+                  from_date: Optional[datetime] = None,
+                  to_date: Optional[datetime] = None,
                   aggregation_interval: Interval = "m5",
                   columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     """Fetch data from MongoDB time series collection with aggregation."""
     await self.ensure_connected()
+    if self.database is None:
+      raise RuntimeError("Database connection not established")
 
     to_date = to_date or now()
     from_date = from_date or ago(from_date=to_date, years=1)
 
-    if self.database is None:
-      raise Exception("MongoDB database not connected")
     collection = self.database[table]
 
     # Build aggregation pipeline
@@ -441,7 +453,7 @@ class MongoDb(Tsdb):
 
     # If specific columns requested, project only those
     if columns:
-      project_stage: Dict[str, Any] = {"ts": 1}
+      project_stage: dict[str, Any] = {"ts": 1}
       for col in columns:
         project_stage[col] = 1
       pipeline.append({"$project": project_stage})
@@ -449,7 +461,7 @@ class MongoDb(Tsdb):
     # Add time bucketing for aggregation
     bucket_expr = BUCKET_GRANULARITY.get(aggregation_interval)
     if bucket_expr:
-      group_fields: Dict[str, Any] = {
+      group_fields: dict[str, Any] = {
           col: {
               "$last": f"${col}"
           }
@@ -459,7 +471,7 @@ class MongoDb(Tsdb):
               "$last": "$$ROOT"
           }
       }
-      group_stage: Dict[str, Any] = {
+      group_stage: dict[str, Any] = {
           "$group": {
               "_id": bucket_expr,
               "ts": {
@@ -468,11 +480,11 @@ class MongoDb(Tsdb):
               **group_fields
           }
       }
-      sort_stage: Dict[str, Any] = {"$sort": {"ts": -1}}
+      sort_stage: dict[str, Any] = {"$sort": {"ts": -1}}
       pipeline.extend([group_stage, sort_stage])
     else:
       # No aggregation, just sort
-      sort_stage_simple: Dict[str, Any] = {"$sort": {"ts": -1}}
+      sort_stage_simple: dict[str, Any] = {"$sort": {"ts": -1}}
       pipeline.append(sort_stage_simple)
 
     try:
@@ -514,8 +526,8 @@ class MongoDb(Tsdb):
   async def fetch_batch(
       self,
       tables: list[str],
-      from_date: datetime | None = None,
-      to_date: datetime | None = None,
+      from_date: Optional[datetime] = None,
+      to_date: Optional[datetime] = None,
       aggregation_interval: Interval = "m5",
       columns: list[str] = []) -> tuple[list[str], list[tuple]]:
     """Fetch data from multiple MongoDB collections."""
@@ -537,9 +549,45 @@ class MongoDb(Tsdb):
 
     return (all_columns, all_data)
 
-  async def fetchall(self):
-    """MongoDB doesn't have a universal 'fetch all' - need collection name."""
-    raise NotImplementedError("fetchall requires collection name for MongoDB")
+  async def fetch_batch_by_ids(self, table: str,
+                               uids: list[str]) -> list[tuple]:
+    """Fetch multiple records by their UIDs using MongoDB $in operator for efficiency"""
+    await self.ensure_connected()
+    if self.database is None:
+      return []
+
+    try:
+      if not uids:
+        return []
+
+      collection = self.database[table]
+
+      # Use MongoDB's $in operator for efficient batch fetching
+      cursor = collection.find({"uid": {"$in": uids}}).sort("updated_at", -1)
+      documents = await cursor.to_list(length=None)
+
+      if not documents:
+        return []
+
+      # Convert MongoDB documents to tuples (similar to other adapters)
+      # We need to maintain consistent field ordering
+      results = []
+      for doc in documents:
+        # Remove MongoDB's _id field and convert to tuple
+        if "_id" in doc:
+          del doc["_id"]
+
+        # Convert document values to tuple (order should match field definitions)
+        # For consistency, we'll return the document as a tuple of values
+        # The calling code should handle field mapping
+        result_tuple = tuple(doc.values())
+        results.append(result_tuple)
+
+      return results
+    except Exception as e:
+      log_error(
+          f"Failed to fetch batch records by IDs from {self.db}.{table}: {e}")
+      return []
 
   async def commit(self):
     """MongoDB auto-commits by default."""
@@ -548,11 +596,55 @@ class MongoDb(Tsdb):
   async def list_tables(self) -> list[str]:
     """List MongoDB collections."""
     await self.ensure_connected()
+    if self.database is None:
+      return []
+
     try:
-      if self.database is None:
-        return []
       collections = await self.database.list_collection_names()
       return collections
     except Exception as e:
       log_error(f"Failed to list collections from {self.db}", e)
       return []
+
+  async def _connect(self):
+    """MongoDB-specific connection using motor."""
+    try:
+      client = AsyncIOMotorClient(
+          f"mongodb://{self.user}:{self.password}@{self.host}:{self.port}/"
+          if self.user and self.password else
+          f"mongodb://{self.host}:{self.port}/")
+      database = client[self.db]
+
+      # Test the connection
+      await database.list_collection_names()
+
+      self.client = client
+      self.database = database
+      log_info(f"Connected to MongoDB at {self.host}:{self.port}")
+      return {"client": client, "database": database}
+    except Exception as e:
+      log_error(f"Failed to connect to MongoDB: {e}")
+      raise e
+
+  async def _init_db(self):
+    """Initialize MongoDB database."""
+    try:
+      client = AsyncIOMotorClient(
+          f"mongodb://{self.user}:{self.password}@{self.host}:{self.port}/"
+          if self.user and self.password else
+          f"mongodb://{self.host}:{self.port}/")
+      self.client = client
+      self.database = client[self.db]
+
+      # Test the connection
+      await self.database.list_collection_names()
+
+      log_info(f"Connected to MongoDB at {self.host}:{self.port}")
+    except Exception as e:
+      log_error("Failed to initialize MongoDB database", e)
+      raise e
+
+  @property
+  def database_name(self) -> str:
+    """Return the database name"""
+    return self.db

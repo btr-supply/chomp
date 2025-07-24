@@ -36,7 +36,7 @@ class ArgParser(ArgumentParser):
                               )  # arg type and default value
     return action
 
-  def get_info(self, arg_name: str) -> Optional[tuple]:
+  def get_info(self, arg_name: str) -> tuple | None:
     return self.info.get(arg_name)
 
   def parse_args(self, *args, **kwargs) -> Any:
@@ -56,7 +56,7 @@ class ArgParser(ArgumentParser):
 
   def add_arguments(self,
                     arguments: list[tuple],
-                    group: Optional[_ArgumentGroup] = None) -> None:
+                    group: _ArgumentGroup | None = None) -> None:
     for arg_tuple in arguments:
       args, kwargs = self.argument_tuple_to_kwargs(arg_tuple)
       if group:
