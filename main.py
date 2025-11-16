@@ -49,17 +49,21 @@ async def start_ingester(config: IngesterConfig):
   from src.cache import is_task_claimed, ping as redis_ping, register_ingester, register_instance
   from src.actions import schedule, scheduler
 
-  # Validate Redis connection before proceeding
-  try:
-    redis_connected = await redis_ping()
-    if not redis_connected:
-      log_error(
-          "Failed to connect to Redis. Cannot proceed with task claiming.")
+  # Skip Redis validation in test mode
+  if not state.args.test_mode:
+    # Validate Redis connection before proceeding
+    try:
+      redis_connected = await redis_ping()
+      if not redis_connected:
+        log_error(
+            "Failed to connect to Redis. Cannot proceed with task claiming.")
+        return
+      log_info("Redis connection verified")
+    except Exception as e:
+      log_error(f"Redis connection error: {e}")
       return
-    log_info("✅ Redis connection verified")
-  except Exception as e:
-    log_error(f"Redis connection error: {e}")
-    return
+  else:
+    log_info("TEST MODE: Skipping Redis connection")
 
   ingesters = config.ingesters
 
@@ -74,23 +78,25 @@ async def start_ingester(config: IngesterConfig):
       for ingester in ingesters
   ]))
 
-  # Register all ingesters with full configurations
-  log_info("Registering ingesters in resource registry...")
-  registration_tasks = [register_ingester(ing) for ing in ingesters]
-  registration_results = await gather(*registration_tasks,
-                                      return_exceptions=True)
-  successful_registrations = sum(1 for r in registration_results if r is True)
-  log_info(
-      f"Successfully registered {successful_registrations}/{len(ingesters)} ingesters: {', '.join([ing.name for ing in ingesters])}"
-  )
+  # Skip registration in test mode
+  if not state.args.test_mode:
+    # Register all ingesters with full configurations
+    log_info("Registering ingesters in resource registry...")
+    registration_tasks = [register_ingester(ing) for ing in ingesters]
+    registration_results = await gather(*registration_tasks,
+                                        return_exceptions=True)
+    successful_registrations = sum(1 for r in registration_results if r is True)
+    log_info(
+        f"Successfully registered {successful_registrations}/{len(ingesters)} ingesters: {', '.join([ing.name for ing in ingesters])}"
+    )
 
-  # Register this instance
-  log_info("Registering instance...")
-  instance_registered = await register_instance(state.instance)
-  if instance_registered:
-    log_info(f"✅ Instance {state.instance.name} registered successfully")
-  else:
-    log_warn(f"⚠️ Failed to register instance {state.instance.name}")
+    # Register this instance
+    log_info("Registering instance...")
+    instance_registered = await register_instance(state.instance)
+    if instance_registered:
+      log_info(f"Instance {state.instance.name} registered successfully")
+    else:
+      log_warn(f"Failed to register instance {state.instance.name}")
 
   # Instance initialization is handled in state.init() during startup
 
@@ -175,7 +181,67 @@ async def start_ingester(config: IngesterConfig):
       )
       return
 
-  # schedule only successfully claimed tasks
+  # TEST MODE: Run each ingester once and exit
+  if state.args.test_mode:
+    log_info(f"\n{'='*80}")
+    log_info("TEST MODE: Running single collection epoch for each ingester")
+    log_info(f"{'='*80}\n")
+
+    for ing in successfully_claimed:
+      log_info(f"\n{'='*60}")
+      log_info(f"Testing {ing.name} ({ing.ingester_type})")
+      log_info(f"Target: {ing.target if hasattr(ing, 'target') else 'N/A'}")
+      log_info(f"Fields: {len(ing.fields)}")
+      log_info(f"{'='*60}")
+
+      try:
+        # Get the scheduler function for this ingester type
+        from src.actions.schedule import get_scheduler
+        scheduler_fn = get_scheduler(ing.ingester_type)
+
+        if scheduler_fn:
+          # Schedule the ingester (sets up the ingest function)
+          await scheduler_fn(ing)
+
+          # Get the ingest function from scheduler
+          if ing.id in scheduler.job_by_id:
+            ingest_fn, args = scheduler.job_by_id[ing.id]
+
+            # Run the ingest function once
+            log_info(f"Running single ingest epoch for {ing.name}...")
+            await ingest_fn(*args)
+
+            # Log the collected data - show ALL fields
+            log_info(f"\n{'='*80}")
+            log_info(f"COLLECTED DATA FOR: {ing.name}")
+            log_info(f"{'='*80}")
+
+            # Count fields with values
+            fields_with_values = sum(1 for f in ing.fields if f.value is not None)
+            log_info(f"Total fields: {len(ing.fields)} | With values: {fields_with_values} | None: {len(ing.fields) - fields_with_values}")
+            log_info(f"{'─'*80}")
+
+            # Log all fields (no truncation for test mode)
+            for idx, field in enumerate(ing.fields, 1):
+              value_str = str(field.value) if field.value is not None else "None"
+              log_info(f"  [{idx:3d}] {field.name:30} = {value_str}")
+            log_info(f"{'='*80}\n")
+          else:
+            log_warn(f"No job found in scheduler for {ing.name}")
+        else:
+          log_error(f"No scheduler found for ingester type: {ing.ingester_type}")
+
+      except Exception as e:
+        log_error(f"Error testing {ing.name}: {e}")
+        import traceback
+        log_error(traceback.format_exc())
+
+    log_info(f"\n{'='*80}")
+    log_info("TEST MODE: Completed all test runs. Exiting...")
+    log_info(f"{'='*80}\n")
+    return
+
+  # NORMAL MODE: schedule and run continuously
   schedule_tasks = [schedule(c) for c in successfully_claimed]
   try:
     scheduled_results = await gather(*schedule_tasks)
@@ -250,22 +316,26 @@ async def main(ap: ArgParser):
       return 1
 
   # reload(state)
-  tsdb_class = get_adapter_class(state.args.tsdb_adapter)
-  if not tsdb_class:
-    available_adapters = get_available_adapters()
-    if available_adapters:
-      raise ValueError(
-          f"Unsupported TSDB_ADAPTER adapter: {state.args.tsdb_adapter}. "
-          f"Available adapters: {', '.join(available_adapters)}. "
-          f"You may need to install additional dependencies for other adapters."
-      )
-    else:
-      raise ValueError(
-          "No database adapters are available! "
-          "Please check your installation and ensure required dependencies are installed."
-      )
+  # Skip database connection in test mode
+  if not state.args.test_mode:
+    tsdb_class = get_adapter_class(state.args.tsdb_adapter)
+    if not tsdb_class:
+      available_adapters = get_available_adapters()
+      if available_adapters:
+        raise ValueError(
+            f"Unsupported TSDB_ADAPTER adapter: {state.args.tsdb_adapter}. "
+            f"Available adapters: {', '.join(available_adapters)}. "
+            f"You may need to install additional dependencies for other adapters."
+        )
+      else:
+        raise ValueError(
+            "No database adapters are available! "
+            "Please check your installation and ensure required dependencies are installed."
+        )
 
-  state.tsdb.set_adapter(await tsdb_class.connect())
+    state.tsdb.set_adapter(await tsdb_class.connect())
+  else:
+    log_info("TEST MODE: Skipping database connection")
 
   # ping dbs for readiness checks
   if state.args.ping:
@@ -285,8 +355,10 @@ async def main(ap: ArgParser):
   except KeyboardInterrupt:
     log_info("Shutting down...")
   finally:
-    await state.tsdb.close()
-    await state.redis.close()
+    # Skip closing connections in test mode (they were never opened)
+    if not state.args.test_mode:
+      await state.tsdb.close()
+      await state.redis.close()
 
 
 if __name__ == "__main__":
@@ -387,6 +459,13 @@ if __name__ == "__main__":
               "./ingesters.yml",
               None,
               "Comma-delimited list of ingester YAML configuration files",
+          ),
+          (
+              ("-test", "--test_mode"),
+              bool,
+              False,
+              "store_true",
+              "Test mode: run single epoch, log data, skip persistence",
           ),
       ],
       "Server runtime": [

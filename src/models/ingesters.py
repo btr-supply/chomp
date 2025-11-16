@@ -133,9 +133,18 @@ class Ingester(Resource, Targettable):
     state = safe_import("src.state")
 
     if actions_store and state:
-      await actions_store.transform_and_store(self, table, publish, jsonify, monitor)
-      if state.args.verbose:
-        log_debug(f"Ingested {self.name} -> {self.get_field_values()}")
+      # Skip storage in test mode, but still run transformations
+      if hasattr(state.args, 'test_mode') and state.args.test_mode:
+        # Only transform the data, don't store it
+        actions_transform = safe_import("src.actions.transform")
+        if actions_transform:
+          await actions_transform.transform_all(self)
+        log_debug(f"[TEST MODE] Transformed {self.name} -> {self.get_field_values()}")
+      else:
+        # Normal mode: transform and store
+        await actions_store.transform_and_store(self, table, publish, jsonify, monitor)
+        if state.args.verbose:
+          log_debug(f"Ingested {self.name} -> {self.get_field_values()}")
 
     await self._post_ingest(response_data, status_code, table, publish, jsonify, monitor)
 
